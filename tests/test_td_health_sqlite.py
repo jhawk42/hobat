@@ -43,7 +43,7 @@ def _result(suffix: str = "1") -> tuple[Observation, Assessment]:
     observation = Observation(
         observation_id=f"observation-{suffix}",
         datasource_id="otbr-cli",
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         network_id="extpan:78b9775b001c1cbe",
         network_name="island",
         observed_at=f"2026-09-01T00:00:0{suffix}+00:00",
@@ -480,7 +480,7 @@ def test_age_purge_is_exclusive_preserves_roster_and_supports_dry_run(tmp_path) 
     assert result.deleted["expected_devices"] == 0
     assert store.store_capabilities()["observationCount"] == 1
     assert store.latest_assessment(
-        "extpan:78b9775b001c1cbe", "otbr_cli_networkdiag_fetch_all"
+        "extpan:78b9775b001c1cbe", "otbr_cli_diagnostics_fetch"
     )["assessment_id"] == "assessment-3"
 
 
@@ -1140,7 +1140,7 @@ def test_pruned_comparison_is_read_only_and_device_purge_removes_it(tmp_path) ->
         store.save_processing_result(*_result(suffix))
     service = TDHealthReadService(tmp_path)
     listing = service.comparisons(network_id="extpan:78b9775b001c1cbe",
-                                  dataset_id="otbr_cli_networkdiag_fetch_all", limit=1, offset=1)
+                                  dataset_id="otbr_cli_diagnostics_fetch", limit=1, offset=1)
     assert listing["total"] == 2 and len(listing["items"]) == 1
     detail = service.comparison(comparison_id=listing["items"][0]["comparisonId"], limit=25, offset=0)
     assert detail["baselineState"] == "pruned"
@@ -1165,7 +1165,7 @@ def test_real_v3_migration_backfills_only_lossless_device_facts(tmp_path) -> Non
         connection.execute("INSERT INTO devices VALUES (?, ?)", ("extaddr:8672766ae0578187", "8672766ae0578187"))
         connection.execute(
             """INSERT INTO observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("observation-old", "otbr-cli", "otbr_cli_networkdiag_fetch_all",
+            ("observation-old", "otbr-cli", "otbr_cli_diagnostics_fetch",
              "extpan:78b9775b001c1cbe", None, "2026-09-01T00:00:00+00:00",
              "2026-09-01T00:00:00+00:00", "complete", "digest"),
         )
@@ -1569,7 +1569,7 @@ def test_mac_ratio_comparison_read_preserves_values_units_and_delta(tmp_path) ->
     service = TDHealthReadService(tmp_path)
     listing = service.comparisons(
         network_id="extpan:78b9775b001c1cbe",
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         limit=25,
         offset=0,
     )
@@ -1609,7 +1609,7 @@ def test_pruned_numeric_delta_is_suppressed_without_mutating_persisted_item(tmp_
         store.save_processing_result(*endpoint(suffix, value))
     service = TDHealthReadService(tmp_path)
     listing = service.comparisons(network_id="extpan:78b9775b001c1cbe",
-                                  dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0)
+                                  dataset_id="otbr_cli_diagnostics_fetch", limit=25, offset=0)
     comparison_id = listing["items"][0]["comparisonId"]
     first = service.comparison(comparison_id=comparison_id, limit=25, offset=0)
     numeric = next(item for item in first["items"] if item["metric"] == "routerRolePercent")
@@ -1657,7 +1657,7 @@ def test_comparison_filters_count_and_page_the_effective_population(tmp_path) ->
     service = TDHealthReadService(tmp_path)
     listing = service.comparisons(
         network_id="extpan:78b9775b001c1cbe",
-        dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0,
+        dataset_id="otbr_cli_diagnostics_fetch", limit=25, offset=0,
     )
     comparison_id = listing["items"][0]["comparisonId"]
 

@@ -46,6 +46,7 @@ uses vendored vis-network; dashboard table sorting is application-owned.
 | File | Responsibility |
 |---|---|
 | `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `health`, `system`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
+| `td_unified_dataset.py` | Cache-only Unified source-primary assembly and catalog-owned four-primary composition with original raw authority/lineage, one outer lock, report-last publication/recovery, verified generation reads, and CLI |
 | `td_webserver.py` | aiohttp application, dataset catalog, source capabilities, file action registry, HTTP caching, background jobs, health APIs, device actions, and device-label API |
 | `td_logging.py` | Shared CLI logging configuration and redaction of Thread secrets in sensitive output |
 | `td_dataset_catalog.py` | Dataset manifest validation and runtime catalog loading, including health roster policy projections |
@@ -137,6 +138,7 @@ OTBR action API has no idempotency key; idempotent reads use bounded retries.
 | `ha_matter_ws_topology.py` | Directional neighbor, child, route, and placeholder topology derivation |
 | `ha_matter_ws_thread.py` | Native Thread Border Router and selected-network diagnostics validation and collection |
 | `ha_matter_ws_native_topology.py` | Native schema-13 network-topology validation |
+| `ha_matter_ws_unified.py` | Pure cached inventory/native/projection conversion, native link binding, original times/outcome checks; no client or collection imports |
 | `ha_matter_ws_fetch_all.py`, `ha_matter_ws_cli.py` | One-snapshot orchestration, checkpoints, atomic files, outcome, and source CLI |
 
 The source is read-only and controller-scoped. Its fallback URI is
@@ -158,6 +160,7 @@ explicitly absent. It does not replace OTBR network-wide collection.
 | `td_health_rules.py`, `td-health-rules.json` | Health finding catalog validation and stable rule metadata |
 | `td_health_cli.py` | Health processing, comparison, roster, and retention command dispatch |
 | `td_health_processor.py`, `td_health_evaluator.py` | Stable cached-file reads, safe normalization, completeness, tagged evaluation context, and Python-owned verdicts |
+| `td_health_unified.py` | Immutable original-evidence closure, retained Unified reproduction contracts, source times, and domain-qualified absence witness identity; no collector or schema changes |
 | `td_health_observation_model.py`, `td_health_policy.py` | Frozen domain contracts and validated health policy |
 | `td_health_observation_store.py`, `td_health_sqlite.py`, `td_health_history.py` | Observation persistence boundary, SQLite transactions, current assessment, and bounded retention |
 | `td_health_migration.py` | Read-only retained-history inventory, replay adapters, backup-first transactional migration, and report generation |
@@ -189,6 +192,7 @@ datasets. It does not contain health thresholds or reclassify evidence.
 | `tdash-adaptors.js` | Dispatch from dataset recipes to source adaptors |
 | `tdash-adaptor-*.js`, `tdash-adaptor-shared.js` | Source-specific record conversion and shared adaptor helpers |
 | `tdash-adaptor-model.js` | Canonical device/relationship/detail model and validated emission |
+| `tdash-adaptor-unified.js` | Committed Unified row/model projection, scoped relationship resolution, and typed native links without raw-file dispatch |
 | `tdash-source-authority.js` | Browser projection of catalog source authority for merge ordering |
 | `tdash-device-diagnostics.js` | Eligible device targets and supported transient diagnostic actions |
 | `tdash-health.js` | Health API requests and rendering of server-owned assessments, roster, and comparisons |

@@ -57,7 +57,7 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_all_long_running_files_have_checkpoint_in_set(self) -> None:
-        """Every force_async or long-cost file must have a checkpoint filename registered."""
+        """Collector jobs expose checkpoints; Unified exposes committed generations only."""
         from td_const import TD_CHECKPOINT_FILENAME_SUFFIX
         for name, fa in td_webserver.FILE_ACTION_MAP.items():
             if fa.action == "STATIC":
@@ -65,6 +65,9 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
             expected = (
                 name.rsplit(".", 1)[0] + TD_CHECKPOINT_FILENAME_SUFFIX
             ).lower()
+            if fa.action[0] == "unify-dataset":
+                self.assertNotIn(expected, td_webserver._CHECKPOINT_FILENAMES)
+                continue
             self.assertIn(
                 expected,
                 td_webserver._CHECKPOINT_FILENAMES,

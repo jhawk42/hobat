@@ -70,6 +70,79 @@ mkdir -p "$PWD/data"
 export TD_DATA_DIR="$PWD/data"
 ```
 
+## Cache-only Unified Materialization
+
+CLI, REST, HA Matter, and mDNS source-primary products, plus their four-source
+composition, can be built from declared cached inputs without contacting collectors:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data unify-dataset \
+  --dataset otbr_cli_unified --allow-partial --json
+```
+
+Use `--dataset all` to build all five Unified products from the cache, with
+the four source primaries first and Multi-source last. With `--json`, this
+returns an array of the five normal per-dataset summaries; a single dataset
+still returns one object. Without `--json`, each dataset has one summary line.
+The command stops on the first failure with a nonzero exit status; earlier
+successful builds remain committed. `--allow-partial` applies to every selected
+dataset. As in Multi-source composition, `--network` selects the Thread
+network without constraining the standalone mDNS service inventory.
+
+Missing required inputs need explicit `--allow-partial`; malformed present
+inputs or stale scope bindings fail without replacing the committed product.
+Outputs have digest-bound reports, outcomes where applicable, and network
+context. Unchanged evidence is a byte/mtime-preserving no-op. Interrupted
+publication is recovered only by the next explicit build, not a read.
+
+All five Unified products are selectable and designated source primaries;
+the fast source defaults remain unchanged. The redundant CLI topology and
+HA seven-file composite are hidden from menus but retain explicit recipe lookup.
+REST topology and the legacy precomputed Multi-source option remain selectable:
+their real-cache relationship and operator-workflow parity gates are not yet
+passed. The catalog currently
+contains 43 definitions / 41 selectable options, not the final 39-option target.
+Availability checks validate outcomes using each source's own format, including
+HA Matter. Standalone REST diagnostic and mesh-diagnostic sweeps publish full
+digest-bound outcome metadata even with `--items-only`; the flag still returns
+the compatibility item array. Guarded empty sweeps retain old diagnostics.
+Cache-only builds do not repair old outcomes or their scope bindings.
+See the [REST collection reference](doc/help_td_restapi_cli.md#diagnostics-fetch-all).
+CLI, REST, HA Matter and Multi-source now have dedicated health profiles;
+mDNS remains enrichment-only and health-ineligible. Explicit
+`health process-dataset --dataset ID` verifies original cached evidence without
+collecting or rewriting the generation. Partial/degraded originals never become
+fresh complete collections. See
+[Unified health qualification](doc/thread_network_health.md#unified-health-qualification).
+`--dataset multi_source_unified` prepares/reuses each source primary once under
+one directory lock, verifies their original evidence, and writes
+`td-merged-unified.json`. At least one usable source can produce an explicitly
+allowed partial result; four complete sources are needed for completion.
+Original raw authority, times, network/fabric boundaries and service membership
+survive composition; aggregate filenames never acquire evidence authority.
+Operational Matter and HAP UDP (`_hap._udp.local.`) mDNS advertisements with one
+unambiguous matching Thread-device OMR
+address are retained in that device's `mdnsRecords` array instead of separate
+top-level rows. Device details expose the full array under **MDNS**, including
+each advertisement's fabric/node identity, properties and capture metadata.
+Normal search also finds the device through its embedded service records.
+Unmatched or ambiguous advertisements and other service types stay separate.
+mDNS Unified remains a standalone service inventory. This enrichment does not
+give an advertisement the device's network scope or health authority.
+An accepted device observation clears a merged `relationshipOnly` marker;
+relationship-only evidence or mDNS enrichment alone does not. Explicit builds
+upgrade older generations to assembly-v5; coherent v2/v3/v4 generations remain
+readable without an automatic rebuild.
+HA uses its [cached converters](src/ha_matter_ws_unified.py) and the commissioned
+inventory plus three required topology/native inputs. A missing inventory is
+explicitly partial, never repaired by a dashboard projection. Native graph time
+is not refreshed by reading its cache; outcome/coverage gaps are reported
+separately from materialization. Unknown/non-Thread rows do not acquire a Thread
+network merely from a file sidecar or requested network.
+Underlying snapshots, explicit recipe lookup, defaults, all three same-source
+OTBR + mDNS alternatives, and live collector commands are unchanged.
+See the [Unified command reference](doc/help_td_cli.md#unify-dataset).
+
 ## Start the Dashboard
 
 From the repository root:
@@ -169,7 +242,7 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data ha-matter-ws all
 PYTHONPATH=src python3 -m td_cli --datadir ./data mdns thread
 PYTHONPATH=src python3 -m td_cli --datadir ./data process-eve
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_networkdiag_fetch_all --dry-run
+  --dataset otbr_cli_diagnostics_fetch --dry-run
 PYTHONPATH=src python3 -m td_cli --datadir ./data health migrate-history \
   --dataset all --policy-config-dir /absolute/path/to/server/config --dry-run --json
 PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset

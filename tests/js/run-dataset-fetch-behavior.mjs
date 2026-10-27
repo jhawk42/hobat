@@ -324,6 +324,33 @@ try {
     assert.equal(calls.every((call) => call.signal === primaryCalls[0].signal), true);
     dataset.endFetchSession(sessionId);
   }
+  for (const asyncJob of [false, true]) {
+    const unifiedEntry = DATASET_REGISTRY.find((entry) => entry.value === "ha_matter_ws_unified");
+    const dataset = await freshModule();
+    dataset.setOnlyCache(!asyncJob);
+    let reads = 0;
+    const calls = mockFetch(({ url }) => {
+      if (url.startsWith("/api/job/")) return response({ status: "done" });
+      reads += 1;
+      if (asyncJob && reads === 1) return response({ job_id: "unified-job", filename: unifiedEntry.files[0] }, {}, 202);
+      return response(row("partial-unified"), { "X-TD-Materialization-State": "partial" });
+    });
+    const loaded = await finish(dataset.loadDataset(unifiedEntry.value));
+    assert.equal(loaded.materializationState, "partial");
+    assert.equal(loaded.isPartial, true);
+    assert.equal(calls.some((call) => /thread-network-info|dataset-active/.test(call.url)), false);
+    if (!asyncJob) assert.deepEqual(calls[0].headers, { "Cache-Control": `only-if-cached, max-age=${CACHE_ONLY_SECONDS}` });
+    mockFetch(() => response(row("complete-unified"), { "X-TD-Materialization-State": "complete" }));
+    const complete = await finish(dataset.loadDataset(unifiedEntry.value));
+    assert.equal(complete.isPartial, false);
+    assert.equal(complete.materializationState, "complete");
+    for (const invalidState of [undefined, "done"]) {
+      mockFetch(() => response(row("invalid-state"), invalidState
+        ? { "X-TD-Materialization-State": invalidState } : {}));
+      assert.equal(await finish(dataset.loadDataset(unifiedEntry.value)), null);
+      assert.equal(dataset.currentDataset, complete);
+    }
+  }
   console.log(JSON.stringify({ scenarioCount, requestCount, controlledTimers: true }));
 } finally {
   DATASET_REGISTRY.pop();

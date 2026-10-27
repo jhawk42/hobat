@@ -227,7 +227,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                 encoding="utf-8",
             )
             processed = process_health(
-                data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+                data_dir=data_dir, dataset_id="otbr_cli_diagnostics_fetch",
                 policy=load_health_policy(), store=store,
             )
             observation, assessment = processed.observation, processed.assessment
@@ -480,7 +480,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                 encoding="utf-8",
             )
             processed = process_health(
-                data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+                data_dir=data_dir, dataset_id="otbr_cli_diagnostics_fetch",
                 policy=load_health_policy(), store=store,
             )
             observation, assessment = processed.observation, processed.assessment
@@ -612,7 +612,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
         data_dir = Path(tempfile.mkdtemp())
         request = _request(data_dir)
         request.json = unittest.mock.AsyncMock(
-            return_value={"dataset": "otbr_cli_networkdiag_fetch_all"}
+            return_value={"dataset": "otbr_cli_diagnostics_fetch"}
         )
         task = unittest.mock.MagicMock()
         task.done.return_value = False
@@ -630,7 +630,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 202)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(payload["task"], "health-process-dataset")
-        self.assertEqual(payload["dataset"], "otbr_cli_networkdiag_fetch_all")
+        self.assertEqual(payload["dataset"], "otbr_cli_diagnostics_fetch")
         self.assertEqual(payload["job_id"], duplicate_payload["job_id"])
         self.assertEqual(
             td_webserver._job_registry[payload["job_id"]].filename, ""
@@ -645,7 +645,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_process_dataset_always_allows_partial_input(self) -> None:
         request = _request(Path(tempfile.mkdtemp()))
         request.json = unittest.mock.AsyncMock(
-            return_value={"dataset": "otbr_cli_networkdiag_fetch_all"}
+            return_value={"dataset": "otbr_cli_diagnostics_fetch"}
         )
         with patch.object(
             td_webserver,
@@ -666,7 +666,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             run_cli.await_args.args[0],
             [
                 "health", "process-dataset", "--dataset",
-                "otbr_cli_networkdiag_fetch_all", "--allow-partial", "--json",
+                "otbr_cli_diagnostics_fetch", "--allow-partial", "--json",
             ],
         )
         self.assertEqual(
@@ -681,7 +681,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             filename="",
             status=td_webserver.JOB_STATUS_RUNNING,
             task="health-process-dataset",
-            dataset="otbr_cli_networkdiag_fetch_all",
+            dataset="otbr_cli_diagnostics_fetch",
         )
         td_webserver._job_registry[job.job_id] = job
         response = await td_webserver.handle_job_cancel_api(
@@ -690,7 +690,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(response.text)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(payload["task"], "health-process-dataset")
-        self.assertEqual(payload["dataset"], "otbr_cli_networkdiag_fetch_all")
+        self.assertEqual(payload["dataset"], "otbr_cli_diagnostics_fetch")
         self.assertNotIn("filename", payload)
 
     async def test_summary_is_pinned_grouped_and_no_store(self) -> None:
@@ -704,7 +704,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                     *_result()
                 )
                 response = await td_webserver.handle_health_summary_api(
-                    _request(data_dir, query={"dataset": "otbr_cli_networkdiag_fetch_all"})
+                    _request(data_dir, query={"dataset": "otbr_cli_diagnostics_fetch"})
                 )
                 payload = json.loads(response.text)
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
@@ -721,7 +721,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                 await td_webserver.handle_health_summary_api(_request(data_dir))
             with self.assertRaises(aiohttp.web.HTTPServiceUnavailable):
                 await td_webserver.handle_health_summary_api(
-                    _request(data_dir, query={"dataset": "otbr_cli_networkdiag_fetch_all"})
+                    _request(data_dir, query={"dataset": "otbr_cli_diagnostics_fetch"})
                 )
 
     async def test_observation_limit_is_bounded_before_store_access(self) -> None:
@@ -765,12 +765,12 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_same_origin_health_reads_reach_every_endpoint_without_cors(self) -> None:
         paths = (
-            "/api/health/summary?dataset=otbr_cli_networkdiag_fetch_all",
+            "/api/health/summary?dataset=otbr_cli_diagnostics_fetch",
             "/api/health/findings?assessment=assessment-1",
             "/api/health/devices/extaddr:8672766ae0578187?assessment=assessment-1",
             "/api/health/observations?network=extpan:78b9775b001c1cbe&limit=5&offset=0",
-            "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&side=after",
-            "/api/health/latest?dataset=otbr_cli_networkdiag_fetch_all",
+            "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe&dataset=otbr_cli_diagnostics_fetch&side=after",
+            "/api/health/latest?dataset=otbr_cli_diagnostics_fetch",
             "/api/health/capabilities",
         )
         for path in paths:
@@ -787,7 +787,7 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         store.save_processing_result(*_result("2"))
         endpoint_page = await self.client.get(
             "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe"
-            "&dataset=otbr_cli_networkdiag_fetch_all&side=after&limit=1&offset=0"
+            "&dataset=otbr_cli_diagnostics_fetch&side=after&limit=1&offset=0"
         )
         self.assertEqual(endpoint_page.status, 200)
         self.assertEqual(endpoint_page.headers["Cache-Control"], "no-store")
@@ -804,7 +804,7 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         )
         pinned_endpoints = await self.client.get(
             "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe"
-            "&dataset=otbr_cli_networkdiag_fetch_all&side=after"
+            "&dataset=otbr_cli_diagnostics_fetch&side=after"
             "&selected=assessment-1&limit=1&offset=0"
         )
         pinned_navigation = (await pinned_endpoints.json())["navigation"]
@@ -813,17 +813,17 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(pinned_navigation["older"])
         missing_selected = await self.client.get(
             "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe"
-            "&dataset=otbr_cli_networkdiag_fetch_all&side=after&selected=assessment-missing"
+            "&dataset=otbr_cli_diagnostics_fetch&side=after&selected=assessment-missing"
         )
         self.assertEqual(missing_selected.status, 404)
         before_page = await self.client.get(
             "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe"
-            "&dataset=otbr_cli_networkdiag_fetch_all&side=before&after=assessment-2"
+            "&dataset=otbr_cli_diagnostics_fetch&side=before&after=assessment-2"
         )
         self.assertEqual((await before_page.json())["total"], 1)
         listing = await self.client.get(
             "/api/health/comparisons?network=extpan:78b9775b001c1cbe"
-            "&dataset=otbr_cli_networkdiag_fetch_all&limit=1&offset=0"
+            "&dataset=otbr_cli_diagnostics_fetch&limit=1&offset=0"
         )
         self.assertEqual(listing.status, 200)
         self.assertEqual(listing.headers["Cache-Control"], "no-store")
@@ -832,7 +832,7 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         comparison_id = body["items"][0]["comparisonId"]
         selected_pair = await self.client.get(
             "/api/health/comparison?network=extpan:78b9775b001c1cbe"
-            "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-2"
+            "&dataset=otbr_cli_diagnostics_fetch&before=assessment-1&after=assessment-2"
             "&limit=25&offset=0&scope=all&result=all"
         )
         self.assertEqual(selected_pair.status, 200)
@@ -840,7 +840,7 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((selected["origin"], selected["createdAt"] is not None), ("stored", True))
         default_pair = await self.client.get(
             "/api/health/comparison?network=extpan:78b9775b001c1cbe"
-            "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-2"
+            "&dataset=otbr_cli_diagnostics_fetch&before=assessment-1&after=assessment-2"
         )
         self.assertEqual((await default_pair.json())["limit"], 100)
         for query in (
@@ -851,7 +851,7 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         ):
             invalid_pair = await self.client.get(
                 "/api/health/comparison?network=extpan:78b9775b001c1cbe"
-                "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-2"
+                "&dataset=otbr_cli_diagnostics_fetch&before=assessment-1&after=assessment-2"
                 f"&{query}"
             )
             self.assertEqual(invalid_pair.status, 400, query)
@@ -876,8 +876,8 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(invalid_filter.status, 400)
         self.assertEqual((await self.client.get("/api/health/comparisons/comparison:missing")).status, 404)
         for query in (
-            "network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&side=before",
-            "network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&side=other",
+            "network=extpan:78b9775b001c1cbe&dataset=otbr_cli_diagnostics_fetch&side=before",
+            "network=extpan:78b9775b001c1cbe&dataset=otbr_cli_diagnostics_fetch&side=other",
         ):
             self.assertEqual(
                 (await self.client.get(f"/api/health/comparison-endpoints?{query}")).status,
@@ -885,24 +885,24 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
             )
         same_observation = await self.client.get(
             "/api/health/comparison?network=extpan:78b9775b001c1cbe"
-            "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-1"
+            "&dataset=otbr_cli_diagnostics_fetch&before=assessment-1&after=assessment-1"
         )
         self.assertEqual(same_observation.status, 200)
         same_observation_payload = await same_observation.json()
         self.assertFalse(same_observation_payload["comparable"])
         self.assertEqual(same_observation_payload["primaryReason"], "same-observation")
-        self.assertEqual((await self.client.get("/api/health/comparisons?dataset=otbr_cli_networkdiag_fetch_all")).status, 400)
-        self.assertEqual((await self.client.get("/api/health/comparisons?network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&limit=101")).status, 400)
+        self.assertEqual((await self.client.get("/api/health/comparisons?dataset=otbr_cli_diagnostics_fetch")).status, 400)
+        self.assertEqual((await self.client.get("/api/health/comparisons?network=extpan:78b9775b001c1cbe&dataset=otbr_cli_diagnostics_fetch&limit=101")).status, 400)
         self.assertEqual(store.comparison_rows(network_id="extpan:78b9775b001c1cbe",
-                                               dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0)[1], 1)
+                                               dataset_id="otbr_cli_diagnostics_fetch", limit=25, offset=0)[1], 1)
 
     async def test_foreign_origin_is_not_authorized_and_mutating_preflights_fail(self) -> None:
         health_paths = (
-            "/api/health/summary?dataset=otbr_cli_networkdiag_fetch_all",
+            "/api/health/summary?dataset=otbr_cli_diagnostics_fetch",
             "/api/health/findings?assessment=assessment-1",
             "/api/health/devices/extaddr:8672766ae0578187?assessment=assessment-1",
             "/api/health/observations?limit=5&offset=0",
-            "/api/health/latest?dataset=otbr_cli_networkdiag_fetch_all",
+            "/api/health/latest?dataset=otbr_cli_diagnostics_fetch",
             "/api/health/capabilities",
         )
         for path in health_paths:

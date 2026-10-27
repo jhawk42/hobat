@@ -306,6 +306,7 @@ def _derive_device_comparison_items(
     interval: ComparisonInterval,
     roster_device_ids: frozenset[str],
     endpoint_facts: Mapping[str, tuple[Mapping[str, object], ...]] | None,
+    unified_contexts: tuple[Mapping, Mapping] | None = None,
 ) -> list[ComparisonItem]:
     items: list[ComparisonItem] = []
     old_devices = {device.device_id: device for device in before_obs.devices}
@@ -322,13 +323,34 @@ def _derive_device_comparison_items(
         old_time = source_time_for_sample(before_obs, source_file) if source_file else None
         new_time = source_time_for_sample(after_obs, source_file) if source_file else None
         if old_device or new_device:
+            presence_source, presence_old_time, presence_new_time = source_file, old_time, new_time
+            if unified_contexts is not None and (old_device is None or new_device is None):
+                from td_health_unified import DIAGNOSTICS, timestamp
+                old_context, new_context = unified_contexts
+                old_witness, new_witness = old_context.get("absenceWitness"), new_context.get("absenceWitness")
+                negative_context = old_context if old_device is None else new_context
+                qualified = (
+                    old_witness is not None and new_witness is not None
+                    and old_witness["domain"] == new_witness["domain"]
+                    and old_witness["key"] != new_witness["key"]
+                    and timestamp(old_witness["sourceObservedAt"]) < timestamp(new_witness["sourceObservedAt"])
+                    and device_id not in negative_context.get("positiveDeviceIds", ())
+                    and negative_context.get("absenceOrderingAvailable") is True
+                )
+                presence_source = DIAGNOSTICS[new_witness["domain"]] if qualified else None
+                presence_old_time = old_witness["sourceObservedAt"] if qualified else None
+                presence_new_time = new_witness["sourceObservedAt"] if qualified else None
+            presence_files = (
+                tuple(sorted(set(source_files) | {presence_source}))
+                if unified_contexts is not None and presence_source else source_files
+            )
             items.append(derive_discrete_item(
                 interval, kind="presence-transition", scope="device", subject_id=device_id,
                 metric=None, before_value=old_device is not None, after_value=new_device is not None,
-                before_source_time=old_time, after_source_time=new_time if new_device else None,
-                source_files=source_files, before_source_file=source_file,
-                after_coverage_source=source_file if new_device is None else None,
-                after_coverage_time=new_time if new_device is None else None,
+                before_source_time=presence_old_time, after_source_time=presence_new_time if new_device else None,
+                source_files=presence_files, before_source_file=presence_source,
+                after_coverage_source=presence_source if new_device is None else None,
+                after_coverage_time=presence_new_time if new_device is None else None,
             ))
         for field in ("role", "state"):
             if (
@@ -544,7 +566,10 @@ def derive_comparison(
     )
     items = [
         *_derive_device_comparison_items(
-            before_obs, after_obs, interval, roster_device_ids, endpoint_facts
+            before_obs, after_obs, interval, roster_device_ids, endpoint_facts,
+            (before_assessment.reproduction_context.get("unifiedHealth", {}),
+             after_assessment.reproduction_context.get("unifiedHealth", {}))
+            if after_assessment.sample_contract_version == "comparison-v1-unified" else None,
         ),
         *_derive_metric_comparison_items(before_obs, after_obs, interval, policy),
         *_derive_relationship_comparison_items(before_obs, after_obs, interval),
@@ -683,7 +708,11 @@ def source_roles_for_dataset(dataset: HealthDataset) -> Mapping[str, str]:
                  *dataset.health_profile.required_outcomes)
     if len(filenames) != len(set(filenames)):
         raise ValueError("Duplicate manifest source filename")
-    return {filename: "required" for filename in filenames}
+    roles = {filename: "required" for filename in filenames}
+    if dataset.unified_recipe:
+        roles.update({item["file"]: "required" if item["required"] else "optional"
+                      for item in dataset.unified_recipe["rawInputs"]})
+    return roles
 
 
 def _utc_timestamp(value: str) -> datetime:
@@ -781,8 +810,20 @@ def compare_interval(
         if signature != after_signature:
             reasons.add("source-signature-mismatch")
         supported_contracts = {COMPARISON_VERSION}
-        if before_obs.dataset_id == after_obs.dataset_id == "otbr_cli_networkdiag_fetch_all":
+        if before_obs.dataset_id == after_obs.dataset_id and before_obs.dataset_id in {
+            "otbr_cli_networkdiag_fetch_all", "otbr_cli_diagnostics_fetch",
+        }:
             supported_contracts.add(ROUTE64_SAMPLE_CONTRACT_VERSION)
+        if before_obs.dataset_id == after_obs.dataset_id and before_obs.dataset_id in {
+            "otbr_cli_unified", "otbr_restapi_unified", "ha_matter_ws_unified", "multi_source_unified",
+        }:
+            old_context = before_assessment.reproduction_context.get("unifiedHealth", {})
+            new_context = after_assessment.reproduction_context.get("unifiedHealth", {})
+            if (old_context.get("version") == new_context.get("version") == "unified-health-v1"
+                    and old_context.get("recipeContractDigest")
+                    and old_context["recipeContractDigest"] == new_context.get("recipeContractDigest")
+                    and before_assessment.evaluator_version == after_assessment.evaluator_version == "snapshot-v15"):
+                supported_contracts.add("comparison-v1-unified")
         if (before_assessment.sample_contract_version != after_assessment.sample_contract_version or
             before_assessment.sample_contract_version not in supported_contracts):
             reasons.add("sample-contract-mismatch")

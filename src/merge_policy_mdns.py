@@ -5,6 +5,21 @@ from typing import Any
 
 from td_record_merge import value_is_empty
 from td_device_fields import get_matter_fabric_node_identity
+from td_network_identity import canonical_ext_pan_id
+
+
+def observed_service_network(record: dict[str, Any]) -> str | None:
+    """Only this MeshCoP observation's XPAN is scope, not a sibling service's."""
+    if record.get("scope") != "_meshcop._udp.local.":
+        return None
+    service = record.get("serviceInfo", record.get("service_info", {}))
+    properties = service.get("properties", {}) if isinstance(service, dict) else {}
+    xp = properties.get("xp") if isinstance(properties, dict) else None
+    if xp is None:
+        return None
+    if not isinstance(xp, dict) or xp.get("hex") is None:
+        raise ValueError("Invalid MeshCoP Extended PAN ID")
+    return canonical_ext_pan_id(xp["hex"])
 
 
 def merge_mdns_service_info(

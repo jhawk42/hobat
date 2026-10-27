@@ -75,9 +75,13 @@ check([{ mode: { device: "unknown" } }]);
 check([{ mode: { device: "MTD" }, role: "child" }], ["hasMtdNodes"]);
 for (const role of [" child ", "CHILD"]) {
   check([{ mode: { device: "FTD" }, role, rloc16: "0x1200", isBorderRouter: true }],
-    ["hasFtdNodes", "hasReedNodes", "hasRouters", "hasBorderRouters", "hasRoutersWithoutChildren"]);
+    ["hasFtdNodes", "hasReedNodes", "hasBorderRouters"]);
 }
-for (const role of ["router", "leader", "reed", "sleepy-child"]) {
+for (const role of ["router", "leader"]) {
+  check([{ mode: { device: "FTD" }, role }],
+    ["hasFtdNodes", "hasRouters", "hasRoutersWithoutChildren"]);
+}
+for (const role of ["reed", "sleepy-child"]) {
   check([{ mode: { device: "FTD" }, role }], ["hasFtdNodes"]);
 }
 check([{ mode: { device: "FTD" }, rloc16: "0x1200" }],
@@ -90,7 +94,8 @@ for (const field of ["rloc16", "RLOC16"]) {
   }
 }
 for (const rloc16 of ["1200", "0x1201", "0x100", "0x12300", "", null]) {
-  check([{ rloc16, isRouter: true, role: "router" }]);
+  check([{ rloc16, isRouter: true, role: "router" }],
+    ["hasRouters", "hasRoutersWithoutChildren"]);
 }
 for (const field of ["isBorderRouter", "is_border_router", "br"]) {
   for (const value of [true, "true", " TRUE "]) {
@@ -207,7 +212,7 @@ check([{ childTable: [{ lq: 2 }], children: [{ link_quality: 2 }] }]);
 
 const fullRows = [
   {
-    mode: { device: "FTD" }, role: "child", rloc16: "0x1200", isBorderRouter: true,
+    mode: { device: "FTD" }, role: "router", rloc16: "0x1200", isBorderRouter: true,
     totalChildren: 1,
     macCounters: { ifinerrors_pct: 0, ifindiscards_pct: 0, ifTotalErrorsTotalPktsRatio: 0, ifTotalDiscardsTotalPktsRatio: 0 },
     mleCounters: { partIdChangesCount: 0, newParentCount: 0, betterPartIdAttachAttemptsCount: 0, totalParentPartitionChangesCount: 0 },
@@ -217,6 +222,7 @@ const fullRows = [
     links3: 0, totalLinks: 0, timeStatistics: { routerPct: 0, detachedDisabledPct: 0 },
   },
   { mode: { device: "MTD" }, rloc16: "0x3400" },
+  { mode: { device: "FTD" }, role: "child" },
 ];
 const full = check(fullRows, flagKeys);
 check([...fullRows, {}], flagKeys);

@@ -24,6 +24,7 @@ import mdns_thread_scopes
 import eve_process
 import td_health_cli
 import td_system_cli
+import td_unified_dataset
 
 import otbr_cli_thread_network_info
 import otbr_cli_bbr
@@ -519,6 +520,11 @@ def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:
     """Build the flattened merge commands."""
 
     # Remaining args are captured as extras via parse_known_args and forwarded to subordinate module main().
+    subparsers.add_parser(
+        "unify-dataset",
+        help="Materialize a source-primary Unified dataset using cached inputs only",
+        add_help=False,
+    )
     subparsers.add_parser(
         "merge-dataset",
         aliases=["merge-data"],
@@ -1147,7 +1153,18 @@ def _dispatch_merge(
     )
 
 
+def _dispatch_unified(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    if getattr(args, "output", None) is not None or getattr(args, "log_thread_secrets", False):
+        parser.error("unify-dataset does not accept output overrides or Thread secrets")
+    return _normalize_module_rc(
+        td_unified_dataset.main(_forward_with_datadir(args, extra_args)), "td_unified_dataset.main"
+    )
+
+
 _FAMILY_DISPATCHERS = {
+    "unify-dataset": _dispatch_unified,
     "otbr-cli": _dispatch_otbr_cli,
     "mdns": _dispatch_mdns,
     "otbr-restapi": _dispatch_otbr_restapi,
@@ -1209,7 +1226,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.command == "ha-matter-ws"
         and args.ha_matter_command == "device"
         and args.ha_matter_device_command == "ping"
-    ) or (args.command in {"health", "system"} and "--json" in extras) or (
+    ) or (args.command in {"health", "system", "unify-dataset"} and "--json" in extras) or (
         args.command == "system"
         and args.system_command == "device"
         and args.device_action == "ping"

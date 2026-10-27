@@ -29,7 +29,7 @@ from td_health_rules import HealthRuleCatalogError
 
 
 PROFILE = load_health_manifest().dataset(
-    "otbr_cli_topology_mdns_health"
+    "otbr_cli_topology_mdns"
 ).health_profile
 
 
@@ -41,7 +41,7 @@ def _observation(relationship: RelationshipSample) -> Observation:
     return Observation(
         "observation:test",
         "otbr-cli",
-        "otbr_cli_topology_mdns_health",
+        "otbr_cli_topology_mdns",
         "extpan:78b9775b001c1cbe",
         "test",
         "2026-09-01T00:00:00+00:00",

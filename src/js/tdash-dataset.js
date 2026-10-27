@@ -1,4 +1,4 @@
-import { DATASET_REGISTRY, getDatasetCatalog } from "./tdash-dataset-registry.js";
+import { getDatasetCatalog, resolveDataset } from "./tdash-dataset-registry.js";
 import { MERGE_STRATEGIES } from "./tdash-constants.js";
 import {
   toText,
@@ -187,6 +187,7 @@ export const MERGE_STRATEGY_HANDLERS = Object.freeze({
 });
 
 export function getDatasetAuxiliaryFiles(entry) {
+  if (entry?.unified) return [];
   if (!["otbr-cli", "otbr-restapi"].includes(entry?.source)) return [];
   const profiles = getDatasetCatalog().healthProfiles ?? {};
   const profileNames = entry.healthProfile && profiles[entry.healthProfile]
@@ -474,7 +475,8 @@ function _extractResponseCacheMetadata(response) {
   const responseMaxAge = maxAgeMatch ? parseInt(maxAgeMatch[1], 10) : null;
   const lastModifiedHeader = response.headers.get("Last-Modified");
   const lastModifiedAt = lastModifiedHeader ? Date.parse(lastModifiedHeader) : null;
-  return { responseMaxAge, lastModifiedAt };
+  const materializationState = response.headers.get("X-TD-Materialization-State");
+  return { responseMaxAge, lastModifiedAt, materializationState };
 }
 
 function _datasetRequestHeaders(filename, forceFresh) {
@@ -542,21 +544,20 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpoin
     });
     _trackJobForSession(sessionId, job.job_id);
     try {
-      const { data, responseMaxAge, lastModifiedAt } = await pollJobUntilDone(
+      const result = await pollJobUntilDone(
         job.job_id,
         job.filename,
         sessionId,
         onCheckpointData,
       );
-      return { data, responseMaxAge, lastModifiedAt };
+      return result;
     } finally {
       _untrackJobForSession(sessionId, job.job_id);
     }
   }
   if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
   const data = await response.json();
-  const { responseMaxAge, lastModifiedAt } = _extractResponseCacheMetadata(response);
-  return { data, responseMaxAge, lastModifiedAt };
+  return { data, ..._extractResponseCacheMetadata(response) };
 }
 
 // Polls /api/job/{jobId} every 5 s until done or error.
@@ -701,8 +702,7 @@ async function pollJobUntilDone(
         );
       }
       const data = await finalResponse.json();
-      const { responseMaxAge, lastModifiedAt } = _extractResponseCacheMetadata(finalResponse);
-      return { data, responseMaxAge, lastModifiedAt };
+      return { data, ..._extractResponseCacheMetadata(finalResponse) };
     }
 
     if (pollBody.status === JOB_POLL_STATUS.CANCELLED) {
@@ -795,12 +795,7 @@ export async function loadDataset(entryValue, options = {}) {
   const onFileReady = options.onFileReady ?? null;
   _assertFetchSessionActive(sessionId);
 
-  const entry = DATASET_REGISTRY.find((e) => e.value === entryValue);
-  if (!entry) {
-    document.getElementById("fetch-status-line-content").textContent =
-      `Unknown dataset: ${entryValue}`;
-    return null;
-  }
+  const entry = resolveDataset(entryValue);
 
   const statusEl = document.getElementById("fetch-status-line-content");
   const timerEl = document.getElementById("fetch-timetaken-value");
@@ -846,6 +841,7 @@ export async function loadDataset(entryValue, options = {}) {
 
   // Null-filled array updated as each file resolves; shared with _buildPartialDataset.
   const rawFilesInProgress = entry.files.map(() => null);
+  const materializationStates = [];
   const auxiliaryFileNames = getDatasetAuxiliaryFiles(entry);
 
   let settled;
@@ -873,7 +869,11 @@ export async function loadDataset(entryValue, options = {}) {
             }
           : null;
         return fetchJson(`/api/data/${f}`, reqHeaders, sessionId, onCheckpointData).then(
-          ({ data, responseMaxAge, lastModifiedAt }) => {
+          ({ data, responseMaxAge, lastModifiedAt, materializationState }) => {
+            if (entry.unified && !["complete", "partial"].includes(materializationState)) {
+              throw new Error(`Missing or invalid Unified materialization state for ${f}`);
+            }
+            materializationStates[fileIdx] = materializationState;
             _updateFileCacheMetadata(f, responseMaxAge, lastModifiedAt);
             if (onFileReady !== null && progressiveEnabled && _isFetchSessionActive(sessionId)) {
               rawFilesInProgress[fileIdx] = normalizeDatasetFilePayload(
@@ -995,7 +995,10 @@ export async function loadDataset(entryValue, options = {}) {
     loadedFiles: assembled.loadedFiles,
     fetchDurationMs,
     fileLastModifiedAt: oldestLastModifiedAt,
-    isPartial: failedFiles.length > 0,
+    isPartial: failedFiles.length > 0 || materializationStates.includes("partial"),
+    ...(entry.unified ? {
+      materializationState: materializationStates.includes("partial") ? "partial" : "complete",
+    } : {}),
     fetchMetrics: {
       progressiveEnabled,
       timeToFirstRenderMs: firstIncrementalRenderAtMs,
@@ -1005,7 +1008,7 @@ export async function loadDataset(entryValue, options = {}) {
     },
   };
 
-  if (failedFiles.length === 0) acceptedDataset = currentDataset;
+  if (!currentDataset.isPartial) acceptedDataset = currentDataset;
 
   // Set progress bar to 100% when fetch completes
   if (progressEl) {

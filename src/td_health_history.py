@@ -19,6 +19,17 @@ from td_health_sqlite import SQLiteHealthStore
 
 def network_id_for_dataset(*, data_dir: Path, dataset_id: str) -> str:
     dataset = load_health_manifest().dataset(dataset_id)
+    if dataset.unified_recipe is not None:
+        from td_dataset_catalog import load_dataset_catalog, resolve_dataset
+        from td_unified_dataset import UnifiedDatasetError, read_original_evidence
+        catalog = load_dataset_catalog()
+        try:
+            view = read_original_evidence(
+                data_dir, resolve_dataset(catalog, dataset_id), catalog=catalog,
+            )
+        except (UnifiedDatasetError, OSError, ValueError) as exc:
+            raise HealthProcessingError(f"Cannot verify Unified roster identity: {exc}") from exc
+        return view["report"]["networkInstance"]
     identity_path = data_dir / dataset.health_profile.identity_file
     try:
         identity = json.loads(identity_path.read_text(encoding="utf-8"))

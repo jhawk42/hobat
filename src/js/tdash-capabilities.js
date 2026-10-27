@@ -30,10 +30,22 @@ export function isFileCached(filename, capabilities) {
 }
 
 export function datasetIsAvailable(entry, capabilities) {
+  if (entry.unified) {
+    return entry.files.every((filename) => {
+      const file = capabilities?.files?.[filename];
+      return file?.cached === true || file?.buildableFromCache === true;
+    });
+  }
   if (!sourceIsAvailable(entry.source, capabilities)) return false;
   return entry.files.every((filename) => {
     const file = capabilities?.files?.[filename];
     return file?.cached === true || file?.source
       && sourceIsAvailable(file.source, capabilities);
   });
+}
+
+export function sourceHasAvailableDatasets(source, capabilities, entries) {
+  return sourceIsAvailable(source, capabilities) || entries.some((entry) =>
+    entry.source === source && entry.selectable !== false && entry.unified
+    && datasetIsAvailable(entry, capabilities));
 }

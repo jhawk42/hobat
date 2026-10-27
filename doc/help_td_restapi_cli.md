@@ -438,6 +438,22 @@ diagnostics fetch-all [--device-ids ID ...]
 
 The default result is a structured outcome containing `items`, `deviceResults`, `partial`, clearing state, counts, and timestamps. Results are automatically written to `<datadir>/td-otbr-restapi-diagnostics-fetch-all.json` unless `--no-auto-output` or `--output` is specified.
 
+If unresolved mesh-local IIDs guard a partial sweep, the diagnostic outcome
+and its digest-bound `.network.json` companion are still updated. When no
+usable diagnostic items are returned, the previous diagnostic dataset, its
+network companion, and its checkpoint are retained unchanged. Outcome scope
+uses the normal observed/operator/unknown provenance rules; a guarded outcome
+does not make the retained data fresh or complete. A scope-write failure is
+reported as an error, and stale bindings remain invalid. Existing stale
+bindings are not repaired by cache-only Unified processing.
+
+Every standalone sweep saves its full outcome, not only sweeps affected by
+the unresolved-IID guard. `--items-only` changes the returned primary payload
+to the compatibility array but does not discard outcome metadata. The
+outcome uses the primary filename with `.outcome` before its suffix, including
+custom output paths; `--no-auto-output` without an explicit output writes
+neither primary nor outcome.
+
 By default, the roster's `mode.fullThreadDevice` and `mode.device` fields
 classify children. MTD fast requests exactly TLVs 0, 1, 2, 8; optional MTD
 detail and FTD medium each request exactly 0, 1, 2, 8, 9. `mode.device` is
@@ -910,7 +926,7 @@ mesh-diagnostics fetch-all [--device-ids ID ...]
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
 | `--routers-only` | off | Filter to router devices only (RLOC16 lower 10 bits == 0); skips child devices that return empty mesh-diag records |
 | `--preserve-diagnostics` | off | Keep the existing diagnostics collection instead of clearing once for this full sweep |
-| `--items-only` | off | Return only successful diagnostic items instead of the structured sweep outcome |
+| `--items-only` | off | Return only successful diagnostic items; still save the full outcome companion when output is enabled |
 
 > **Note:** `--update-devices` has been replaced by `--no-update-devices`. Device list refresh now runs by default.
 

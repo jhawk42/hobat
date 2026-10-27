@@ -10,6 +10,7 @@ import { adaptEve, adaptEveNative } from './tdash-adaptor-eve.js';
 export { adaptEve, adaptEveNative };
 import { adaptThreadToolsNative } from './tdash-adaptor-thread-tools.js';
 import { getDeviceIdentityKeys } from './tdash-device-fields.js';
+import { adaptUnified } from './tdash-adaptor-unified.js';
 export { adaptThreadToolsNative };
 function buildFileMap(fileNames, rawFiles) {
   const map = new Map();
@@ -20,6 +21,7 @@ function buildFileMap(fileNames, rawFiles) {
 // ── Dispatch: pick adaptor from the dataset registry identifier ───────────────
 
 export const ADAPTOR_HANDLERS = Object.freeze({
+  'unified': adaptUnified,
   'meshdiag-networkdiag': (fileMap, rows) => adaptMeshdiagNetworkdiag(fileMap, rows),
   'merged-detailed': (fileMap) => adaptMergedDetailed(fileMap),
   'eve-enhanced': (fileMap) => adaptEve(fileMap),

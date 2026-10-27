@@ -58,7 +58,7 @@ def test_history_subprocess_discovery_and_network_scope(tmp_path) -> None:
     _seed(tmp_path)
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     native = process_health(
-        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=store,
     )
     removed = "otbr_restapi_diagnostics_fetch_all"
@@ -113,7 +113,7 @@ def test_history_subprocess_tagged_replay_apply_rerun(tmp_path) -> None:
     _seed(data_dir)
     store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
     native = process_health(
-        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=data_dir, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=store,
     )
     # Synthetic context-free evidence exercises replay, not an old schema layout.
@@ -130,10 +130,11 @@ def test_history_subprocess_tagged_replay_apply_rerun(tmp_path) -> None:
     assert preview.returncode == 0, preview.stderr
     item = json.loads(preview.stdout)["items"][0]
     assert item["sourceResolution"] == "equivalent-contracts"
-    assert len(item["sourceRevisionIds"]) == 3
+    assert len(item["sourceRevisionIds"]) == 7
+    assert "manifest-sha256:c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011" in item["sourceRevisionIds"]
     assert item["adapterId"] == "retained-equivalent-v1"
     applied = _history_subprocess(
-        data_dir, "--dataset", "otbr_cli_networkdiag_fetch_all",
+        data_dir, "--dataset", "otbr_cli_diagnostics_fetch",
         "--backup-output", str(tmp_path / "backup"), "--yes", "--json",
     )
     assert applied.returncode == 0, applied.stderr
@@ -164,7 +165,7 @@ def test_history_legacy_unique_target_lineage(tmp_path, damage) -> None:
     _seed(data_dir)
     store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
     native = process_health(
-        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=data_dir, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=store,
     )
     policy = replace(load_health_policy(), digest="test-policy-legacy")
@@ -240,7 +241,7 @@ def test_history_refuses_changed_preview_and_busy_writer(tmp_path, change) -> No
     _seed(data_dir)
     store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
     process_health(
-        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=data_dir, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=store,
     )
     policy = replace(load_health_policy(), digest="test-policy-preview")
@@ -280,14 +281,14 @@ def test_history_archive_preflight_is_isolated_from_native_commands(tmp_path, ar
     data_dir.mkdir()
     _seed(data_dir)
     process_health(
-        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=data_dir, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME),
     )
     command = [sys.executable, str(runtime / "td_cli.py"), "--datadir", str(data_dir), "health"]
     for arguments in (
         ["--help"],
         ["migrate", "--check", "--json"],
-        ["process-dataset", "--dataset", "otbr_cli_networkdiag_fetch_all", "--dry-run", "--json"],
+        ["process-dataset", "--dataset", "otbr_cli_diagnostics_fetch", "--dry-run", "--json"],
     ):
         result = subprocess.run(
             command + arguments, capture_output=True, text=True, timeout=30, check=False,
@@ -318,7 +319,7 @@ def test_history_subprocess_preserves_unsupported_contracts(
     _seed(tmp_path)
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     process_health(
-        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=store,
     )
     with closing(store._connect()) as connection, connection:
@@ -345,7 +346,7 @@ def test_history_real_schema3_upgrade_does_not_invent_sample_contract(tmp_path) 
     _create_schema_fixture(database, 3)
     with sqlite3.connect(database) as connection:
         connection.execute(
-            "UPDATE observations SET dataset_id='otbr_cli_networkdiag_fetch_all', "
+            "UPDATE observations SET dataset_id='otbr_cli_diagnostics_fetch', "
             "datasource_id='otbr-cli'",
         )
         connection.execute(
@@ -378,7 +379,7 @@ def test_history_refuses_changed_contract_file_after_preview(tmp_path, changed_f
     _seed(data_dir)
     store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
     process_health(
-        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=data_dir, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=store,
     )
     bundled = load_manifest_history()
@@ -407,11 +408,13 @@ def test_history_refuses_changed_contract_file_after_preview(tmp_path, changed_f
 
 
 @pytest.mark.parametrize("saved_context", [True, False])
-def test_history_source_profile_is_distinct_from_changed_target(tmp_path, saved_context) -> None:
+def test_history_source_profile_is_distinct_from_changed_target(tmp_path, saved_context, monkeypatch) -> None:
+    import td_health_manifest_history as history_contract
+
     _seed(tmp_path)
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     process_health(
-        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=store,
     )
     if not saved_context:
@@ -423,9 +426,25 @@ def test_history_source_profile_is_distinct_from_changed_target(tmp_path, saved_
     bundled = load_manifest_history()
     manifest = tmp_path / "changed-manifest.json"
     raw = json.loads(bundled.manifest_path.read_text(encoding="utf-8"))
+    archive = json.loads(bundled.history_path.read_text(encoding="utf-8"))
+    digest = history_contract.canonical_digest(raw)
+    archive["revisions"].append({
+        "revisionId": "manifest-sha256:" + digest,
+        "commit": "e" * 40, "committedAt": "2026-10-27T00:00:00+00:00",
+        "manifestPath": "src/td-dataset-manifest.json", "manifestDigest": digest,
+        "healthContractDigest": history_contract.canonical_digest(history_contract.health_projection(raw)),
+        "manifest": raw,
+    })
+    history = tmp_path / "history.json"
+    history.write_text(json.dumps(archive), encoding="utf-8")
+    monkeypatch.setattr(history_contract, "PRODUCER_SAMPLE_SUPPORT", {
+        **history_contract.PRODUCER_SAMPLE_SUPPORT,
+        digest: {"otbr_cli_diagnostics_fetch": "comparison-v1-route64"},
+    })
+    raw = json.loads(json.dumps(raw))
     raw["healthProfiles"]["otbr-cli-networkdiag-v1"]["borderRouterAuthority"] = False
     manifest.write_text(json.dumps(raw), encoding="utf-8")
-    resolver = load_manifest_history(manifest, bundled.history_path)
+    resolver = load_manifest_history(manifest, history)
     inventory = inventory_health_history(
         SQLiteHealthStore(store.path, read_only=True),
         target_policy=load_health_policy(), resolver=resolver,
@@ -438,7 +457,8 @@ def test_history_source_profile_is_distinct_from_changed_target(tmp_path, saved_
     assert item.target_contract_digest is None
     if saved_context:
         assert item.source_resolution == "equivalent-contracts"
-        assert len(item.source_revision_ids) == 2
+        assert len(item.source_revision_ids) == 7
+        assert "manifest-sha256:c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011" in item.source_revision_ids
     else:
         assert item.source_resolution == "ambiguous"
 
@@ -447,7 +467,7 @@ def test_history_explicit_identification_only_revision_cannot_fall_forward(tmp_p
     _seed(tmp_path)
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     process_health(
-        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=store,
     )
     with closing(store._connect()) as connection, connection:
@@ -462,8 +482,8 @@ def test_history_explicit_identification_only_revision_cannot_fall_forward(tmp_p
     assert result.returncode == 1, result.stderr
     report = json.loads(result.stdout)
     assert report["items"][0]["targetContractDigest"] is None
-    assert report["items"][0]["eligibility"] == "unsupported"
-    assert report["items"][0]["reasons"] == ["unsupported-sample-contract"]
+    assert report["items"][0]["eligibility"] == "invalid"
+    assert report["items"][0]["reasons"] == ["conflicting-manifest-revision"]
     assert report["items"][0]["sourceRevisionIds"] == []
     with closing(store._connect()) as connection:
         assert connection.execute("SELECT COUNT(*) FROM health_assessment_upgrades").fetchone()[0] == 0
@@ -477,7 +497,7 @@ def test_history_all_preview_rechecks_new_retained_dataset(tmp_path) -> None:
     _seed(data_dir)
     store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
     process_health(
-        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=data_dir, dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(), store=store,
     )
     readonly = SQLiteHealthStore(store.path, read_only=True)
@@ -611,7 +631,7 @@ def test_dry_run_json_does_not_create_database(tmp_path) -> None:
     output = io.StringIO()
     with redirect_stdout(output):
         assert td_health_cli.main(
-            ["--datadir", str(tmp_path), "process-dataset", "--dataset", "otbr_cli_networkdiag_fetch_all", "--dry-run", "--json"]
+            ["--datadir", str(tmp_path), "process-dataset", "--dataset", "otbr_cli_diagnostics_fetch", "--dry-run", "--json"]
         ) == 0
     document = json.loads(output.getvalue())
     assert document["networkId"] == "extpan:78b9775b001c1cbe"
@@ -669,7 +689,7 @@ def test_cached_cli_counter_change_without_reset_witness_stays_unknown(tmp_path)
         output = io.StringIO()
         with redirect_stdout(output):
             assert td_cli.main(["--datadir", str(tmp_path), "health", "process-dataset",
-                                "--dataset", "otbr_cli_networkdiag_fetch_all", "--json"]) == 0
+                                "--dataset", "otbr_cli_diagnostics_fetch", "--json"]) == 0
         assessment_ids.append(json.loads(output.getvalue())["assessmentId"])
 
     output = io.StringIO()
@@ -715,7 +735,7 @@ def test_dry_run_uses_existing_roster_history_without_mutating_store(tmp_path) -
         connection.commit()
     assert td_health_cli.main([
         "--datadir", str(tmp_path), "process-dataset",
-        "--dataset", "otbr_cli_networkdiag_fetch_all",
+        "--dataset", "otbr_cli_diagnostics_fetch",
     ]) == 0
     snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
     snapshot.write_text(snapshot.read_text(encoding="utf-8") + "\n", encoding="utf-8")
@@ -725,7 +745,7 @@ def test_dry_run_uses_existing_roster_history_without_mutating_store(tmp_path) -
     with redirect_stdout(output):
         assert td_health_cli.main([
             "--datadir", str(tmp_path), "process-dataset",
-            "--dataset", "otbr_cli_networkdiag_fetch_all", "--dry-run", "--json",
+            "--dataset", "otbr_cli_diagnostics_fetch", "--dry-run", "--json",
         ]) == 0
 
     document = json.loads(output.getvalue())
@@ -741,7 +761,7 @@ def test_migrate_history_cli_dry_run_is_read_only_json(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     assert td_health_cli.main([
         "--datadir", str(tmp_path), "process-dataset",
-        "--dataset", "otbr_cli_networkdiag_fetch_all",
+        "--dataset", "otbr_cli_diagnostics_fetch",
     ]) == 0
     with closing(store._connect()) as connection:
         connection.execute(
@@ -755,7 +775,7 @@ def test_migrate_history_cli_dry_run_is_read_only_json(tmp_path) -> None:
     with redirect_stdout(output):
         assert td_health_cli.main([
             "--datadir", str(tmp_path), "migrate-history",
-            "--dataset", "otbr_cli_networkdiag_fetch_all",
+            "--dataset", "otbr_cli_diagnostics_fetch",
             "--dry-run", "--json",
         ]) == 0
     report = json.loads(output.getvalue())
@@ -773,7 +793,7 @@ def test_migrate_history_creates_verified_backup_and_revision(tmp_path) -> None:
     store = SQLiteHealthStore(database_path)
     assert td_health_cli.main([
         "--datadir", str(data_dir), "process-dataset",
-        "--dataset", "otbr_cli_networkdiag_fetch_all",
+        "--dataset", "otbr_cli_diagnostics_fetch",
     ]) == 0
     with closing(store._connect()) as connection:
         source = connection.execute(
@@ -790,7 +810,7 @@ def test_migrate_history_creates_verified_backup_and_revision(tmp_path) -> None:
     inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
     backup_path = tmp_path / "backup"
 
@@ -857,7 +877,7 @@ def test_history_replay_accepts_gt_one_mac_ratios_without_rewriting_history(tmp_
     store = SQLiteHealthStore(database_path)
     processed = process_health(
         data_dir=data_dir,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
     )
@@ -916,7 +936,7 @@ def test_history_replay_accepts_gt_one_mac_ratios_without_rewriting_history(tmp_
     inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
     item = next(item for item in inventory.items if item.observation_id == observation_id)
     assert item.eligibility.value != "invalid"
@@ -1009,7 +1029,7 @@ def test_invalid_member_aborts_entire_history_cohort(tmp_path) -> None:
     policy = load_health_policy()
     first = process_health(
         data_dir=data_dir,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy,
         store=store,
     )
@@ -1020,7 +1040,7 @@ def test_invalid_member_aborts_entire_history_cohort(tmp_path) -> None:
     )
     second = process_health(
         data_dir=data_dir,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy,
         store=store,
     )
@@ -1041,7 +1061,7 @@ def test_invalid_member_aborts_entire_history_cohort(tmp_path) -> None:
     inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
     backup_path = tmp_path / "backup"
 
@@ -1081,7 +1101,7 @@ def test_migrate_history_policy_reversion_restores_native_preference(tmp_path) -
     policy_one = load_health_policy()
     native = process_health(
         data_dir=data_dir,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy_one,
         store=store,
     )
@@ -1093,7 +1113,7 @@ def test_migrate_history_policy_reversion_restores_native_preference(tmp_path) -
     inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
         target_policy=policy_two,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
     migrated = migrate_health_history(
         SQLiteHealthStore(database_path, read_only=True),
@@ -1116,7 +1136,7 @@ def test_migrate_history_policy_reversion_restores_native_preference(tmp_path) -
     inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
         target_policy=policy_one,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
     reverted = migrate_health_history(
         SQLiteHealthStore(database_path, read_only=True),
@@ -1147,7 +1167,7 @@ def test_migrate_history_policy_reversion_restores_native_preference(tmp_path) -
     inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
         target_policy=policy_two,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
     migrate_health_history(
         SQLiteHealthStore(database_path, read_only=True),
@@ -1202,7 +1222,7 @@ def test_history_upgrade_identity_is_independent_of_dataset_scope(tmp_path) -> N
     store = SQLiteHealthStore(database_path)
     native = process_health(
         data_dir=data_dir,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
     )
@@ -1213,7 +1233,7 @@ def test_history_upgrade_identity_is_independent_of_dataset_scope(tmp_path) -> N
     first_inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
     first = migrate_health_history(
         SQLiteHealthStore(database_path, read_only=True),
@@ -1258,7 +1278,7 @@ def test_migration_prefers_upgraded_endpoints_and_stores_comparison(tmp_path) ->
     os.utime(identity, (first_time.timestamp(), first_time.timestamp()))
     first = process_health(
         data_dir=data_dir,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy_one,
         store=store,
     )
@@ -1278,7 +1298,7 @@ def test_migration_prefers_upgraded_endpoints_and_stores_comparison(tmp_path) ->
     os.utime(identity, (second_time.timestamp(), second_time.timestamp()))
     second = process_health(
         data_dir=data_dir,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy_two,
         store=store,
     )
@@ -1295,7 +1315,7 @@ def test_migration_prefers_upgraded_endpoints_and_stores_comparison(tmp_path) ->
         store._auto_compare(connection, *old_endpoint)
 
     network_id = "extpan:78b9775b001c1cbe"
-    dataset_id = "otbr_cli_networkdiag_fetch_all"
+    dataset_id = "otbr_cli_diagnostics_fetch"
     before_service = TDHealthReadService(data_dir)
     before_list = before_service.comparisons(
         network_id=network_id, dataset_id=dataset_id, limit=25, offset=0
@@ -1315,7 +1335,7 @@ def test_migration_prefers_upgraded_endpoints_and_stores_comparison(tmp_path) ->
     inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
         target_policy=policy_two,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
 
     report = migrate_health_history(
@@ -1421,7 +1441,7 @@ def test_migration_reserves_newest_comparison_pairs_with_current_endpoint_before
         native_results.append(
             process_health(
                 data_dir=data_dir,
-                dataset_id="otbr_cli_networkdiag_fetch_all",
+                dataset_id="otbr_cli_diagnostics_fetch",
                 policy=load_health_policy(),
                 store=store,
             )
@@ -1461,7 +1481,7 @@ def test_migration_reserves_newest_comparison_pairs_with_current_endpoint_before
     inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
     assert any(
         item.observation_id == native_results[1].observation.observation_id
@@ -1510,16 +1530,16 @@ def test_top_level_json_has_no_banner(tmp_path) -> None:
     output = io.StringIO()
     with redirect_stdout(output):
         assert td_cli.main(
-            ["--datadir", str(tmp_path), "health", "process-dataset", "--dataset", "otbr_cli_networkdiag_fetch_all", "--dry-run", "--json"]
+            ["--datadir", str(tmp_path), "health", "process-dataset", "--dataset", "otbr_cli_diagnostics_fetch", "--dry-run", "--json"]
         ) == 0
-    assert json.loads(output.getvalue())["datasetId"] == "otbr_cli_networkdiag_fetch_all"
+    assert json.loads(output.getvalue())["datasetId"] == "otbr_cli_diagnostics_fetch"
 
 
 def test_top_level_age_purge_dry_run_is_json_and_does_not_mutate(tmp_path) -> None:
     _seed(tmp_path)
     assert td_health_cli.main([
         "--datadir", str(tmp_path), "process-dataset",
-        "--dataset", "otbr_cli_networkdiag_fetch_all",
+        "--dataset", "otbr_cli_diagnostics_fetch",
     ]) == 0
     output = io.StringIO()
     with redirect_stdout(output):
@@ -1557,7 +1577,7 @@ def test_roster_upsert_state_change_and_list_are_cli_only(tmp_path) -> None:
         assert td_health_cli.main([
             "--datadir", str(tmp_path),
             "process-dataset",
-            "--dataset", "otbr_cli_networkdiag_fetch_all",
+            "--dataset", "otbr_cli_diagnostics_fetch",
             "--roster-device", "86:72:76:6A:E0:57:81:87",
             "--roster-label", "Office Router",
             "--roster-state", "intermittent",
@@ -1572,7 +1592,7 @@ def test_roster_upsert_state_change_and_list_are_cli_only(tmp_path) -> None:
         assert td_health_cli.main([
             "--datadir", str(tmp_path),
             "process-dataset",
-            "--dataset", "otbr_cli_networkdiag_fetch_all",
+            "--dataset", "otbr_cli_diagnostics_fetch",
             "--roster-list",
             "--json",
         ]) == 0
@@ -1600,7 +1620,7 @@ def test_label_map_import_is_additive_and_reports_existing_entries(tmp_path) -> 
         with redirect_stdout(output):
             assert td_health_cli.main([
                 "--datadir", str(tmp_path), "process-dataset",
-                "--dataset", "otbr_cli_networkdiag_fetch_all",
+                "--dataset", "otbr_cli_diagnostics_fetch",
                 "--init-roster-from-label-map", "--json",
             ]) == 0
         return json.loads(output.getvalue())

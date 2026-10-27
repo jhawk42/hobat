@@ -21,6 +21,88 @@ snapshots; equivalent browser contracts support multi-file dashboard datasets.
 Tests enforce shared preferred fields, aliases, identity keys, placeholders,
 source precedence, conflicts, and idempotence across the two runtimes.
 
+## Cache-only Four-primary Composition
+
+The `multi_source_unified` recipe consumes exactly the four declared
+CLI/REST/HA Matter/mDNS primary generations. Its opt-in `unified` merge group
+dispatches [the Unified builder](../src/td_unified_dataset.py), not the legacy
+aggregate-file merge; `full` retains its existing inputs and output.
+Dependencies are prepared/reused once under one outer lock. Malformed present
+evidence aborts; missing/excluded/partial sources require explicit partial
+permission, and no usable source preserves the prior final with an error.
+
+Authority is evaluated on verified **original observations**. The builder
+replays each admitted raw input through its declared converter and the same
+scoped canonical merge used for source primaries. Original filenames keep their
+established precedence, tie ordering, conflict, partition and endpoint policies.
+It does not assign a rank to a primary filename or treat a source-wide rank as
+per-field lineage. Stable `recordSources` and `fieldSources` retain raw
+filenames/record identities, including identity-keyed relationship item paths.
+Conflicting losing evidence remains in merge metadata.
+
+`read_generation(data_dir, entry, verify_inputs=True)` verifies committed
+dependencies, their reports/companions and the current transitive raw evidence.
+Multi-source reports expose `rawInputs` (the closed catalog allowlist with
+roles/digests/scope/times/status) and generation-bound `rawInputsDigest`.
+This is the reusable metadata boundary for the later health evidence view;
+it embeds no complete raw snapshot and adds no health eligibility.
+Display reads verify only the coherent committed product and do not repair
+changed original caches. An explicit build alone refreshes derived products.
+
+Mixed known networks stay separate without a selection; an explicit observed
+network excludes mismatches without relabelling unknown records. A primary
+sidecar never assigns all mDNS services or non-Thread Matter members a network.
+Fabric identities remain distinct, service evidence is retained, and native
+links resolve again against final committed row IDs. Rebuilding identical
+evidence preserves artifact bytes/mtimes and original observation times.
+
+REST diagnostic snapshots can contain several observations of one device with
+different diagnostic UUIDs and creation times. Unified merges these observations
+when they have a concrete extended address in the same scope, retaining every
+original contributor and normal field conflicts. Diagnostic UUIDs are not device
+identities. Same-file inventory collisions, diagnostics without an extended
+address, conflicting addresses, and different Matter fabrics remain separate.
+mDNS advertisements do not join devices merely through an advertised extended
+address.
+
+Assembly contract `unified-assembly-v3` corrects diagnostic-observation merging.
+An explicit cache-only build upgrades existing generations even when raw inputs
+are unchanged; display reads still accept coherent `unified-assembly-v2`
+generations without silently rebuilding them.
+
+Assembly contract `unified-assembly-v4` additionally embeds operational Matter
+mDNS services in a matching Thread device's `mdnsRecords` array. Matching uses
+the current normalized IPv6 OMR address and requires exactly one device candidate
+within any observed service scope, with no conflicting concrete extended address.
+An unscoped service can enrich one unambiguous scoped device, but its embedded
+`_networkInstance` remains unknown. Unspecified, multicast, link-local, loopback
+and invalid addresses cannot establish a match. Multiple device/network/fabric
+candidates, mismatched known scopes, non-Thread devices and unmatched services
+stay separate. Assembly-v4 did not embed non-Matter services.
+
+Assembly contract `unified-assembly-v5` extends the same guarded association to
+HAP UDP (`_hap._udp.local.`), not HAP TCP or MeshCoP advertisements. It also
+corrects stale `relationshipOnly` markers in the in-memory device merge: an
+accepted non-mDNS device observation with a device identity clears the marker,
+regardless of contribution order. Original contributor flags remain untouched;
+placeholder-only observations and mDNS enrichment alone cannot clear it.
+Genuine relationship-only placeholders remain ineligible association targets.
+Explicit builds upgrade unchanged v2/v3/v4 generations; coherent older
+generations remain readable without an implicit rebuild.
+
+Each array item is the complete deduplicated service record, with its own
+`_unifiedRecordId`, original scope, capture metadata, service properties and
+fabric/node advertisement identity. Device fields and identities are unchanged.
+`recordSources` includes every contributing original observation;
+`fieldSources` binds `mdnsRecords` and each service-ID-keyed nested field to the
+original source references, without assigning mDNS authority to device fields.
+Device details show the array in the mDNS section, and normal search includes
+embedded advertisement names, fabric/node identities and properties. Source-primary CLI/REST/HA
+rows are unchanged; standalone mDNS Unified still represents service inventory.
+Explicit builds upgrade existing v2/v3 generations; coherent v2/v3 generations
+remain readable, and retained health still uses original evidence rather than
+the embedded advertisements.
+
 ## Network Instance
 
 An Extended PAN ID scopes a layer snapshot to one Thread network. The shared

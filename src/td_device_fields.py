@@ -50,6 +50,8 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "childTable", "aliases": ("router_child_table",), "transform": "relationship"},
     {"path": "childIpv6Addresses", "aliases": ("child_ipv6_addresses",), "transform": "stringArray"},
     {"path": "routerNeighbors", "aliases": ("router_neighbor_table",), "transform": "relationship"},
+    {"path": "nativeNodeIds", "aliases": (), "transform": "identity"},
+    {"path": "nativeRelationships", "aliases": (), "transform": "identity"},
     {"path": "frameErrorRate", "aliases": ("err_rate_frame_pct",), "transform": "relationshipMetric"},
     {"path": "messageErrorRate", "aliases": ("err_rate_msg_pct",), "transform": "relationshipMetric"},
     {"path": "averageRssi", "aliases": ("rss_ave",), "transform": "relationshipMetric"},
@@ -551,6 +553,9 @@ def get_device_identity_keys(
     if strategy == "none":
         return keys
     if strategy == "by-identity":
+        unified_id = record.get("_unifiedRecordId")
+        if isinstance(unified_id, str) and unified_id:
+            keys.append(f"unified:{unified_id}")
         ext_address = get_canonical_ext_address(record)
         if ext_address and not is_placeholder_ext_address(ext_address):
             keys.append(f"extAddress:{ext_address}")

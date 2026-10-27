@@ -3423,6 +3423,42 @@ def emit_rest_payload_output(
         raise
 
 
+def collection_outcome_path(output_path: str | Path) -> Path:
+    output = Path(output_path)
+    return output.with_name(f"{output.stem}.outcome{output.suffix}")
+
+
+def write_rest_collection_outcome(
+    outcome: dict[str, Any],
+    outcome_path: str | Path,
+    *,
+    raw: bool,
+    command_name: str,
+) -> None:
+    from td_json_key_normalizer import convert_keys_to_camel_case
+    from td_network_identity import resolve_network_scope
+    from util_data import TD_EXT_PAN_ID_ENV_VAR, save_json_atomic, write_network_scope
+
+    outcome_file = Path(outcome_path)
+    payload = outcome if raw else convert_keys_to_camel_case(outcome)
+    try:
+        save_json_atomic(payload, outcome_file)
+        write_network_scope(
+            outcome_file,
+            resolve_network_scope(outcome_file, payload, os.environ.get(TD_EXT_PAN_ID_ENV_VAR)),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        logging.error(
+            "event=diagnostic_outcome_write_failed command=%s outcome_file=%s error_type=%s error=%s",
+            command_name, outcome_file, type(exc).__name__, exc,
+        )
+        raise
+    logging.info(
+        "event=diagnostic_outcome_write command=%s outcome_file=%s",
+        command_name, outcome_file,
+    )
+
+
 def emit_rest_command_output(
     payload: Any,
     output_path: str | Path | None,

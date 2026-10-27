@@ -6,6 +6,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -56,7 +57,9 @@ from util_ot_ctl import (
     TD_OTBR_CONTAINER_USE_DEFAULT,
     TD_OTBR_CONTAINER_USE_ENV,
 )
-from util_data import read_network_scope
+from util_data import network_scope_path, read_network_scope
+from td_dataset_catalog import load_dataset_catalog
+from td_unified_dataset import UnifiedDatasetError, inspect_unified_cache
 
 
 PROBE_TIMEOUT_SECONDS = 2.0
@@ -106,7 +109,7 @@ SOURCE_FILES = {
         MDNS_SCOPES_HAP_FILENAME,
         MDNS_SCOPES_MATTER_FILENAME,
     ),
-    "merged": (MERGED_TOPOLOGY_ALL_FILENAME,),
+    "multi-source": (MERGED_TOPOLOGY_ALL_FILENAME,),
     "system": (EXTADDR_DEVICE_LABEL_MAP_FILENAME,),
 }
 
@@ -114,6 +117,22 @@ FILE_SOURCES = {
     filename: source for source, filenames in SOURCE_FILES.items() for filename in filenames
 }
 Probe = Callable[[], Awaitable[str | None]]
+FileSignature = tuple[tuple[str, tuple[int, ...] | None], ...]
+
+
+def _file_signature(data_dir: Path, filenames: set[str]) -> FileSignature:
+    signature = []
+    for filename in sorted(filenames):
+        try:
+            stat = (data_dir / filename).stat()
+        except FileNotFoundError:
+            signature.append((filename, None))
+        else:
+            signature.append((filename, (
+                stat.st_dev, stat.st_ino, stat.st_mode, stat.st_size,
+                stat.st_mtime_ns, stat.st_ctime_ns,
+            )))
+    return tuple(signature)
 
 
 async def _probe_otbr_cli() -> str | None:
@@ -203,20 +222,65 @@ class SourceCapabilityService:
         self._probe_ttl_seconds = probe_ttl_seconds
         self._probe_cache: dict[str, tuple[float, str | None]] = {}
         self._inflight: dict[str, asyncio.Task[str | None]] = {}
+        self._inspection_inflight: dict[Path, asyncio.Task[dict]] = {}
+        self._inspection_cache: dict[Path, tuple[dict, FileSignature, dict]] = {}
 
-    async def capabilities(self, data_dir: Path) -> dict[str, object]:
+    def _inspect_files(self, data_dir: Path) -> dict:
+        catalog = load_dataset_catalog()
+        file_sources = dict(FILE_SOURCES)
+        filenames = set(file_sources)
+        for entry in catalog["datasets"]:
+            if "unified" in entry:
+                file_sources[entry["files"][0]] = entry["source"]
+                recipe = entry["unified"]
+                filenames.update(entry["files"])
+                filenames.update(item["file"] for item in recipe["inputs"])
+                filenames.update(recipe[key] for key in ("reportFile", "identityFile", "outcomeFile")
+                                 if recipe[key] is not None)
+        filenames.update(network_scope_path(name).name for name in tuple(filenames))
+        for _ in range(3):
+            before = _file_signature(data_dir, filenames)
+            cached = self._inspection_cache.get(data_dir)
+            if cached is not None and cached[0] == catalog and cached[1] == before:
+                return cached[2]
+            files = self._read_files(data_dir, catalog, file_sources)
+            if catalog != load_dataset_catalog():
+                raise UnifiedDatasetError("Capability catalog changed during inspection; retry the request")
+            if before == _file_signature(data_dir, filenames):
+                self._inspection_cache[data_dir] = (catalog, before, files)
+                return files
+        raise UnifiedDatasetError("Cached capability inputs changed during inspection; retry the request")
+
+    @staticmethod
+    def _read_files(data_dir: Path, catalog: dict, file_sources: dict[str, str]) -> dict:
         files = {
             filename: {"cached": (data_dir / filename).is_file(), "source": source}
-            for filename, source in FILE_SOURCES.items()
+            for filename, source in file_sources.items()
         }
         for filename, file_info in files.items():
             if file_info["cached"]:
                 scope, _ = read_network_scope(data_dir / filename)
                 if scope is not None:
                     file_info["networkInstance"] = scope
+        inspections: dict[str, dict] = {}
+        for entry in catalog["datasets"]:
+            if "unified" in entry:
+                files[entry["files"][0]].update(inspect_unified_cache(
+                    data_dir, entry, catalog=catalog, inspections=inspections))
+        return files
+
+    async def capabilities(self, data_dir: Path) -> dict[str, object]:
+        data_dir = data_dir.resolve()
+        task = self._inspection_inflight.get(data_dir)
+        if task is None:
+            task = asyncio.create_task(asyncio.to_thread(self._inspect_files, data_dir))
+            self._inspection_inflight[data_dir] = task
+            task.add_done_callback(lambda completed: self._inspection_inflight.pop(data_dir, None))
+        files = deepcopy(await asyncio.shield(task))
         sources: dict[str, object] = {}
         for source, filenames in SOURCE_FILES.items():
             cached = any(files[filename]["cached"] for filename in filenames)
+            cached = cached or any(info["source"] == source and info["cached"] for info in files.values())
             if source in ALWAYS_AVAILABLE_SOURCES:
                 sources[source] = self._source_result(source, "available", cached, "not-applicable")
                 continue

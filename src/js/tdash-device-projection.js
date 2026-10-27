@@ -58,7 +58,7 @@ function deriveDiagnostics(row, metrics, deviceType, isRouter, isBorderRouter, i
 }
 
 export function buildDeviceProjection(row, index = 0) {
-  const deviceId = getDeviceIdentityKeys(row)[0] ?? `row:${index}`;
+  const deviceId = row._unifiedRecordId ?? getDeviceIdentityKeys(row)[0] ?? `row:${index}`;
   const rloc16 = toText(getColumnValue(row, "rloc16")).toLowerCase();
   const role = toText(getColumnValue(row, "role")).trim().toLowerCase();
   const explicitRouter = getColumnValue(row, "isRouter");
@@ -95,13 +95,14 @@ export function buildDeviceProjection(row, index = 0) {
     row,
     metrics,
     normalizedType,
-    derivedRouter,
+    isRouter,
     isBorderRouter,
     isReed,
     relationships,
   );
   return {
     deviceId,
+    ...(row._unifiedRecordId ? { _unifiedRecordId: row._unifiedRecordId } : {}),
     extAddress: toText(getColumnValue(row, "extAddress")),
     rloc16,
     omrIpv6Address: toText(getColumnValue(row, "omrIpv6Address")),

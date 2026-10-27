@@ -897,6 +897,7 @@ export const DEVICE_DETAILS_SECTIONS = Object.freeze([
       "omrIpv6Address",
       "id",
       "topologyId",
+      "nativeNodeIds",
       "graph.unifiedId",
       "ID",
     ],
@@ -1036,6 +1037,7 @@ export const DEVICE_DETAILS_SECTIONS = Object.freeze([
   {
     sectionId: "mdns-list",
     fields: [
+      "mdnsRecords",
       "scope",
       "serviceInfo.type",
       "serviceInfo.server",
@@ -1105,6 +1107,7 @@ export const DEVICE_DETAILS_SECTIONS = Object.freeze([
   {
     sectionId: "routes-links-list",
     fields: [
+      "nativeRelationships",
       "routes",
       "route",
       "route.routeData",

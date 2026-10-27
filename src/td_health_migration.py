@@ -22,10 +22,11 @@ from td_health_comparison import (
 )
 from td_health_evaluator import (
     EVALUATOR_VERSION,
+    UNIFIED_EVALUATOR_VERSION,
     evaluate_observation,
     evaluation_inputs_from_payload,
 )
-from td_health_manifest import HealthProfile
+from td_health_manifest import HealthProfile, load_health_manifest
 from td_health_manifest_history import (
     ManifestHistoryError,
     ManifestHistoryResolver,
@@ -54,7 +55,7 @@ from td_health_sqlite import (
 )
 
 
-_SUPPORTED_EVALUATORS = frozenset({"snapshot-v10", "snapshot-v11", EVALUATOR_VERSION})
+_SUPPORTED_EVALUATORS = frozenset({"snapshot-v10", "snapshot-v11", "snapshot-v15", EVALUATOR_VERSION})
 _DEVICE_ID_PREFIX = "extaddr:"
 
 
@@ -190,8 +191,9 @@ def _saved_context_inputs(
     ):
         raise LookupError("unsupported-profile")
     expected_sample_contract = (
+        "comparison-v1-unified" if profile.input_mode == "unified" else
         ROUTE64_SAMPLE_CONTRACT_VERSION
-        if row["dataset_id"] == "otbr_cli_networkdiag_fetch_all"
+        if row["dataset_id"] in {"otbr_cli_networkdiag_fetch_all", "otbr_cli_diagnostics_fetch"}
         else "comparison-v1"
     )
     if row["sample_contract_version"] != expected_sample_contract:
@@ -294,8 +296,19 @@ def _saved_context_inputs(
             "reasonCodes": list(inputs.roster.reason_codes),
             "context": inputs.roster_context or {},
         }
+        expected_digest = _digest(assessment_identity)
+        if row["sample_contract_version"] == "comparison-v1-unified":
+            from td_health_unified import validate_context, digest
+            dataset = load_health_manifest().dataset(row["dataset_id"])
+            unified_health = validate_context(raw, dataset, observation)
+            profile_identity.update(
+                coverage=unified_health["effectiveCoverage"],
+                topologyAuthority=bool(unified_health["absenceWitness"]),
+                borderRouterAuthority=bool(unified_health["absenceWitness"]),
+            )
+            expected_digest = digest([_digest(assessment_identity), unified_health])
         if (
-            _digest(assessment_identity) != row["policy_digest"]
+            expected_digest != row["policy_digest"]
             or _digest(presence) != row["presence_input_digest"]
             or _digest(roster_identity) != row["roster_context_digest"]
         ):
@@ -522,8 +535,11 @@ def _resolved_source_inputs(
     if row["evaluator_version"] not in _SUPPORTED_EVALUATORS:
         raise LookupError("unsupported-evaluator")
     expected_contract = (
+        "comparison-v1-unified" if row["dataset_id"] in {
+            "otbr_cli_unified", "otbr_restapi_unified", "ha_matter_ws_unified", "multi_source_unified"
+        } else
         ROUTE64_SAMPLE_CONTRACT_VERSION
-        if row["dataset_id"] == "otbr_cli_networkdiag_fetch_all"
+        if row["dataset_id"] in {"otbr_cli_networkdiag_fetch_all", "otbr_cli_diagnostics_fetch"}
         else "comparison-v1"
     )
     if row["sample_contract_version"] != expected_contract:
@@ -795,7 +811,10 @@ def inventory_health_history(
                 adapter_id = target.adapter_id
                 item_target_digest = target_contract_digest(
                     dataset, source["sample_contract_version"],
-                    evaluator_version=EVALUATOR_VERSION,
+                    evaluator_version=(
+                        UNIFIED_EVALUATOR_VERSION if source["sample_contract_version"] == "comparison-v1-unified"
+                        else EVALUATOR_VERSION
+                    ),
                     policy_version=target_policy.version,
                     policy_digest=target_policy.digest,
                 )
@@ -807,13 +826,14 @@ def inventory_health_history(
                     sample_contract_version=source["sample_contract_version"],
                     network_roster_revision=source["network_roster_revision"],
                     assessed_at=source["assessed_at"],
+                    unified_health=json.loads(source["reproduction_context_json"]).get("unifiedHealth"),
                 )
                 if inputs.evaluation_context_complete and inputs.verdict_context_complete:
                     classification = HistoryMigrationEligibility.REPLAYABLE
                 else:
                     classification = HistoryMigrationEligibility.REPLAYABLE_WITH_GAPS
                 if (
-                    source["evaluator_version"] == EVALUATOR_VERSION
+                    source["evaluator_version"] == replay.evaluator_version
                     and source["health_policy_digest"] == target_policy.digest
                     and replay.assessment_id == source["assessment_id"]
                     and replay.status.value == source["status"]
@@ -948,8 +968,9 @@ def inventory_health_history(
             dataset_id: {
                 "profileId": dataset.health_profile.profile_id,
                 "sampleContractVersion": (
+                    "comparison-v1-unified" if dataset.unified_recipe is not None else
                     ROUTE64_SAMPLE_CONTRACT_VERSION
-                    if dataset_id == "otbr_cli_networkdiag_fetch_all" else "comparison-v1"
+                    if dataset_id == "otbr_cli_diagnostics_fetch" else "comparison-v1"
                 ),
             }
             for dataset_id in dataset_ids
@@ -997,6 +1018,7 @@ def _replay_item(
         sample_contract_version=row["sample_contract_version"],
         network_roster_revision=row["network_roster_revision"],
         assessed_at=row["assessed_at"],
+        unified_health=json.loads(row["reproduction_context_json"]).get("unifiedHealth"),
     )
     if (
         item.target_assessment_id is not None

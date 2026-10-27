@@ -120,9 +120,14 @@ def _validated(field: str, value: Any, policy: RosterPolicy) -> Any:
 def extract_roster_facts(
     record: Mapping[str, Any], *, filename: str, dataset: HealthDataset,
     policy: RosterPolicy,
+    evidence_files: frozenset[str] | None = None,
 ) -> tuple[RosterFact, ...]:
     """Never infer facts from identity context, relationships, or static labels."""
-    if filename not in dataset.files:
+    if evidence_files is not None:
+        from td_health_unified import sample_sources
+        if dataset.unified_recipe is None or not evidence_files <= sample_sources(dataset):
+            raise ValueError("Unapproved Unified roster evidence allowlist")
+    if filename not in (evidence_files if evidence_files is not None else dataset.files):
         return ()
     try:
         device_id = device_id_from_ext_address(get_canonical_ext_address(record))

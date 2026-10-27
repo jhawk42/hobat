@@ -61,6 +61,14 @@ EVE_TOPOLOGY_FILENAME = "td-eve-topology.json"
 THREAD_TOOLS_DIAGNOSTICS_FILENAME = "diagnostics.json"
 MERGED_TOPOLOGY_ALL_FILENAME = "td-merged-topology-all.json"
 
+UNIFIED_FILENAMES = MappingProxyType({
+    "otbr_cli_unified": "td-otbr-cli-unified.json",
+    "otbr_restapi_unified": "td-otbr-restapi-unified.json",
+    "ha_matter_ws_unified": "td-ha-matter-ws-unified.json",
+    "mdns_unified": "td-mdns-unified.json",
+    "multi_source_unified": "td-merged-unified.json",
+})
+
 TD_CHECKPOINT_FILENAME_SUFFIX = ".partial.json"
 
 
@@ -99,5 +107,4 @@ TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS = "ff03::2" # Diagnostic queri
 
 # Multicast Protocol for Low-Power Networks (MPL) messaging 
 TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_MPL_FORWARDERS = "ff03::fc" # Multicast Protocol for Low-Power Networks (MPL) messaging
-
 

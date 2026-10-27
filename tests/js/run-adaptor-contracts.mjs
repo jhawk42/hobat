@@ -471,7 +471,7 @@ assert.equal(haMatter.nodeData[0].font.vadjust, -8);
 assert.equal(haMatter.nodeData[1].font.background, "rgba(7, 18, 40, 0.62)");
 assert.equal(haMatter.nodeData[1].font.size, 13);
 assert.equal(haMatter.nodeData[1].font.vadjust, undefined);
-assert.equal(haMatter.nodeData[0].title, "Unknown node\nRLOC16: 0x1000");
+assert.equal(haMatter.nodeData[0].title, "Unknown node\nRloc16: 0x1000\nRole: Router");
 assert.equal(haMatter.nodeData[0].borderWidth, 3);
 assert.equal(haMatter.nodeData[0].size, 45);
 assert.equal(haMatter.nodeData[1].borderWidth, 1);

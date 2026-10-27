@@ -57,7 +57,8 @@ def test_failed_repeat_sync_cannot_complete_against_prior_dataset() -> None:
     assert "currentDataset = acceptedDataset;" in dataset_text
     assert "acceptedDataset;" in dataset_text
     assert "acceptedDataset = currentDataset;" in dataset_text
-    assert "if (failedFiles.length === 0) acceptedDataset = currentDataset;" in dataset_text
+    assert 'isPartial: failedFiles.length > 0 || materializationStates.includes("partial")' in dataset_text
+    assert "if (!currentDataset.isPartial) acceptedDataset = currentDataset;" in dataset_text
     assert 'result.status === "fulfilled" && result.value != null' in dataset_text
     assert "loadedDataset = await loadDataset(selectedValue" in ui_text
     assert "if (!loadedDataset || currentDataset !== loadedDataset)" in ui_text

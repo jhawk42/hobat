@@ -41,6 +41,8 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "childTable", aliases: ["router_child_table"], transform: "relationship" },
   { path: "childIpv6Addresses", aliases: ["child_ipv6_addresses"], transform: "stringArray" },
   { path: "routerNeighbors", aliases: ["router_neighbor_table"], transform: "relationship" },
+  { path: "nativeNodeIds", aliases: [], transform: "identity" },
+  { path: "nativeRelationships", aliases: [], transform: "identity" },
   { path: "frameErrorRate", aliases: ["err_rate_frame_pct"], transform: "relationshipMetric" },
   { path: "messageErrorRate", aliases: ["err_rate_msg_pct"], transform: "relationshipMetric" },
   { path: "averageRssi", aliases: ["rss_ave"], transform: "relationshipMetric" },
@@ -535,6 +537,9 @@ export function getDeviceIdentityKeys(record, strategy = "by-identity", options 
   const keys = [];
   if (strategy === "none") return keys;
   if (strategy === "by-identity") {
+    if (typeof record?._unifiedRecordId === "string" && record._unifiedRecordId) {
+      keys.push(`unified:${record._unifiedRecordId}`);
+    }
     const extAddress = getCanonicalExtAddress(record);
     if (extAddress && !isPlaceholderExtAddress(extAddress)) keys.push(`extAddress:${extAddress}`);
     const omrAddress = getCanonicalOmrAddress(record);

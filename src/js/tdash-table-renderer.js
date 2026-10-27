@@ -903,6 +903,8 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
 }
 
 export function findTableRowByDeviceId(rows, deviceId) {
+  const committed = rows.filter((row) => row._unifiedRecordId === deviceId);
+  if (committed.length) return committed.length === 1 ? committed[0] : null;
   const targetAddress = deviceId?.replace(/^extaddr:/i, "").toLowerCase();
   if (!targetAddress) return null;
   let matchingRow = null;

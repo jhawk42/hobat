@@ -213,7 +213,7 @@ assert.equal(explicitBorderRouterCount.borderRouters, 1);
 assert.equal(formatAge(null), "unknown");
 assert.equal(formatAge("not-a-date"), "unknown");
 assert.equal(formatAge(new Date(Date.now() - 30_000).toISOString()), "just now");
-const assessment = { networkId: "extpan:78b9775b001c1cbe", datasetId: "otbr_cli_networkdiag_fetch_all" };
+const assessment = { networkId: "extpan:78b9775b001c1cbe", datasetId: "otbr_cli_diagnostics_fetch" };
 const page = { schemaVersion: 1, total: 1, limit: 25, offset: 0, items: [{
   comparisonId: "comparison:one", networkId: assessment.networkId, datasetId: assessment.datasetId,
 }] };

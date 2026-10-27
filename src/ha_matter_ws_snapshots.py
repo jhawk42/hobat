@@ -12,6 +12,10 @@ from ha_matter_ws_roles import (
 from td_device_fields import normalize_input_record
 
 
+DASHBOARD_SCHEMA_VERSION = "1.0.0"
+NATIVE_SNAPSHOT_SCHEMA_VERSION = "1.0.0"
+
+
 class MatterSnapshotSecurityError(ValueError):
     """A normalized snapshot contains credential material."""
 

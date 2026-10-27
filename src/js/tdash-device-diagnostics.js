@@ -113,7 +113,7 @@ function sourceFiles(record) {
 
 function hasSourceEvidence(record, entry, prefix) {
   if (entry?.source === prefix) return true;
-  if (entry?.source !== "merged") return false;
+  if (entry?.source !== "multi-source") return false;
   return sourceFiles(record).some((filename) => filename.startsWith(`td-${prefix}-`));
 }
 

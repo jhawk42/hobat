@@ -326,9 +326,7 @@ function _accumulateTableCapabilitiesForRow(capabilities, row) {
   if (md === "FTD") capabilities.hasFtdNodes = true;
   if (md === "MTD") capabilities.hasMtdNodes = true;
 
-  const rloc16Text = toText(getColumnValue(row, "rloc16")).toLowerCase();
-  // rloc16 starts with 0x and ends with 00 and has a length of 6
-  const isRouter = rloc16Text.startsWith("0x") && rloc16Text.endsWith("00") && rloc16Text.length === 6;
+  const isRouter = roleProjection.isRouter;
   if (isRouter) capabilities.hasRouters = true;
 
   const isBorderRouter = isExplicitTrue(getColumnValue(row, "isBorderRouter"));

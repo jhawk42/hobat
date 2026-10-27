@@ -7,10 +7,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from td_const import (
-    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
-    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
-)
 from otbr_restapi_util import (
     ActionTimingPolicy,
     BASIC_DIAGNOSTIC_TLVS,
@@ -25,7 +21,9 @@ from otbr_restapi_util import (
     OTBRInvalidResponseError,
     OTBRRestApiClient,
     OTBRUsageError,
+    collection_outcome_path as _diagnostic_outcome_path,
     emit_rest_command_output,
+    write_rest_collection_outcome as _write_guard_affected_outcome,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
 from td_device_fields import normalize_input_record
@@ -433,42 +431,6 @@ def _has_unresolved_iid_skip(outcome: dict[str, Any]) -> bool:
     )
 
 
-def _diagnostic_outcome_path(output_path: str | Path) -> Path:
-    output_file = Path(output_path)
-    if output_file.name == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME:
-        return output_file.with_name(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME)
-    suffix = output_file.suffix
-    stem = output_file.name[: -len(suffix)] if suffix else output_file.name
-    return output_file.with_name(f"{stem}.outcome{suffix}")
-
-
-def _write_guard_affected_outcome(
-    outcome: dict[str, Any],
-    output_path: str | Path,
-    *,
-    raw: bool,
-    command_name: str,
-) -> None:
-    outcome_file = Path(output_path)
-    payload = outcome if raw else convert_keys_to_camel_case(outcome)
-    try:
-        save_json_atomic(payload, outcome_file)
-    except (OSError, TypeError, ValueError) as exc:
-        logging.error(
-            "event=diagnostic_outcome_write_failed command=%s outcome_file=%s error_type=%s error=%s",
-            command_name,
-            outcome_file,
-            type(exc).__name__,
-            exc,
-        )
-        raise
-    logging.info(
-        "event=diagnostic_outcome_write command=%s outcome_file=%s",
-        command_name,
-        outcome_file,
-    )
-
-
 def _dispatch_diagnostics_list(
     client: OTBRRestApiClient,
     args: argparse.Namespace,
@@ -651,7 +613,7 @@ def _dispatch_diagnostics_fetch_all(
         on_pass_checkpoint=_on_pass_checkpoint,
     )
     guard_affected = _has_unresolved_iid_skip(outcome)
-    if guard_affected and output_path is not None:
+    if output_path is not None:
         _write_guard_affected_outcome(
             outcome,
             _diagnostic_outcome_path(output_path),

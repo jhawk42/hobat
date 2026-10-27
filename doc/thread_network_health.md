@@ -11,21 +11,21 @@ Preview an assessment without creating the database:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_networkdiag_fetch_all --dry-run
+  --dataset otbr_cli_diagnostics_fetch --dry-run
 ```
 
 Store it atomically and emit one JSON document:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_networkdiag_fetch_all --json
+  --dataset otbr_cli_diagnostics_fetch --json
 ```
 
 Write a non-authoritative support export after the database commit:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_networkdiag_fetch_all --export-latest
+  --dataset otbr_cli_diagnostics_fetch --export-latest
 ```
 
 `--export-latest FILE` accepts only a leaf filename under the data directory.
@@ -165,6 +165,18 @@ from its date. Update the independent expectations in the
 [archive and resolver fixtures](../tests/test_td_health_manifest_history.py)
 alongside the reviewed inventory and operator documentation.
 
+The archive also retains the committed manifest from `65fb5c6`
+(`c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011`).
+Its replacement changes only the displayed source label from `Multi-source`
+to `multi-source`; the current full-manifest digest is
+`8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81`.
+Both retain health projection
+`1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09`
+and identical replay/target contracts. The displaced snapshot's explicitly
+reviewed sample support is preserved, not inferred from archive membership.
+All thirteen earlier archive entries remain immutable. No sample versions,
+coverage, authority, backup/rollback or rerun guarantees change.
+
 After migration, refresh a native assessment from cached snapshots before
 normal dashboard use when the report identifies a policy transition or
 context-dependent current coverage:
@@ -185,20 +197,143 @@ The shared manifest currently permits these dataset IDs:
 
 | Source | Dataset ID | Health profile |
 |---|---|---|
-| OTBR CLI | `otbr_cli_networkdiag_fetch_all` | `otbr-cli-networkdiag-v1` |
-| OTBR CLI | `otbr_cli_topology_health` | `otbr-cli-topology-diagnostics-v1` |
-| OTBR CLI | `otbr_cli_topology_mdns_health` | `otbr-cli-topology-diagnostics-mdns-v1` |
-| OTBR REST | `otbr_restapi_devices_fetch_diagnostics_fetch_all` | `otbr-restapi-devices-diagnostics-v1` |
-| OTBR REST | `otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all` | `otbr-restapi-topology-diagnostics-v1` |
-| OTBR REST | `otbr_restapi_topology_mdns_health` | `otbr-restapi-topology-diagnostics-mdns-v1` |
-| Merged | `merged_otbr_topology_mdns_health` | `merged-otbr-topology-diagnostics-mdns-v1` |
+| OTBR CLI | `otbr_cli_diagnostics_fetch` | `otbr-cli-networkdiag-v1` |
+| OTBR CLI | `otbr_cli_topology` | `otbr-cli-topology-diagnostics-v1` |
+| OTBR CLI | `otbr_cli_topology_mdns` | `otbr-cli-topology-diagnostics-mdns-v1` |
+| OTBR REST | `otbr_restapi_devices_diagnostics_fetch` | `otbr-restapi-devices-diagnostics-v1` |
+| OTBR REST | `otbr_restapi_topology` | `otbr-restapi-topology-diagnostics-v1` |
+| OTBR REST | `otbr_restapi_topology_mdns` | `otbr-restapi-topology-diagnostics-mdns-v1` |
+| Multi-source | `multi_source_otbr_topology_mdns` | `merged-otbr-topology-diagnostics-mdns-v1` |
+
+### Dataset identifier cutover (2026-10-27)
+
+The current seven health recipes use the compact IDs above. Their previous IDs
+are intentionally unsupported for new processing requests: update scripts and
+API clients rather than relying on aliases. The profiles, evidence files, fast
+defaults, and collector commands have not changed. The synthetic source is now
+`multi-source`; cache filenames and existing health profile names are unchanged.
+CLI + mDNS and REST + mDNS remain under their respective OTBR source groups.
+
+The displaced manifest is retained in the immutable
+[manifest history](../src/td-dataset-manifest-history.json). Existing observations
+keep their original dataset/source IDs, profile, digests, and lineage. There is
+no historical-row rewrite, cross-ID history stitching, or replay into the renamed
+targets. Archive membership alone does not grant replay support. Supported
+non-health dataset aliases resolve directly to their canonical recipes; the
+legacy source `merged` is accepted only with a matching non-health dataset alias,
+not with a current health request.
+
+The initial hidden Unified processing previews left these seven health
+profiles and their health-contract projection unchanged. The preceding
+identifier-migration and three-source-preview worktree manifests are retained
+exactly for observations made between implementation phases. Those entries record
+`captureKind: "worktree"` and an offset-bearing `capturedAt`, with null `commit`
+and `committedAt`; it does not invent a Git commit. Exact producer support is
+declared only for their existing canonical sample contracts. The additive,
+hidden HA recipe does not qualify any Unified health profile. The exact
+four-source-primary manifest immediately before adding Multi-source is also
+archived with digest
+`73e911ff0385d0de5f06bbb870dccb50467e78f64cec906bab18527125046b3e`.
+It retains only the same seven canonical sample contracts; archive membership
+does not authorize replay into any Unified target. The last pre-qualification
+manifest is archived exactly as
+`88ac93a9e81380ad7c02542c23e8cfe58f469cb180c589df89acc7f61b19349e`.
+Other archived
+entries and all historical-ID replay boundaries remain unchanged.
+
+### Unified health qualification
+
+The `otbr_cli_unified`, `otbr_restapi_unified`, `ha_matter_ws_unified`,
+and `multi_source_unified` products have dedicated `*-unified-v1` profiles.
+`mdns_unified` remains explicitly enrichment-only and health-ineligible.
+All five Unified products are now selectable source primaries; fast defaults
+and collector commands remain unchanged, and selection never processes health.
+CLI topology and the HA seven-file composite are menu-hidden but explicitly
+resolvable. REST topology and legacy precomputed Multi-source remain visible
+until real-cache workflow parity is proved; see the
+[current rollout limits](../README.md#cache-only-unified-materialization).
+The exact qualified pre-rollout manifest is archived as
+`d369ccc7cca9e30cd2016ac33213039343ef94d9d224ea73d2ffd2dbcb548dd6`.
+Its reviewed producer contracts include the four Unified sample contracts;
+older producer support is unchanged. The presentation-only rollout preserves
+health projection `1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09`
+and all existing replay/target golden vectors.
+Build and process explicitly, without collecting:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data unify-dataset --dataset otbr_cli_unified
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset --dataset otbr_cli_unified
+```
+
+`inputMode: unified` and `evidenceReport` select the verified
+original-evidence reader. Health verifies the committed report, row/identity/
+outcome/scope bindings and original raw digests/times before normalizing through
+source-owned converters. Changed, deleted or invalid originals require an
+explicit cache-only rebuild. `--allow-partial` admits provisional evidence,
+not unknown/mismatched network identity or a stale generation. Health never
+rewrites a Unified generation or runs a collector.
+
+Retained Unified lineage accepts the exact assembly-v2/v3/v4/v5 report
+contracts. Assembly-v3 corrects repeated REST diagnostic observations in derived
+rows; it does not change original-evidence samples, capability maxima, absence
+witness rules, manifest snapshots, or replay eligibility. Assembly-v4 embeds
+unambiguously matched Matter service advertisements under `mdnsRecords` in
+derived Thread rows. Assembly-v5 corrects merged relationship-only markers and
+adds HAP UDP advertisements to the same guarded association; health still
+consumes only verified original evidence, not the derived marker or service array.
+Existing assembly-v2/v3/v4
+assessments remain readable and reopenable; unknown assembly contracts are still
+rejected.
+
+Samples and roster facts retain original filenames, field authority and
+original observation times. Identity/outcome companions, mDNS services,
+non-Thread Matter devices, relationship-only placeholders and derived dashboard
+projections cannot manufacture Thread devices or counter measurements.
+Native Thread links contribute only measured directional LQI/RSSI with
+unambiguous admitted endpoints; qualitative strength is not measured LQI.
+MAC ratios still require their original denominators. Missing pillars remain
+missing/limited. CLI/REST/Multi-source coverage maxima are sufficient for the
+first four pillars and limited for external routing; HA maxima are limited
+for all five and have no whole-network topology/BR absence authority.
+Original completeness, outcomes and unavailable inputs can only reduce these
+maxima.
+
+Unified assessments use `snapshot-v15` and the distinct
+`comparison-v1-unified` sample contract. Legacy `snapshot-v14`,
+`comparison-v1` and Route64 contracts and golden vectors are unchanged.
+Original profiles default to `inputMode: files`. An immutable `unifiedRecipe`
+uses the builder's `unified-v1` contract and retains the validated transitive raw closure;
+versioned assessment `unifiedHealth` retains recipe/authority contract digests,
+the original-evidence fingerprint, effective coverage and absence witness.
+Observation identity excludes build/report timestamps. Rebuilding identical
+evidence cannot create a fresh collection or advance Offline.
+
+For new Unified absence assessments, a qualified complete CLI domain wins;
+otherwise a complete qualified REST domain may supply the witness. The key is
+the observed network, original diagnostic digest and original diagnostic time.
+Required original topology/identity/outcome coverage must qualify that key.
+Original and Unified projections count once, same-key positive device presence
+overrides negatives, and the current key is excluded from prior counts.
+CLI and REST streaks are never stitched together; unresolved time ties make
+ordering unavailable. HA-only collections never supply a negative whole-network
+witness. Retained roster reassessment uses the same rules without consulting
+today's cache.
+
+Reopening, comparisons, replay and complete-directory backup/restore validate
+the retained recipe and original evidence; they do not need current raw files.
+Restore the whole backup through the existing system commands, not selected
+SQLite tables. Existing backup-first replay/rollback and rerun guarantees remain;
+there is no SQLite schema migration, historical-ID alias, cross-ID replay
+transition or threshold change. See the independent
+[Unified regressions](../tests/test_td_health_unified.py) and
+[manifest vectors](../tests/test_td_health_manifest_history.py).
 
 OTBR CLI profiles and the merged OTBR profile use
 `td-otbr-cli-thread-network-info.json` for source-wide network identity. OTBR REST
 profiles use `td-otbr-restapi-dataset-active.json`. Both identity files provide
 `extPanId` and `networkName` independently of the selected evidence recipe.
 
-`ha_matter_ws_merge_topology` is explicitly ineligible. Current Matter snapshots
+`ha_matter_ws_topology_merge` is explicitly ineligible. Current Matter snapshots
 contain consistent per-record Extended PAN IDs, but do not provide a dedicated
 identity context, processor-normalized native topology relationships, or a
 single merged-collection outcome. It can be reconsidered when those three
@@ -263,7 +398,7 @@ entries from the static label map explicitly:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_networkdiag_fetch_all --init-roster-from-label-map
+  --dataset otbr_cli_diagnostics_fetch --init-roster-from-label-map
 ```
 
 An expected device absent from one complete observation remains missing with
@@ -279,9 +414,9 @@ List or update one network's roster from the CLI:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_networkdiag_fetch_all --roster-list
+  --dataset otbr_cli_diagnostics_fetch --roster-list
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_networkdiag_fetch_all --roster-device 0011223344556677 \
+  --dataset otbr_cli_diagnostics_fetch --roster-device 0011223344556677 \
   --roster-label "Office Router" --roster-state expected
 ```
 
@@ -647,7 +782,7 @@ last-known roster does not supply historical endpoint values.
 OTBR CLI hex partition IDs are stored as bounded integer facts, not treated
 as opaque version strings.
 
-For `otbr_cli_networkdiag_fetch_all`, a complete Route64 table from one
+For `otbr_cli_diagnostics_fetch`, a complete Route64 table from one
 canonical reporter can contribute directional reporter-to-destination
 membership comparisons. A table qualifies only with a bounded ID sequence,
 at most 63 distinct entries, and every Router ID resolving unambiguously to

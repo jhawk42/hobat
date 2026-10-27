@@ -30,6 +30,7 @@ from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
 EVALUATOR_VERSION = "snapshot-v14"
+UNIFIED_EVALUATOR_VERSION = "snapshot-v15"
 
 _DIRECT_THRESHOLD_COUNT_METRICS = frozenset(
     {"parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"}
@@ -118,6 +119,7 @@ def _evaluate_availability(
     expected_device_ids: frozenset[str],
     absences: Mapping[str, int],
     complete: bool,
+    witness_positive_ids: frozenset[str] = frozenset(),
 ) -> tuple[list[Finding], AvailabilityFacts]:
     findings: list[Finding] = []
     observed_ids = frozenset(device.device_id for device in observation.devices)
@@ -164,6 +166,7 @@ def _evaluate_availability(
         device_id
         for device_id in missing_expected_ids
         if complete
+        and device_id not in witness_positive_ids
         and absence_history_available
         and absences.get(device_id, 0) + 1 >= offline_required
     )
@@ -196,7 +199,8 @@ def _evaluate_availability(
                     "present": False,
                     "completeObservation": complete,
                     "consecutiveCompleteAbsences": (
-                        prior + 1 if complete and prior is not None else prior
+                        prior + (device_id not in witness_positive_ids)
+                        if complete and prior is not None else prior
                     ),
                     "required": offline_required,
                     "offlineCandidateCount": len(offline_candidate_ids),
@@ -502,9 +506,10 @@ def _assessment_input_digest(
     profile: HealthProfile,
     sample_contract_version: str,
     evaluation_inputs: EvaluationInputs,
+    evaluator_version: str = EVALUATOR_VERSION,
 ) -> str:
     payload = {
-        "evaluatorVersion": EVALUATOR_VERSION,
+        "evaluatorVersion": evaluator_version,
         "healthPolicy": {
             "version": policy.version,
             "digest": policy.digest,
@@ -1552,7 +1557,24 @@ def evaluate_observation(
     history_boundary: Mapping[str, Any] | None = None,
     evaluation_inputs: EvaluationInputs | None = None,
     sample_contract_version: str = "comparison-v1",
+    unified_health: Mapping[str, Any] | None = None,
 ) -> Assessment:
+    evaluator_version = (
+        UNIFIED_EVALUATOR_VERSION if sample_contract_version == "comparison-v1-unified"
+        else EVALUATOR_VERSION
+    )
+    declared_profile = profile
+    if sample_contract_version == "comparison-v1-unified":
+        from dataclasses import replace
+        from td_health_unified import validate_context
+        from td_health_manifest import load_health_manifest
+        dataset = load_health_manifest().dataset(observation.dataset_id)
+        validate_context({"unifiedHealth": unified_health}, dataset, observation)
+        profile = replace(
+            profile, coverage=unified_health["effectiveCoverage"],
+            topology_authority=bool(unified_health["absenceWitness"]),
+            border_router_authority=bool(unified_health["absenceWitness"]),
+        )
     inputs = evaluation_inputs or _legacy_evaluation_inputs(
         observation,
         expected_device_ids=expected_device_ids,
@@ -1587,7 +1609,8 @@ def evaluate_observation(
     findings: list[Finding] = []
     complete = observation.completeness is Completeness.COMPLETE
     availability_findings, availability_facts = _evaluate_availability(
-        observation, policy, inputs, expected_device_ids, absences, complete
+        observation, policy, inputs, expected_device_ids, absences, complete,
+        frozenset(unified_health.get("positiveDeviceIds", ())) if unified_health else frozenset(),
     )
     findings.extend(availability_findings)
     observed_ids = availability_facts.observed_ids
@@ -1915,10 +1938,13 @@ def evaluate_observation(
     }
     assessment_time = assessed_at or datetime.now(timezone.utc).isoformat()
     assessment_input_digest = _assessment_input_digest(
-        policy, profile, sample_contract_version, inputs
+        policy, profile, sample_contract_version, inputs, evaluator_version
     )
-    if sample_contract_version not in {"comparison-v1", ROUTE64_SAMPLE_CONTRACT_VERSION}:
+    if sample_contract_version not in {"comparison-v1", ROUTE64_SAMPLE_CONTRACT_VERSION, "comparison-v1-unified"}:
         raise ValueError(f"Unsupported sample contract: {sample_contract_version}")
+    if unified_health is not None:
+        from td_health_unified import digest
+        assessment_input_digest = digest([assessment_input_digest, unified_health])
     normalized_roster_context = dict(inputs.roster_context or {})
     presence_inputs = {
         "complete": complete,
@@ -1961,7 +1987,7 @@ def evaluate_observation(
     )
     reproduction_context = {
         "schemaVersion": 2,
-        "evaluatorVersion": EVALUATOR_VERSION,
+        "evaluatorVersion": evaluator_version,
         "healthPolicy": {
             "version": policy.version,
             "digest": policy.digest,
@@ -1974,12 +2000,12 @@ def evaluate_observation(
             },
         },
         "healthProfile": {
-            "profileId": profile.profile_id,
-            "identityFile": profile.identity_file,
-            "requiredOutcomes": list(profile.required_outcomes),
-            "coverage": dict(profile.coverage),
-            "topologyAuthority": profile.topology_authority,
-            "borderRouterAuthority": profile.border_router_authority,
+            "profileId": declared_profile.profile_id,
+            "identityFile": declared_profile.identity_file,
+            "requiredOutcomes": list(declared_profile.required_outcomes),
+            "coverage": dict(declared_profile.coverage),
+            "topologyAuthority": declared_profile.topology_authority,
+            "borderRouterAuthority": declared_profile.border_router_authority,
         },
         "networkRosterRevision": network_roster_revision,
         "rosterContext": normalized_roster_context,
@@ -1994,12 +2020,17 @@ def evaluate_observation(
             "observedAt": observation.observed_at,
         },
     }
+    if unified_health is not None:
+        reproduction_context["unifiedHealth"] = dict(unified_health)
+        reproduction_context["healthProfile"].update(
+            inputMode=declared_profile.input_mode, evidenceReport=declared_profile.evidence_report,
+        )
     return Assessment(
         assessment_id=assessment_id,
         observation_id=observation.observation_id,
         policy_version=policy.version,
         policy_digest=assessment_input_digest,
-        evaluator_version=EVALUATOR_VERSION,
+        evaluator_version=evaluator_version,
         profile_id=profile.profile_id,
         status=status,
         confidence=confidence,

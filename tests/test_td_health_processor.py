@@ -49,7 +49,7 @@ def _write_seed(data_dir, devices, *, extpan="78b9775b001c1cbe"):
     ({"value": 1}, 1), ({"value": False}, None), ({"value": "invalid"}, None),
 ])
 def test_relationship_projection_preserves_zero_and_preferred_evidence(field, preferred, expected):
-    dataset = load_health_manifest().dataset("otbr_cli_networkdiag_fetch_all")
+    dataset = load_health_manifest().dataset("otbr_cli_diagnostics_fetch")
     filename = "td-otbr-cli-networkdiag-fetch-all.json"
     payloads = {name: [] for name in dataset.files}
     child = {"extAddress": "2222222222222222", "linkQuality": 2,
@@ -91,7 +91,7 @@ def test_corrected_relationship_evidence_roundtrips_without_rewriting_history(tm
         for name in (filename, "td-otbr-cli-thread-network-info.json"):
             os.utime(tmp_path / name, (stamp, stamp))
         result = process_health(
-            data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+            data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
             policy=policy, store=store,
             processing_time=datetime(2026, 9, 3, tzinfo=timezone.utc),
         )
@@ -124,7 +124,7 @@ def test_corrected_relationship_evidence_roundtrips_without_rewriting_history(tm
         assert finding.evidence["linkQualityIn"] == 0
         assert finding.evidence["linkQualityOut"] == 3
     repeated = process_health(
-        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy, store=store,
         processing_time=datetime(2026, 9, 3, tzinfo=timezone.utc),
     )
@@ -133,7 +133,7 @@ def test_corrected_relationship_evidence_roundtrips_without_rewriting_history(tm
     service = TDHealthReadService(tmp_path)
     listing = service.comparisons(
         network_id=results[-1].observation.network_id,
-        dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0,
+        dataset_id="otbr_cli_diagnostics_fetch", limit=25, offset=0,
     )
     assert listing["total"] > 0
     comparison = service.comparison(
@@ -145,7 +145,7 @@ def test_corrected_relationship_evidence_roundtrips_without_rewriting_history(tm
 
 def test_roster_extracts_only_explicit_valid_source_facts() -> None:
     manifest = load_health_manifest()
-    dataset = manifest.dataset("otbr_restapi_devices_fetch_diagnostics_fetch_all")
+    dataset = manifest.dataset("otbr_restapi_devices_diagnostics_fetch")
     filename = "td-otbr-restapi-devices-fetch.json"
     facts = extract_roster_facts(
         {"extAddress": "86:72:76:6A:E0:57:81:87", "eui64": "11:22:33:44:55:66:77:88",
@@ -238,7 +238,7 @@ def test_roster_extracts_only_explicit_valid_source_facts() -> None:
 ])
 def test_roster_partition_accepts_explicit_cli_hex_and_rejects_invalid_values(value, expected) -> None:
     manifest = load_health_manifest()
-    dataset = manifest.dataset("otbr_cli_networkdiag_fetch_all")
+    dataset = manifest.dataset("otbr_cli_diagnostics_fetch")
     facts = extract_roster_facts(
         {"extAddress": "8672766ae0578187", "leaderData": {"partitionId": value}},
         filename="td-otbr-cli-networkdiag-fetch-all.json", dataset=dataset,
@@ -265,7 +265,7 @@ def test_partition_distribution_deduplicates_devices_and_persists_reproduction_e
     database = tmp_path / HOBAT_DATABASE_FILENAME
     result = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=SQLiteHealthStore(database),
     )
@@ -305,7 +305,7 @@ def test_partition_distribution_deduplicates_devices_and_persists_reproduction_e
         result.observation,
         load_health_policy(),
         profile=load_health_manifest().dataset(
-            "otbr_cli_networkdiag_fetch_all"
+            "otbr_cli_diagnostics_fetch"
         ).health_profile,
         evaluation_inputs=replay_inputs,
     )
@@ -321,7 +321,7 @@ def test_partition_distribution_deduplicates_devices_and_persists_reproduction_e
             replace(result.observation, completeness=completeness),
             load_health_policy(),
             profile=load_health_manifest().dataset(
-                "otbr_cli_networkdiag_fetch_all"
+                "otbr_cli_diagnostics_fetch"
             ).health_profile,
             evaluation_inputs=replay_inputs,
         )
@@ -335,7 +335,7 @@ def test_partition_distribution_deduplicates_devices_and_persists_reproduction_e
         replace(result.observation, network_id="extpan:1111222233334444"),
         load_health_policy(),
         profile=load_health_manifest().dataset(
-            "otbr_cli_networkdiag_fetch_all"
+            "otbr_cli_diagnostics_fetch"
         ).health_profile,
         evaluation_inputs=replay_inputs,
     )
@@ -378,7 +378,7 @@ def test_partition_distribution_severity_boundary(
 
     result = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
     )
     finding = next(
@@ -427,7 +427,7 @@ def test_partition_distribution_unknown_for_incomplete_membership(
 
     result = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
     )
     finding = next(
@@ -440,7 +440,7 @@ def test_partition_distribution_unknown_for_incomplete_membership(
 
 
 def test_otbr_cli_route64_requires_resolved_bounded_reporter_coverage() -> None:
-    dataset = load_health_manifest().dataset("otbr_cli_networkdiag_fetch_all")
+    dataset = load_health_manifest().dataset("otbr_cli_diagnostics_fetch")
     filename = dataset.files[0]
     reporter = {"extaddr": "1111111111111111", "router_id": 1,
                 "route64": {"id_sequence": 4, "route_data": [
@@ -474,7 +474,7 @@ def test_otbr_cli_route64_requires_resolved_bounded_reporter_coverage() -> None:
         {**reporter, "rloc16": "0x0400", "route64": None}, fallback, target,
     ]})
     assert links == () and coverage == ()
-    rest = load_health_manifest().dataset("otbr_restapi_devices_fetch_diagnostics_fetch_all")
+    rest = load_health_manifest().dataset("otbr_restapi_devices_diagnostics_fetch")
     _, links, coverage, _, _ = _normalize_samples(rest, {
         name: [reporter, target] if name == rest.files[0] else [] for name in rest.files
     })
@@ -498,13 +498,13 @@ def test_route64_comparison_persists_covered_removal_and_unknown_gap(tmp_path) -
         record = {**reporter, "route64": {"id_sequence": 4, "route_data": routes}}
         snapshot.write_text(json.dumps([record, target]), encoding="utf-8")
         os.utime(snapshot, (source_time.timestamp(), source_time.timestamp()))
-        process_health(data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        process_health(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
                        policy=load_health_policy(), store=store,
                        processing_time=datetime(2026, 9, 5, tzinfo=timezone.utc))
 
     service = TDHealthReadService(tmp_path)
     listing = service.comparisons(network_id="extpan:78b9775b001c1cbe",
-                                  dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0)
+                                  dataset_id="otbr_cli_diagnostics_fetch", limit=25, offset=0)
     assert listing["total"] == 4
     assert any(
         item["beforeObservedAt"].startswith("2026-09-01T")
@@ -557,7 +557,7 @@ def test_route64_reprocessing_creates_new_immutable_observation_identity(tmp_pat
     _write_seed(tmp_path, [{"extaddr": "1111111111111111", "router_id": 1,
                             "route64": {"id_sequence": 1, "route_data": []}}])
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
-    pending = build_processing_result(data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+    pending = build_processing_result(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
                                       policy=load_health_policy())
     observation = pending.observation
     old_key = "\0".join((observation.datasource_id, observation.dataset_id,
@@ -567,7 +567,7 @@ def test_route64_reprocessing_creates_new_immutable_observation_identity(tmp_pat
     legacy_assessment = replace(pending.assessment, assessment_id="assessment:legacy-route64",
                                 observation_id=legacy_id, sample_contract_version="comparison-v1")
     store.save_processing_result(legacy_observation, legacy_assessment)
-    result = process_health(data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+    result = process_health(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
                             policy=load_health_policy(), store=store)
     observation = result.observation
     assert observation.observation_id != legacy_id
@@ -577,7 +577,7 @@ def test_route64_reprocessing_creates_new_immutable_observation_identity(tmp_pat
         assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 2
         assert connection.execute("SELECT COUNT(*) FROM metric_samples WHERE observation_id=?",
                                   (legacy_id,)).fetchone()[0] == 0
-    repeated = process_health(data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+    repeated = process_health(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
                               policy=load_health_policy(), store=store)
     assert repeated.observation.observation_id == observation.observation_id
     assert not repeated.observation_created
@@ -587,10 +587,10 @@ def test_roster_persists_attributed_facts_only_for_new_observations(tmp_path) ->
     _write_seed(tmp_path, [{"extaddr": "8672766ae0578187", "role": "router",
                             "mode": {"rxOnWhenIdle": False}, "deviceLabel": "entry"}])
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
-    first = process_health(data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+    first = process_health(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
                            policy=load_health_policy(), store=store)
     assert first.observation_created
-    again = process_health(data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+    again = process_health(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
                            policy=load_health_policy(), store=store)
     assert not again.observation_created
     with closing(store._connect()) as connection:
@@ -633,7 +633,7 @@ def test_roster_disambiguates_labels_across_pages_and_priorities(tmp_path) -> No
     _write_seed(tmp_path, [{"extaddr": first_id.removeprefix("extaddr:"), "deviceLabel": "Desk"},
                            {"extaddr": second_id.removeprefix("extaddr:"), "deviceLabel": "Desk"}])
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
-    result = process_health(data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+    result = process_health(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
                             policy=load_health_policy(), store=store)
     network_id = result.observation.network_id
     service = TDHealthReadService(tmp_path)
@@ -669,7 +669,7 @@ def test_roster_alias_collision_does_not_merge_device_ids(tmp_path) -> None:
         json.dumps({"deviceResults": [{"status": "completed"}], "completedAt": "2026-09-01"}),
         encoding="utf-8")
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
-    process_health(data_dir=tmp_path, dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
+    process_health(data_dir=tmp_path, dataset_id="otbr_restapi_devices_diagnostics_fetch",
                    policy=load_health_policy(), store=store)
     network_id = "extpan:78b9775b001c1cbe"
     with closing(store._connect()) as connection:
@@ -694,7 +694,7 @@ def test_missing_final_is_rejected_without_allow_partial(tmp_path) -> None:
     with pytest.raises(HealthProcessingError, match="missing or invalid"):
         build_processing_result(
             data_dir=tmp_path,
-            dataset_id="otbr_cli_networkdiag_fetch_all",
+            dataset_id="otbr_cli_diagnostics_fetch",
             policy=load_health_policy(),
         )
 
@@ -706,7 +706,7 @@ def test_processor_uses_extpan_identity_and_normalizes_devices(tmp_path) -> None
     )
     result = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         processing_time=datetime(2026, 9, 1, tzinfo=timezone.utc),
     )
@@ -750,7 +750,7 @@ def test_readonly_history_inventory_replays_a_current_assessment(tmp_path) -> No
     store = SQLiteHealthStore(path)
     process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy,
         store=store,
     )
@@ -759,7 +759,7 @@ def test_readonly_history_inventory_replays_a_current_assessment(tmp_path) -> No
     inventory = inventory_health_history(
         readonly_store,
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
 
     assert len(inventory.items) == 1
@@ -779,7 +779,7 @@ def test_readonly_history_inventory_classifies_context_free_v10_with_gaps(tmp_pa
     store = SQLiteHealthStore(path)
     result = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy,
         store=store,
     )
@@ -794,15 +794,19 @@ def test_readonly_history_inventory_classifies_context_free_v10_with_gaps(tmp_pa
     inventory = inventory_health_history(
         SQLiteHealthStore(path, read_only=True),
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
 
     assert inventory.items[0].eligibility.value == "replayable-with-gaps"
     assert "evaluation-context-unavailable" in inventory.items[0].reason_codes
     assert inventory.items[0].source_resolution == "equivalent-contracts"
-    assert len(inventory.items[0].source_revision_ids) == 3
+    assert len(inventory.items[0].source_revision_ids) == 7
+    assert (
+        "manifest-sha256:c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011"
+        in inventory.items[0].source_revision_ids
+    )
     assert inventory.items[0].source_contract_digest == (
-        "6b4998e26a5827de22d3307fab41e14b08ec0f82a773c9f3d9b99023018d0e33"
+        "d6fb43cc5e83abb0f026c71f207d183fad2bf2486ef6535118bfeb40991337e4"
     )
     assert inventory.items[0].target_contract_digest
     assert inventory.items[0].adapter_id == "retained-equivalent-v1"
@@ -814,7 +818,7 @@ def test_readonly_history_inventory_validates_saved_v1_source_profile(tmp_path, 
     _write_seed(tmp_path, [{"extaddr": "8672766ae0578187", "role": "router"}])
     path = tmp_path / HOBAT_DATABASE_FILENAME
     native = process_health(
-        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy, store=SQLiteHealthStore(path),
     )
     # A synthetic context-v1 fixture retains its own profile and roster evidence.
@@ -845,7 +849,11 @@ def test_readonly_history_inventory_validates_saved_v1_source_profile(tmp_path, 
     else:
         assert item.eligibility.value == "replayable-with-gaps", item.reason_codes
         assert item.source_resolution == "equivalent-contracts"
-        assert len(item.source_revision_ids) == 3
+        assert len(item.source_revision_ids) == 7
+        assert (
+            "manifest-sha256:c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011"
+            in item.source_revision_ids
+        )
 
 
 def test_readonly_history_inventory_rejects_contradictory_v2_context(tmp_path) -> None:
@@ -858,7 +866,7 @@ def test_readonly_history_inventory_rejects_contradictory_v2_context(tmp_path) -
     store.upsert_expected_device(network_id, device_id, "expected")
     result = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy,
         store=store,
     )
@@ -879,7 +887,7 @@ def test_readonly_history_inventory_rejects_contradictory_v2_context(tmp_path) -
     inventory = inventory_health_history(
         SQLiteHealthStore(path, read_only=True),
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
 
     assert inventory.items[0].eligibility.value == "invalid"
@@ -895,7 +903,7 @@ def test_readonly_history_inventory_rejects_undeclared_legacy_source(tmp_path) -
     store = SQLiteHealthStore(path)
     result = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy,
         store=store,
     )
@@ -922,7 +930,7 @@ def test_readonly_history_inventory_rejects_undeclared_legacy_source(tmp_path) -
     inventory = inventory_health_history(
         SQLiteHealthStore(path, read_only=True),
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
 
     assert inventory.items[0].eligibility.value == "invalid"
@@ -943,14 +951,14 @@ def test_readonly_history_inventory_resolves_roster_from_retained_devices(tmp_pa
     )
     process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy,
         store=store,
     )
     _write_seed(tmp_path, [])
     absent = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy,
         store=store,
     )
@@ -963,7 +971,7 @@ def test_readonly_history_inventory_resolves_roster_from_retained_devices(tmp_pa
     inventory = inventory_health_history(
         SQLiteHealthStore(path, read_only=True),
         target_policy=policy,
-        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
 
     target_item = next(
@@ -985,7 +993,7 @@ def test_partial_observation_cannot_make_expected_device_offline(tmp_path) -> No
     store.upsert_expected_device(network_id, "extaddr:8672766ae0578187", "expected")
     complete = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
     )
@@ -996,7 +1004,7 @@ def test_partial_observation_cannot_make_expected_device_offline(tmp_path) -> No
     partial_path.touch()
     partial = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
         allow_partial=True,
@@ -1018,7 +1026,7 @@ def test_second_complete_absence_establishes_offline(tmp_path) -> None:
         connection.commit()
     first = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
         processing_time=datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc),
@@ -1029,7 +1037,7 @@ def test_second_complete_absence_establishes_offline(tmp_path) -> None:
     snapshot.write_text("[]\n", encoding="utf-8")
     second = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
         processing_time=datetime(2026, 9, 1, 0, 1, tzinfo=timezone.utc),
@@ -1051,7 +1059,7 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
         connection.commit()
     process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
         processing_time=datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc),
@@ -1060,7 +1068,7 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
     snapshot.write_text("[]\n", encoding="utf-8")
     offline = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
         processing_time=datetime(2026, 9, 1, 0, 1, tzinfo=timezone.utc),
@@ -1079,7 +1087,7 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
     )
     updated = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
         processing_time=datetime(2026, 9, 1, 0, 2, tzinfo=timezone.utc),
@@ -1097,7 +1105,7 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
     )
     assert historical["filteredTotal"] == 1
     assert historical["devices"][0]["rosterState"] == "intentionally-offline"
-    assert store.latest_assessment(network_id, "otbr_cli_networkdiag_fetch_all")[
+    assert store.latest_assessment(network_id, "otbr_cli_diagnostics_fetch")[
         "assessment_id"
     ] == updated.assessment.assessment_id
 
@@ -1108,7 +1116,7 @@ def test_roster_change_creates_immutable_revision_and_same_observation_is_not_co
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     before = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
     )
@@ -1182,7 +1190,7 @@ def test_expected_epoch_excludes_pre_enrollment_endpoint_and_stale_save_retries(
     network_id = "extpan:78b9775b001c1cbe"
     first = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
     )
@@ -1205,7 +1213,7 @@ def test_expected_epoch_excludes_pre_enrollment_endpoint_and_stale_save_retries(
 
     pending = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
     )
@@ -1242,7 +1250,7 @@ def test_complete_absences_below_roster_ratio_are_offline_without_network_impact
 
     first = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
         processing_time=datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc),
@@ -1253,7 +1261,7 @@ def test_complete_absences_below_roster_ratio_are_offline_without_network_impact
     snapshot.write_text(json.dumps(observed_devices), encoding="utf-8")
     second = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
         processing_time=datetime(2026, 9, 1, 0, 1, tzinfo=timezone.utc),
@@ -1309,7 +1317,7 @@ def test_newer_outcome_does_not_refresh_unchanged_device_source(tmp_path) -> Non
     read_time = datetime(2026, 9, 3, tzinfo=timezone.utc)
     for path in tmp_path.iterdir():
         os.utime(path, (first_time.timestamp(), first_time.timestamp()))
-    dataset_id = "otbr_restapi_devices_fetch_diagnostics_fetch_all"
+    dataset_id = "otbr_restapi_devices_diagnostics_fetch"
     before = build_processing_result(data_dir=tmp_path, dataset_id=dataset_id,
                                      policy=load_health_policy(), processing_time=read_time)
 
@@ -1349,7 +1357,7 @@ def test_rest_outcome_completeness_contract_and_secret_exclusion(tmp_path) -> No
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     complete = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
+        dataset_id="otbr_restapi_devices_diagnostics_fetch",
         policy=load_health_policy(),
         store=store,
     )
@@ -1363,7 +1371,7 @@ def test_rest_legacy_outcome_is_degraded_and_explicit_failure_is_partial(tmp_pat
     _write_rest_seed(tmp_path, {"items": []})
     degraded = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
+        dataset_id="otbr_restapi_devices_diagnostics_fetch",
         policy=load_health_policy(),
     )
     assert degraded.observation.completeness is Completeness.DEGRADED
@@ -1380,7 +1388,7 @@ def test_rest_legacy_outcome_is_degraded_and_explicit_failure_is_partial(tmp_pat
     with pytest.raises(HealthProcessingError, match="partial"):
         build_processing_result(
             data_dir=tmp_path,
-            dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
+            dataset_id="otbr_restapi_devices_diagnostics_fetch",
             policy=load_health_policy(),
         )
 
@@ -1415,7 +1423,7 @@ def test_mode_aware_completion_does_not_invent_unrequested_child_health_inputs(
 
     complete = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
+        dataset_id="otbr_restapi_devices_diagnostics_fetch",
         policy=load_health_policy(),
         allow_partial=True,
     )
@@ -1449,7 +1457,7 @@ def test_mode_aware_completion_does_not_invent_unrequested_child_health_inputs(
     )
     partial = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
+        dataset_id="otbr_restapi_devices_diagnostics_fetch",
         policy=load_health_policy(),
         allow_partial=True,
     )
@@ -1460,7 +1468,7 @@ def test_mode_aware_completion_does_not_invent_unrequested_child_health_inputs(
 
 
 def test_complete_rest_topology_mdns_profile_reports_border_router_redundancy(tmp_path) -> None:
-    dataset_id = "otbr_restapi_topology_mdns_health"
+    dataset_id = "otbr_restapi_topology_mdns"
     (tmp_path / "td-otbr-restapi-dataset-active.json").write_text(
         json.dumps({"extPanId": "78b9775b001c1cbe", "networkName": "test"}),
         encoding="utf-8",
@@ -1522,7 +1530,7 @@ def test_complete_rest_topology_mdns_profile_reports_border_router_redundancy(tm
 
 
 def test_border_router_omr_address_reports_strong_external_routing(tmp_path) -> None:
-    dataset_id = "otbr_cli_topology_mdns_health"
+    dataset_id = "otbr_cli_topology_mdns"
     (tmp_path / "td-otbr-cli-thread-network-info.json").write_text(
         json.dumps({
             "extPanId": "78b9775b001c1cbe",
@@ -1598,7 +1606,7 @@ def test_unqualified_identity_prefix_is_not_omr_authority(prefixes, expected) ->
     ("dataset_id", "identity_file", "final_files", "outcome_files"),
     [
         (
-            "otbr_cli_topology_health",
+            "otbr_cli_topology",
             "td-otbr-cli-thread-network-info.json",
             (
                 "td-otbr-cli-meshdiag-topology.json",
@@ -1609,7 +1617,7 @@ def test_unqualified_identity_prefix_is_not_omr_authority(prefixes, expected) ->
             (),
         ),
         (
-            "merged_otbr_topology_mdns_health",
+            "multi_source_otbr_topology_mdns",
             "td-otbr-cli-thread-network-info.json",
             (
                 "td-static-extaddr-device-label.json",
@@ -1628,7 +1636,7 @@ def test_unqualified_identity_prefix_is_not_omr_authority(prefixes, expected) ->
             ),
         ),
         (
-            "otbr_restapi_devices_fetch_diagnostics_fetch_all",
+            "otbr_restapi_devices_diagnostics_fetch",
             "td-otbr-restapi-dataset-active.json",
             (
                 "td-otbr-restapi-devices-fetch.json",
@@ -1637,7 +1645,7 @@ def test_unqualified_identity_prefix_is_not_omr_authority(prefixes, expected) ->
             ("td-otbr-restapi-diagnostics-fetch-all.outcome.json",),
         ),
         (
-            "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",
+            "otbr_restapi_topology",
             "td-otbr-restapi-dataset-active.json",
             (
                 "td-otbr-restapi-devices-fetch.json",
@@ -1706,7 +1714,7 @@ def test_mle_and_time_statistics_are_extracted_as_metric_samples(tmp_path) -> No
     )
     result = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         allow_partial=True,
     )
@@ -1740,7 +1748,7 @@ def test_mac_counter_ratios_remain_unit_ratios(tmp_path) -> None:
 
     result = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
     )
 
@@ -1760,15 +1768,15 @@ def test_mac_counter_ratios_remain_unit_ratios(tmp_path) -> None:
     ("dataset_id", "filename"),
     [
         (
-            "otbr_cli_networkdiag_fetch_all",
+            "otbr_cli_diagnostics_fetch",
             "td-otbr-cli-networkdiag-fetch-all.json",
         ),
         (
-            "otbr_restapi_devices_fetch_diagnostics_fetch_all",
+            "otbr_restapi_devices_diagnostics_fetch",
             "td-otbr-restapi-diagnostics-fetch-all.json",
         ),
         (
-            "merged_otbr_topology_mdns_health",
+            "multi_source_otbr_topology_mdns",
             "td-otbr-restapi-diagnostics-fetch-all.json",
         ),
     ],
@@ -1799,7 +1807,7 @@ def test_mac_ratio_projection_preserves_values_and_packet_denominator(
 
 
 def test_merged_dataset_normalizes_relationship_error_rates_by_file_source() -> None:
-    dataset = load_health_manifest().dataset("merged_otbr_topology_mdns_health")
+    dataset = load_health_manifest().dataset("multi_source_otbr_topology_mdns")
     payloads = {filename: [] for filename in dataset.files}
     payloads["td-otbr-cli-meshdiag-router-neighbortables.json"] = [
         {
@@ -1855,7 +1863,7 @@ def test_response_timeout_record_is_captured_without_ext_address(tmp_path) -> No
     )
     result = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         allow_partial=True,
     )
@@ -1880,7 +1888,7 @@ def test_duplicate_child_table_entries_are_flagged(tmp_path) -> None:
     )
     result = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_cli_networkdiag_fetch_all",
+        dataset_id="otbr_cli_diagnostics_fetch",
         policy=load_health_policy(),
         allow_partial=True,
     )

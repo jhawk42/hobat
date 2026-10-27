@@ -13,11 +13,13 @@ import otbr_restapi_cli as cli_module
 from otbr_restapi_util import OTBRUsageError, emit_rest_command_output
 from otbr_restapi_util import _RAW_UNSET
 from td_const import (
+    OTBR_RESTAPI_DATASET_ACTIVE_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
 )
 from util_data import (
     CollectionWriteOutcome,
+    TD_EXT_PAN_ID_ENV_VAR,
     network_scope_path,
     read_network_scope,
     save_final_json,
@@ -570,6 +572,8 @@ def test_diagnostics_fetch_all_guard_writes_outcome_but_retains_empty_dataset(
     tmp_path, output_name, outcome_name, items_only, raw, existing_dataset
 ):
     output_path = tmp_path / output_name
+    outcome_path = tmp_path / outcome_name
+    network_scope_path(outcome_path).write_text('{"snapshotSha256":"stale"}')
     old_dataset = b'[{"id":"previous-diagnostic"}]'
     old_scope = b'{"previous":"network-scope"}'
     old_checkpoint = b'[{"id":"previous-checkpoint"}]'
@@ -638,7 +642,74 @@ def test_diagnostics_fetch_all_guard_writes_outcome_but_retains_empty_dataset(
         "unresolved_mesh_local_iid"
     )
     assert saved_outcome["attemptedCount"] == 0
+    scope, error = read_network_scope(outcome_path)
+    assert error is None
+    assert scope is not None
     assert client.fetch_all_devices_diagnostics.call_args.args[0] == [device]
+
+
+@pytest.mark.parametrize(
+    ("outcome_name", "active_network", "operator_network", "expected_network", "provenance"),
+    [
+        (OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+         "1234567890abcdef", "abcdef1234567890", "1234567890abcdef", "observed"),
+        (OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+         None, "abcdef1234567890", "abcdef1234567890", "operator"),
+        (OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+         None, None, None, "unknown"),
+        ("custom.outcome.json", "1234567890abcdef", None, None, "unknown"),
+        ("custom.outcome.json", "1234567890abcdef",
+         "abcdef1234567890", "abcdef1234567890", "operator"),
+    ],
+)
+def test_guard_outcome_scope_preserves_observed_operator_and_unknown_provenance(
+    tmp_path, monkeypatch, outcome_name, active_network, operator_network,
+    expected_network, provenance,
+):
+    if active_network:
+        (tmp_path / OTBR_RESTAPI_DATASET_ACTIVE_FILENAME).write_text(
+            json.dumps({"extPanId": active_network})
+        )
+    if operator_network:
+        monkeypatch.setenv(TD_EXT_PAN_ID_ENV_VAR, operator_network)
+    else:
+        monkeypatch.delenv(TD_EXT_PAN_ID_ENV_VAR, raising=False)
+    outcome_path = tmp_path / outcome_name
+    diagnostics_module._write_guard_affected_outcome(
+        {"partial": True, "deviceResults": []}, outcome_path,
+        raw=False, command_name="diagnostics fetch-all",
+    )
+
+    scope, error = read_network_scope(outcome_path)
+    assert error is None
+    assert scope is not None
+    assert scope["extPanId"] == expected_network
+    assert scope["provenance"] == provenance
+
+
+def test_guard_outcome_scope_write_failure_is_logged_and_rejects_stale_binding(
+    tmp_path, caplog,
+):
+    outcome_path = tmp_path / OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME
+    diagnostics_module._write_guard_affected_outcome(
+        {"partial": False}, outcome_path, raw=False, command_name="diagnostics fetch-all",
+    )
+    old_scope = network_scope_path(outcome_path).read_bytes()
+    caplog.clear()
+    with (
+        patch("util_data.write_network_scope",
+                     side_effect=OSError("scope write failed")),
+        caplog.at_level("INFO"),
+        pytest.raises(OSError, match="scope write failed"),
+    ):
+        diagnostics_module._write_guard_affected_outcome(
+            {"partial": True}, outcome_path, raw=False, command_name="diagnostics fetch-all",
+        )
+
+    assert "event=diagnostic_outcome_write_failed" in caplog.text
+    assert "event=diagnostic_outcome_write command=" not in caplog.text
+    assert network_scope_path(outcome_path).read_bytes() == old_scope
+    assert read_network_scope(outcome_path) == (None, "digest-mismatch")
 
 
 def test_diagnostics_fetch_all_guard_without_output_path_creates_no_sidecar():
@@ -669,6 +740,49 @@ def test_diagnostics_fetch_all_guard_without_output_path_creates_no_sidecar():
             == []
         )
     outcome_write.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["diagnostics", "mesh-diagnostics"])
+@pytest.mark.parametrize("items_only", [False, True])
+@pytest.mark.parametrize("raw", [False, True])
+@pytest.mark.parametrize("custom_output", [False, True])
+def test_standalone_sweep_replaces_old_outcome_and_scope_without_iid_guards(
+    tmp_path, command, items_only, raw, custom_output,
+):
+    output_name = "export.json" if custom_output else f"td-otbr-restapi-{command}-fetch-all.json"
+    output_path = tmp_path / output_name
+    outcome_path = tmp_path / f"{output_path.stem}.outcome.json"
+    outcome_path.write_text('{"partial":true,"completedAt":"2026-09-25T00:00:00Z"}')
+    network_scope_path(outcome_path).write_text('{"snapshotSha256":"stale"}')
+    outcome = {
+        "items": [{"id": "diag-1"}],
+        "deviceResults": [{"deviceId": "1111111111111111", "status": "completed"}],
+        "partial": False,
+        "startedAt": "2026-10-27T16:00:00Z",
+        "completedAt": "2026-10-27T16:01:00Z",
+    }
+    client = Mock()
+    client.list_devices.return_value = [{"id": "1111111111111111", "role": "router"}]
+    client.fetch_all_devices_diagnostics.return_value = outcome
+    client.fetch_mesh_diagnostics_all_devices.side_effect = (
+        lambda *_args, **kwargs: outcome["items"] if kwargs.get("items_only") else outcome
+    )
+    argv = [command, "fetch-all", "--no-update-devices"]
+    if items_only:
+        argv.append("--items-only")
+    args = cli_module.build_parser().parse_args(argv)
+    args.resolved_output_path = str(output_path)
+
+    if command == "diagnostics":
+        result = diagnostics_module.dispatch_diagnostics(client, args, raw, None)
+    else:
+        result = mesh_module.dispatch_mesh_diagnostics(client, args, raw)
+
+    assert result == (outcome["items"] if items_only else outcome)
+    assert json.loads(outcome_path.read_text()) == outcome
+    scope, error = read_network_scope(outcome_path)
+    assert error is None and scope is not None
+    assert json.loads(output_path.read_text()) == result
 
 
 def test_diagnostics_fetch_all_guarded_partial_run_writes_items_and_full_outcome(
@@ -732,11 +846,7 @@ def test_diagnostics_fetch_all_guard_outcome_write_failure_propagates(tmp_path):
     )
     args.resolved_output_path = str(output_path)
 
-    with patch.object(
-        diagnostics_module,
-        "save_json_atomic",
-        side_effect=OSError("disk full"),
-    ):
+    with patch("util_data.save_json_atomic", side_effect=OSError("disk full")):
         with pytest.raises(OSError, match="disk full"):
             diagnostics_module.dispatch_diagnostics(
                 client, args, raw_arg=False, fields=None
@@ -975,11 +1085,13 @@ def test_mesh_fetch_all_all_devices_opt_out_bypasses_router_filter():
     ]
 
 
-def test_mesh_fetch_all_forwards_items_only_and_returns_item_array():
+def test_mesh_fetch_all_retains_outcome_and_returns_item_array():
     items = [{"id": "diag-mesh", "extAddress": "router-role", "children": []}]
     client = Mock()
     client.list_devices.return_value = [{"id": "router-role", "role": "router"}]
-    client.fetch_mesh_diagnostics_all_devices.return_value = items
+    client.fetch_mesh_diagnostics_all_devices.return_value = {
+        "items": items, "deviceResults": [], "partial": False,
+    }
     args = cli_module.build_parser().parse_args(
         [
             "--no-progress",
@@ -996,7 +1108,7 @@ def test_mesh_fetch_all_forwards_items_only_and_returns_item_array():
 
     assert result is items
     client.fetch_mesh_diagnostics_all_devices.assert_called_once()
-    assert client.fetch_mesh_diagnostics_all_devices.call_args.kwargs["items_only"] is True
+    assert client.fetch_mesh_diagnostics_all_devices.call_args.kwargs["items_only"] is False
     assert client.fetch_mesh_diagnostics_all_devices.call_args.kwargs["clear_diagnostics"] is False
 
 

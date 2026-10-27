@@ -145,7 +145,7 @@ assert.equal(declaredThreadCollection.deviceCounts.total, 1);
 const mixedSource = buildThreadNetworkModel({
   entry: {
     label: "Mixed Thread and mDNS",
-    source: "merged",
+    source: "multi-source",
     files: ["td-otbr-cli-meshdiag-topology.json", "td-mdns-scopes-thread.json"],
   },
   loadedFiles: ["td-otbr-cli-meshdiag-topology.json", "td-mdns-scopes-thread.json"],
@@ -238,7 +238,7 @@ assert.ok(notLoaded.networkFacts.every(({ value }) => value === "n/a"));
 assert.equal(notLoaded.partitions.state, "unresolved-scope");
 
 const otbrCliEntry = DATASET_REGISTRY.find(
-  (entry) => entry.value === "otbr_cli_networkdiag_fetch_all",
+  (entry) => entry.value === "otbr_cli_diagnostics_fetch",
 );
 const otbrRoleRows = [
   { extAddress: "0011223344556677", role: "child", mode: { device: "FTD" }, isReed: true },

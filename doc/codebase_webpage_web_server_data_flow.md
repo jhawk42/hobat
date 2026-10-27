@@ -35,6 +35,132 @@ separate bounded probe path in the Python web server, not a collector refresh.
 See the [data-flow ownership table](merge_thread_device_info.md#ownership) for
 the field, identity, authority, and projection owners in both runtimes.
 
+The catalog owns direct non-health dataset aliases and validates source/dataset
+pairs. Only canonical IDs appear in menus; `multi-source` replaces the synthetic
+`merged` source without renaming cache files or commands. Health IDs use an
+intentional cutover, not aliases; see the
+[operator cutover notes](thread_network_health.md#dataset-identifier-cutover-2026-10-27).
+Canonical recipe lookup remains separate from the optional `selectable` menu
+flag, and source defaults must reference visible recipes in the same source.
+
+### Unified processing
+
+The catalog declares selectable CLI/REST/HA Matter/mDNS and
+Multi-source Unified primaries while retaining fast source defaults.
+[td_unified_dataset.py](../src/td_unified_dataset.py) reads only those declared
+cached finals and their scope companions. Source records reuse the merge
+engine's in-memory path; BBR envelope conversion stays in its CLI owner.
+No collector, checkpoint, action-list, or network refresh is implicit.
+HA cached inventory/native converters are implemented in the source-owned
+[ha_matter_ws_unified.py](../src/ha_matter_ws_unified.py). HA primary assembly
+includes its four required inputs, optional projections, original outcome
+checks and conservative observed identity/coverage. Four-primary composition
+prepares/reuses the catalog dependencies once inside the same directory lock,
+verifies their committed reports/current raw evidence and retains per-source
+completion, missing/excluded reasons and original times. Only admitted original
+observations are replayed through the owning normalizers and merge policies;
+no aggregate file rank is used. Network/fabric boundaries and uncorrelated
+services remain separate, and native links rebind to final row IDs.
+Operational Matter and HAP UDP (`_hap._udp.local.`) services with one unambiguous
+Thread-device OMR match instead remain complete records in the device's
+`mdnsRecords` array. They retain their
+own service IDs, original scope, times, properties and per-field source lineage;
+no device field or fabric identity is overwritten. Other service types, unmatched,
+scope-conflicting and ambiguous services remain top-level rows. Standalone mDNS
+Unified is unchanged. The shared device-details mDNS section renders the array.
+The in-memory device merge derives `relationshipOnly` from accepted original
+contributors: a genuine device observation clears the flag, while placeholders
+and mDNS-only enrichment cannot. Assembly-v5 forces an explicit-build upgrade
+for unchanged inputs, retaining coherent v2/v3/v4 read compatibility.
+CLI/REST/HA Matter/Multi-source health profiles now consume verified original
+evidence with dedicated retained contracts; mDNS is enrichment-only and remains
+health-ineligible. Qualification never processes health on selection. Selector
+retirement remains separately gated. CLI topology and the HA seven-file
+composite are menu-hidden but explicitly resolvable; REST topology and legacy
+precomputed Multi-source remain visible pending real-cache workflow parity.
+All three OTBR + mDNS alternatives stay in their original source groups.
+
+The HA converters preserve commissioned/non-Thread membership, full safe
+device/endpoint/power/operational fields and explicit roles. Native IDs stay in
+`nativeNodeIds`, never Matter fabric/node IDs. Safe native details and original
+graph collection time remain under `diagnosticsDetail.nativeBorderRouter` or
+`diagnosticsDetail.nativeTopology`. Only validated IPv6 addresses are promoted
+from the mixed-address Border Router inventory.
+
+`nativeRelationships` are supplementary typed links with stable `sourceId`,
+`targetId`, `networkType`, original `nativeSourceId`/`nativeTargetId`, qualitative
+`strength`, observations, and only present directional `sourceToTarget`/
+`targetToSource` metrics and route metadata. They are not copied into OTBR
+neighbor/child/Route64 tables. Exact duplicate native observations are removed.
+Dangling endpoints stay explicit in `unresolvedEndpoints` and merge conflicts;
+when neither endpoint exists, a relationship-only row retains the evidence
+without inventing a device. Native identity collisions retain separate
+source-local IDs with conflicts instead of arbitrarily connecting endpoints.
+After identity-aware assembly, links bind to committed `_unifiedRecordId`
+values via native IDs, not possibly colliding addresses. Different commissioned
+Matter fabrics remain separate. A missing inventory stays partial even with a
+dashboard projection. Native upstream time and outcome capture/count/scope
+association are checked independently; mtime-only evidence is explicitly
+degraded, not proof of one complete observation.
+Live native collection keeps strict endpoint validation. These are processing
+contracts, not a claim that the Unified products are normally selectable.
+
+The `unified` browser adaptor registers the committed canonical rows directly
+through the shared adaptor model and relationship emitter. Committed record IDs
+keep same-address devices from different scopes/fabrics distinct in topology,
+table selection, details and device projections. Native transport links keep
+their categories, directions and measured metrics; qualitative strength alone
+does not become measured LQI. Unresolved native endpoints remain in details,
+not invented nodes. Retained focused source adaptors keep their existing paths.
+
+Generation IDs bind ordered original content/scope digests, original times,
+recipe/authority digests and selected observed network, excluding build time.
+Rows carry internal `_unifiedRecordId` and `_networkInstance` metadata so report
+lineage does not depend on array ordering. Unknown-scope records are not relabelled
+as known networks, including embedded service evidence. Same-file identity collisions remain visible, while mDNS
+uses service/event deduplication rather than fabricated Thread device identity.
+
+One per-directory `flock` covers building and recovery. Named artifacts stage
+in the data directory, with durable recovery copies and the report replaced
+last as the commit marker. Reads validate the report, generation fingerprint,
+and artifact bindings; mixed generations produce explicit HTTP 409 errors.
+Only an explicit build performs recovery or rebuilds invalid output. Display
+reads may inspect a coherent generation after raw caches change; evidence
+consumers additionally verify current original digests/times.
+For Multi-source, `read_generation(..., verify_inputs=True)` verifies dependency
+report/artifact bindings and the catalog-allowlisted transitive `rawInputs`
+closure. The report's generation-bound `rawInputsDigest` includes original
+roles, content/scope digests, times and selected/missing/excluded states without
+copying raw snapshots. `read_original_evidence` rechecks the committed report and stable original
+reads, applies source-owned normalizers and selected-network/Thread-kind filters,
+then verifies the closure again. This is the health sample boundary; aggregate
+rows never supply authority or observation time. See
+[Unified health qualification](thread_network_health.md#unified-health-qualification)
+for retained recipe, absence witness and replay guarantees.
+
+Unified HTTP row actions run `unify-dataset --allow-partial --json`, asynchronously
+with a 60-second subprocess budget. Companions are static, validated reads;
+Unified checkpoint filenames are not exposed. Successful jobs carry coverage
+and materialization state, and data/revalidation responses carry
+`X-TD-Materialization-State`. Cache Only never starts a build. Capabilities report
+valid committed `cached` state, `buildableFromCache`, and local validation
+reasons, without collecting data. Unified browser availability uses only valid
+cached/buildable state, including when a collector is offline. Capabilities
+requests share one off-event-loop inspection per data directory. Each product
+is inspected once per scan, including Multi-source dependencies. Unchanged
+results are reused only while catalog contracts and filesystem signatures
+(device/inode, mode, size, nanosecond mtime/ctime) of advertised files, Unified
+artifacts, original inputs and scope companions remain unchanged. Changes
+trigger full digest/lineage/snapshot validation, not a TTL-based assumption;
+unstable scans and inspection errors are not cached as successful results.
+This cache does not replace generation validation on data or health reads.
+Unified loads
+never fetch the legacy raw identity auxiliaries. The response materialization
+header is mandatory for a Unified row response, including the final response
+after a processing job: `partial` stays a persistent incomplete-data notice
+across view changes; missing/invalid state cannot replace the last good view.
+Normal-selector rollout remains gated; the preview entries stay hidden.
+
 ### Browser-only Appearance
 
 [tdash-theme.js](../src/js/tdash-theme.js) is a blocking classic script loaded

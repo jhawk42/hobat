@@ -56,12 +56,112 @@ only when the process log destination, access, and retention are controlled.
 | `process-eve` | Parse and enhance an Eve Thread layout file |
 | `health` | Process, inspect, or purge health history |
 | `system` | Create or restore data-directory backups or run a bounded host ping |
+| `unify-dataset` | Materialize a declared source-primary product using cached inputs only |
 | `merge-dataset` (`merge-data`) | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file; `merge-data` is a compatibility alias |
 | `merge-extaddr` | Read or upsert one device label, or bulk-merge missing extaddr entries into the static map |
 
 ---
 
 ## Commands Usage
+
+### `unify-dataset`
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data unify-dataset \
+  --dataset otbr_cli_unified --allow-partial --json
+```
+
+Implemented targets: `otbr_cli_unified`, `otbr_restapi_unified`,
+`ha_matter_ws_unified`, `mdns_unified`, and `multi_source_unified`.
+Use `--dataset all` to build all five, in the order listed above. The
+Multi-source build reuses the already prepared source primaries when unchanged.
+`--allow-partial` applies to every target. In `all` mode, `--network` applies
+to the Thread source primaries and Multi-source, not the standalone mDNS service
+inventory, matching Multi-source's dependency handling. `--json` returns an
+array of normal per-dataset summaries for `all`, retaining the single-object
+result for an individual target. Human-readable output has one line per target.
+The first failure stops the command with exit status 1 and no summary output;
+earlier successful builds remain committed rather than being rolled back.
+All five are selectable source primaries; fast defaults remain unchanged.
+Retirement of overlapping selectors is coverage-gated; see the
+[current rollout limits](../README.md#cache-only-unified-materialization).
+CLI, REST, HA Matter and Multi-source have dedicated qualified health profiles;
+mDNS remains enrichment-only and health-ineligible. Building does not process
+health: request `health process-dataset --dataset DATASET_ID` explicitly after building.
+Health verifies the bound original cached inputs; stale/missing originals need
+an explicit cache-only rebuild, not a live refresh. Partial/degraded originals
+do not become fresh complete collections. See
+[Unified qualification and retained evidence](thread_network_health.md#unified-health-qualification).
+This does not change legacy collector or merge
+commands, fast defaults, or existing health profiles.
+
+Multi-source prepares/reuses the four catalog-owned source-primary generations
+once under the outer build lock. It verifies reports, companions and original
+raw inputs, then replays only their admitted raw observations through the same
+normalizers/merge policies so an aggregate filename never supplies a rank.
+It preserves scoped Thread devices, distinct Matter fabrics, non-Thread members
+and uncorrelated services. Native links are rebound to final committed row IDs.
+An operational Matter or HAP UDP (`_hap._udp.local.`) mDNS advertisement with
+one matching Thread-device OMR address is embedded in the device's `mdnsRecords`
+array. The array preserves
+individual fabric/node identities, capture data, original scope and lineage;
+it never overwrites the device's identity or Matter fields. Invalid/unspecified,
+multicast, link-local or loopback addresses cannot correlate services. Conflicting
+addresses/scopes or multiple device candidates retain standalone service rows.
+Genuine relationship-only placeholders cannot receive advertisements. Accepted
+device observations clear that marker without modifying the original evidence.
+Assembly-v5 applies these corrections on an explicit build, including when raw
+inputs are unchanged; coherent v2/v3/v4 generations remain readable.
+Other source-primary recipes are unchanged; mDNS Unified has no Thread inventory
+and retains its service rows. See the [merge contract](merge_thread_device_info.md).
+Known mismatched sources are excluded with reasons; without four complete
+sources, publication needs `--allow-partial`. No usable source is an error,
+including when an older output remains on disk.
+
+The opt-in catalog group can also be requested with
+`merge-dataset --include-groups unified [--allow-partial]`. It dispatches the same
+safe composer and fixed Unified artifacts, never the legacy merged output.
+It cannot be combined with other groups, arbitrary files/output overrides or
+legacy merge-policy options. Use `unify-dataset` for observed network selection.
+The legacy default `full` group is unchanged.
+
+HA requires its commissioned-device inventory, derived topology, native Border
+Routers and native network topology. Optional diagnostics/dashboard projections
+enrich these inputs; they never make a missing inventory complete. Original HA
+outcomes are checked for status, counts, capture association and observed scope;
+their gaps degrade evidence without hiding usable rows. A malformed present
+outcome still aborts publication. Native graph collection/discovery time stays
+distinct from wrapper read/build time, and raw-file mtime fallback is explicitly
+degraded evidence. Safe identity is emitted only for one unambiguous observed
+network (or an explicit observed selection). Non-Thread rows remain unscoped.
+Native link endpoints bind to committed row IDs; unresolved/ambiguous endpoints
+remain explicit coverage/conflicts, never arbitrary connections.
+
+| Option | Meaning |
+| --- | --- |
+| `--dataset ID` | One canonical Unified target; no aliases or arbitrary recipes |
+| `--network extpan:0123456789abcdef` | Select an observed, nonzero, lowercase Extended PAN ID; never assigns scope to unknown rows |
+| `--allow-partial` | Permit usable inspection data with missing required source/network coverage |
+| `--json` | Emit one summary object, including materialization/health state, generation, artifacts, row/relationship-entry counts, coverage, and no-op state |
+
+No live, refresh, host, retry, arbitrary-input, output-override, or
+Thread-secret flags are accepted. Logs go to stderr. Exit status is 0 for
+published/unchanged complete or explicitly permitted partial results, 2 for
+invalid arguments, and 1 for input/identity/publication failures. A successful
+partial build is not a completeness or health-eligibility claim.
+`healthState` describes evidence readiness, not a network-health assessment
+or catalog health eligibility.
+
+Rows remain arrays. Reports bind every row, network, identity and outcome
+artifact; original source names/times and per-record/field lineage remain in
+the report. Raw-file mtime fallback is explicit. Missing optional inputs are
+reported; malformed present optional inputs fail. Unchanged evidence preserves
+all output bytes and mtimes. A directory-wide advisory lock serializes separate
+CLI/server builds. Report-last publication retains recovery copies; only an
+explicit subsequent build recovers an interrupted generation. Cache Only and
+normal reads never repair it.
+`linkCount` counts canonical relationship entries (including Route64 and
+child/neighbor tables), not deduplicated rendered canvas edges.
 
 ### `otbr-cli`
 

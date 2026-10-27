@@ -6,6 +6,7 @@ import argparse
 import logging
 import re
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -15,6 +16,15 @@ from otbr_cli_util import load_extaddr_map_or_empty, resolve_collector_runtime
 from td_const import OTBR_CLI_BBR_FILENAME
 from td_device_fields import get_canonical_rloc16, normalize_input_record
 from util_data import CollectionWriteOutcome, parse_datadir_from_argv, save_final_json, save_json_atomic
+
+
+def extract_cached_bbr_records(payload: Any) -> list[dict[str, Any]]:
+    if (not isinstance(payload, dict) or not isinstance(payload.get("routers"), list)
+            or not isinstance(payload.get("bbr"), dict)
+            or any(not isinstance(row, dict) for row in payload["routers"])):
+        raise ValueError("Invalid cached BBR observation")
+    return [{**deepcopy(record), "bbr": deepcopy(payload["bbr"])}
+            for record in payload["routers"]]
 
 
 def normalize_rloc16(value: Any) -> str | None:

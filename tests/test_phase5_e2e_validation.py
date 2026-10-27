@@ -9,6 +9,7 @@ Tests for Phase 5 comprehensive validation:
 - Backward compatibility verification
 """
 
+import hashlib
 import json
 import shutil
 import time
@@ -31,12 +32,13 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 # Test 1: End-to-End Merge with Real Data
 # =============================================================================
 
-def _data_manifest(data_dir: Path) -> dict[str, bytes]:
-    return {
-        str(path.relative_to(data_dir)): path.read_bytes()
-        for path in sorted(data_dir.rglob("*"))
-        if path.is_file()
-    }
+def _data_manifest(data_dir: Path) -> dict[str, str]:
+    manifest = {}
+    for path in sorted(data_dir.rglob("*")):
+        if path.is_file():
+            with path.open("rb") as stream:
+                manifest[str(path.relative_to(data_dir))] = hashlib.file_digest(stream, "sha256").hexdigest()
+    return manifest
 
 
 def _run_e2e_merge_with_real_data(data_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:

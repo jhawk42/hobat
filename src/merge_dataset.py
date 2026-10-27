@@ -66,6 +66,7 @@ from td_const import (
     OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
     THREAD_TOOLS_DIAGNOSTICS_FILENAME,
     TD_DATA_DIR_ARG_HELP,
+    UNIFIED_FILENAMES,
 )
 from util_data import (
     load_optional_input,
@@ -745,6 +746,8 @@ def _merge_record_into_nodes(
     by_omr: dict[str, set[int]],
     by_matter_fabric_node: dict[str, set[int]],
     new_node_id: int,
+    preserve_same_file_duplicates: bool = False,
+    preserve_matter_fabrics: bool = False,
 ) -> _MergeRecordOutcome:
     identity_values = collect_merge_identity_values(record)
     rloc16 = identity_values.get("rloc16")
@@ -768,11 +771,44 @@ def _merge_record_into_nodes(
             node_id for node_id in by_rloc16.get(rloc16, set())
             if identities_compatible(nodes[node_id], record, matter_identity_mode)
         }
+    if preserve_matter_fabrics:
+        incoming_matter = get_matter_fabric_node_identity(record)
+        candidate_ids = {
+            node_id for node_id in candidate_ids
+            if not incoming_matter or not get_matter_fabric_node_identity(nodes[node_id])
+            or get_matter_fabric_node_identity(nodes[node_id]) == incoming_matter
+        }
+    # REST diagnostic UUIDs identify observations, not distinct devices.
+    diagnostic_observation = filename in {
+        OTBR_RESTAPI_DIAGNOSTICS_FILENAME,
+        OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME,
+        OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+        OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    } and bool(extaddr)
+    if preserve_same_file_duplicates:
+        candidate_ids = {
+            node_id for node_id in candidate_ids
+            if filename not in nodes[node_id].get("_source_files", [])
+            or (diagnostic_observation and get_canonical_extaddr(nodes[node_id]) == extaddr)
+        }
     collision_candidate_ids = tuple(sorted(candidate_ids)) if len(candidate_ids) > 1 else ()
     ambiguous = any(
         not identities_compatible(nodes[left], nodes[right], matter_identity_mode)
         for left in candidate_ids for right in candidate_ids if left < right
     )
+    if preserve_matter_fabrics:
+        candidate_fabrics = {
+            get_matter_fabric_node_identity(nodes[node_id]) for node_id in candidate_ids
+            if get_matter_fabric_node_identity(nodes[node_id])
+        }
+        ambiguous = ambiguous or len(candidate_fabrics) > 1
+    if preserve_same_file_duplicates and len(candidate_ids) > 1:
+        candidate_sources = [
+            source for candidate_id in candidate_ids
+            for source in nodes[candidate_id].get("_source_files", [])
+            if not (diagnostic_observation and source == filename)
+        ]
+        ambiguous = ambiguous or len(candidate_sources) != len(set(candidate_sources))
     if ambiguous:
         logging.warning("Merge identity ambiguity: retaining incoming row separately; candidates=%s", collision_candidate_ids)
         append_merge_conflict(
@@ -858,6 +894,48 @@ def _merge_record_into_nodes(
         collision_omr_address=omr if collision_candidate_ids else None,
         collision_outcome="retained-ambiguous" if ambiguous else "coalesced" if collision_candidate_ids else None,
     )
+
+
+def merge_cached_records(
+    sources: Sequence[tuple[str, Sequence[dict[str, Any]]]],
+    network_id: str | None,
+    *,
+    preserve_same_file_duplicates: bool = True,
+) -> tuple[list[dict[str, Any]], dict[int, list[tuple[str, dict[str, Any]]]]]:
+    """Merge validated in-memory inputs without opening files or resolving scope."""
+    nodes: dict[int, dict[str, Any]] = {}
+    indexes: list[dict[str, set[int]]] = [defaultdict(set) for _ in range(4)]
+    contributors: dict[int, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+    next_id = 0
+    for filename, records in sorted(sources, key=lambda item: -SOURCE_PRECEDENCE.get(item[0], 0)):
+        for original in records:
+            record = deepcopy(original)
+            record["_source_files"] = [filename]
+            prior_nodes = set(nodes)
+            outcome = _merge_record_into_nodes(
+                record, filename, network_id, "strict-omr", {},
+                nodes, *indexes, next_id,
+                preserve_same_file_duplicates=preserve_same_file_duplicates,
+                preserve_matter_fabrics=True,
+            )
+            for removed in prior_nodes - set(nodes):
+                contributors[outcome.node_id].extend(contributors.pop(removed))
+            contributors[outcome.node_id].append((filename, deepcopy(original)))
+            if outcome.created:
+                next_id += 1
+    ordered = sorted(nodes)
+    for key in ordered:
+        # Relationship-only is valid only without an accepted device observation.
+        if nodes[key].get("relationshipOnly") is True and any(
+            original.get("relationshipOnly") is not True
+            and not is_mdns_record(original)
+            and get_device_identity_keys(original)
+            for _, original in contributors[key]
+        ):
+            nodes[key]["relationshipOnly"] = False
+    return [nodes[key] for key in ordered], {
+        index: contributors[key] for index, key in enumerate(ordered)
+    }
 
 
 def build_merged_records(
@@ -1089,6 +1167,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Directory containing input JSON files (default: current directory).",
     )
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
+    parser.add_argument(
+        "--allow-partial", action="store_true",
+        help="Allow explicitly partial cached composition for --include-groups unified only.",
+    )
     parser.add_argument(
         "--dataset-file",
         default=OTBR_CLI_THREAD_NETWORK_INFO_FILENAME,
@@ -1368,6 +1450,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
     try:
+        raw_groups = args.include_groups
+        group_names = parse_file_list_args([raw_groups] if isinstance(raw_groups, str) else raw_groups)
+        if "unified" in group_names:
+            from td_unified_dataset import build_unified_dataset
+            if (group_names != ["unified"] or args.include_files or args.exclude_files
+                    or args.output not in {MERGED_TOPOLOGY_ALL_FILENAME, UNIFIED_FILENAMES["multi_source_unified"]}
+                    or args.report_file or args.dataset_file != OTBR_CLI_THREAD_NETWORK_INFO_FILENAME
+                    or args.merge_strategy != "merge"
+                    or args.extaddr_map_file != EXTADDR_DEVICE_LABEL_MAP_FILENAME):
+                raise ValueError("Unified composition has a closed recipe; use unify-dataset for network selection")
+            directory = td_data_dir if args.base_dir == "." else Path(args.base_dir)
+            summary = build_unified_dataset(
+                directory, "multi_source_unified", allow_partial=args.allow_partial,
+            )
+            logging.info("Unified composition: %s", json.dumps(summary, sort_keys=True))
+            return 0
+        if args.allow_partial:
+            raise ValueError("--allow-partial is supported only for --include-groups unified")
+        if set(parse_file_list_args(args.include_files)).intersection(UNIFIED_FILENAMES.values()):
+            raise ValueError("Unified aggregates require --include-groups unified or unify-dataset")
         command_inputs = resolve_merge_command_inputs(args, td_data_dir)
         supporting_data = load_merge_supporting_data(command_inputs)
         result = build_merge_output(command_inputs, supporting_data)

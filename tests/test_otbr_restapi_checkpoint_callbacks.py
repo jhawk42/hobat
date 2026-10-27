@@ -195,7 +195,7 @@ def test_topology_wires_fast_pass_checkpoint_to_canonical_snapshot(tmp_path) -> 
     assert stage == "pass:fast"
 
 
-def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_resolved() -> None:
+def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_resolved(tmp_path) -> None:
     client = Mock()
     client.list_devices.return_value = [{"id": "dev-1", "rloc16": "0x4000"}]
 
@@ -211,15 +211,15 @@ def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path
         device_ids=None,
         no_progress=True,
         items_only=True,
-        resolved_output_path="/tmp/td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+        resolved_output_path=str(tmp_path / "td-otbr-restapi-mesh-diagnostics-fetch-all.json"),
     )
 
     def _fake_fetch_mesh_all(*_args, **kwargs):
         on_checkpoint = kwargs.get("on_checkpoint")
         assert on_checkpoint is not None
-        assert kwargs.get("items_only") is True
+        assert kwargs.get("items_only") is False
         on_checkpoint([{"id": "mesh-1"}], 1, 1, "dev-1", "completed")
-        return [{"id": "mesh-1"}]
+        return {"items": [{"id": "mesh-1"}], "deviceResults": [], "partial": False}
 
     client.fetch_mesh_diagnostics_all_devices.side_effect = _fake_fetch_mesh_all
 
@@ -236,7 +236,7 @@ def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path
     checkpoint_write.assert_called_once()
     payload, checkpoint_path = checkpoint_write.call_args.args
     assert payload == [{"id": "mesh-1"}]
-    assert checkpoint_path == Path("/tmp/td-otbr-restapi-mesh-diagnostics-fetch-all.partial.json")
+    assert checkpoint_path == tmp_path / "td-otbr-restapi-mesh-diagnostics-fetch-all.partial.json"
     final_write.assert_called_once()
     assert final_write.call_args.args[1] == args.resolved_output_path
 
@@ -312,7 +312,9 @@ def test_rest_fetch_dispatchers_do_not_checkpoint_without_output_path() -> None:
 
     mesh_client = Mock()
     mesh_client.list_devices.return_value = [{"id": "dev-1", "rloc16": "0x4000"}]
-    mesh_client.fetch_mesh_diagnostics_all_devices.return_value = [{"id": "mesh-1"}]
+    mesh_client.fetch_mesh_diagnostics_all_devices.return_value = {
+        "items": [{"id": "mesh-1"}], "deviceResults": [], "partial": False,
+    }
     mesh_args = SimpleNamespace(
         mesh_diag_command="fetch-all",
         poll_timeout=8.0,

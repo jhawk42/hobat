@@ -21,7 +21,9 @@ from otbr_restapi_util import (
     MESH_DIAGNOSTIC_TLVS,
     OTBRRestApiClient,
     OTBRUsageError,
+    collection_outcome_path,
     emit_rest_command_output,
+    write_rest_collection_outcome,
 )
 
 CLI_MESH_TASK_TIMEOUT_DEFAULT = 15
@@ -216,12 +218,18 @@ def dispatch_mesh_diagnostics(
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
-            items_only=getattr(args, "items_only", False),
+            items_only=False,
             progressive_fallback=not getattr(args, "no_fallback", False),
             on_progress=progress_fn,
             on_checkpoint=_on_checkpoint,
             raw=raw_arg,
         )
-        return finish(outcome)
+        if output_path is not None:
+            write_rest_collection_outcome(
+                outcome, collection_outcome_path(output_path),
+                raw=raw_arg is True, command_name="otbr-restapi mesh-diagnostics fetch-all",
+            )
+        payload = outcome["items"] if getattr(args, "items_only", False) else outcome
+        return finish(payload)
 
     raise ValueError("Unsupported mesh-diagnostics command")

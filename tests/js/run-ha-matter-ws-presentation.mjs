@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { DEVICE_DETAILS_SECTIONS } from "../../src/js/tdash-constants.js";
+import { rowMatchesSearch } from "../../src/js/tdash-search.js";
 
 import {
   createDetailValueNode,
@@ -34,6 +36,12 @@ class Element {
 }
 
 const matterDetailsList = new Element("ul");
+const mdnsDetailsList = new Element("ul");
+mdnsDetailsList.id = "mdns-list";
+mdnsDetailsList.setAttribute(
+ "data-fields",
+ DEVICE_DETAILS_SECTIONS.find((section) => section.sectionId === "mdns-list").fields.join(","),
+);
 matterDetailsList.setAttribute(
  "data-fields",
  "matter.endpoints,generalDiagnostics.upTime,generalDiagnostics.bootReason,"
@@ -41,7 +49,7 @@ matterDetailsList.setAttribute(
 );
 globalThis.document = {
  createElement: (tagName) => new Element(tagName),
- getElementById: (id) => id === "matter-list" ? matterDetailsList : null,
+ getElementById: (id) => ({ "matter-list": matterDetailsList, "mdns-list": mdnsDetailsList })[id] ?? null,
 };
 const allText = (node) => [
  node.textContent,
@@ -211,5 +219,32 @@ const coverage = flattenObjectEntries({
 });
 assert.ok(coverage.some(([path]) => path === "diagnosticCoverage.powerSources"));
 assert.ok(coverage.some(([path]) => path === "diagnosticCoverage.threadNetworkDiagnostics.cluster"));
+
+const advertisements = ["1111222233334444", "9999222233334444"].map((fabric) => ({
+  scope: "_matter._tcp.local.",
+  name: `${fabric}-0000000000000001._matter._tcp.local.`,
+  serviceInfo: { port: 5540, properties: { fabricIdCompressed: { decoded: fabric } } },
+}));
+advertisements.push({
+  scope: "_hap._udp.local.",
+  name: "Encode Plus 1._hap._udp.local.",
+  serviceInfo: { port: 5683, properties: { id: { decoded: "AA:BB:CC:DD:EE:FF" } } },
+});
+populateNodeDetailsLists(flattenObjectEntries({ mdnsRecords: advertisements }));
+const serviceText = allText(mdnsDetailsList);
+assert.match(serviceText, /mdnsRecords/);
+assert.match(serviceText, /1111222233334444/);
+assert.match(serviceText, /9999222233334444/);
+assert.match(serviceText, /5540/);
+assert.match(serviceText, /Encode Plus 1/);
+assert.match(serviceText, /5683/);
+assert.match(serviceText, /AA:BB:CC:DD:EE:FF/);
+assert.doesNotMatch(serviceText, /\[object Object\]/);
+assert.equal(rowMatchesSearch({ mdnsRecords: advertisements }, "1111222233334444"), true);
+assert.equal(rowMatchesSearch({ mdnsRecords: advertisements }, "9999222233334444"), true);
+assert.equal(rowMatchesSearch({ mdnsRecords: advertisements }, "encode plus 1"), true);
+assert.equal(rowMatchesSearch({ mdnsRecords: advertisements }, "_hap._udp.local."), true);
+assert.equal(rowMatchesSearch({ mdnsRecords: advertisements }, "not-advertised"), false);
+assert.equal(rowMatchesSearch({}, "1111222233334444"), false);
 
 process.stdout.write(`${JSON.stringify({checks: 9})}\n`);

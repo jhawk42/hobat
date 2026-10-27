@@ -47,6 +47,15 @@ def test_project_json_filename_values(name, value):
 
 
 def test_dynamic_json_filename_families():
+    assert dict(td_const.UNIFIED_FILENAMES) == {
+        "otbr_cli_unified": "td-otbr-cli-unified.json",
+        "otbr_restapi_unified": "td-otbr-restapi-unified.json",
+        "ha_matter_ws_unified": "td-ha-matter-ws-unified.json",
+        "mdns_unified": "td-mdns-unified.json",
+        "multi_source_unified": "td-merged-unified.json",
+    }
+    with pytest.raises(TypeError):
+        td_const.UNIFIED_FILENAMES["otbr_cli_unified"] = "changed.json"
     assert dict(td_const.MDNS_SCOPE_FILENAMES) == {
         "thread": td_const.MDNS_SCOPES_THREAD_FILENAME,
         "br": td_const.MDNS_SCOPES_BR_FILENAME,
@@ -63,6 +72,7 @@ def test_dynamic_json_filename_families():
 def test_production_modules_do_not_duplicate_project_json_filename_literals():
     src_dir = Path(__file__).parents[1] / "src"
     filenames = set(EXPECTED_JSON_FILENAMES.values())
+    filenames.update(td_const.UNIFIED_FILENAMES.values())
     filenames.add(td_const.OTBR_RESTAPI_DEVICE_DIAGNOSTIC_FILENAME_TEMPLATE)
     literal_pattern = re.compile(
         rf"(?P<quote>['\"])(?:{'|'.join(re.escape(name) for name in sorted(filenames, key=len, reverse=True))})(?P=quote)"

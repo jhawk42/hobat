@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -79,6 +79,8 @@ class _ProcessingInputSnapshot:
     identity_digest: str | None
     identity_source_time: str | None
     completeness: Completeness
+    unified_context: Mapping[str, Any] | None = None
+    evidence_files: frozenset[str] | None = None
 
 
 def _stable_read(path: Path) -> tuple[Any, str, int]:
@@ -374,7 +376,7 @@ def _register_sample_devices(
             rloc = record.get("rloc16")
             if isinstance(rloc, str):
                 rloc_devices[rloc.lower()] = device_id
-            if filename == OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME and dataset.dataset_id == "otbr_cli_networkdiag_fetch_all":
+            if filename == OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME and dataset.dataset_id == "otbr_cli_diagnostics_fetch":
                 route_reporter_counts[device_id] = route_reporter_counts.get(device_id, 0) + 1
                 router_id = normalize_router_id(record.get("routerId"))
                 if router_id is not None:
@@ -419,7 +421,7 @@ def _project_sample_evidence(
             except ValueError:
                 route_reporter_id = None
             if (filename == OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
-                    and dataset.dataset_id == "otbr_cli_networkdiag_fetch_all"
+                    and dataset.dataset_id == "otbr_cli_diagnostics_fetch"
                     and route_reporter_id == reporter_id
                     and route_reporter_counts.get(reporter_id) == 1):
                 route = record.get("route")
@@ -555,6 +557,42 @@ def _project_sample_evidence(
                             if child.get("queuedMessageCount") is None else child["queuedMessageCount"]
                         ),
                     )
+    if dataset.unified_recipe is not None:
+        native_ids: dict[str, set[str]] = {}
+        for records in registration.normalized_by_file.values():
+            for record in records:
+                try:
+                    device_id = device_id_from_ext_address(get_canonical_ext_address(record))
+                except ValueError:
+                    continue
+                for native_id in record.get("nativeNodeIds", []):
+                    native_ids.setdefault(native_id, set()).add(device_id)
+        for filename, records in registration.normalized_by_file.items():
+            if not filename.startswith("td-ha-matter-ws-"):
+                continue
+            for record in records:
+                for link in record.get("nativeRelationships", []):
+                    if link.get("networkType") != "thread" or link.get("unresolvedEndpoints"):
+                        continue
+                    source = native_ids.get(link.get("nativeSourceId"), set())
+                    target = native_ids.get(link.get("nativeTargetId"), set())
+                    if len(source) != 1 or len(target) != 1 or source == target:
+                        continue
+                    source_id, target_id = next(iter(source)), next(iter(target))
+                    forward, backward = link.get("sourceToTarget", {}), link.get("targetToSource", {})
+                    for reporter, peer, outgoing, incoming in (
+                        (source_id, target_id, forward, backward),
+                        (target_id, source_id, backward, forward),
+                    ):
+                        lqi_out, lqi_in = _integer(outgoing.get("lqi")), _integer(incoming.get("lqi"))
+                        rssi = _number(incoming.get("rssi"))
+                        if lqi_out is None and lqi_in is None and rssi is None:
+                            continue
+                        link_id = relationship_id(reporter, peer)
+                        relationships.setdefault(link_id, RelationshipSample(
+                            link_id, "router-neighbor", reporter, peer,
+                            lqi_in, lqi_out, None, rssi, None, None, None, reporter, (filename,),
+                        ))
     return _SampleProjection(
         devices,
         relationships,
@@ -569,6 +607,8 @@ def _read_processing_inputs(
     allow_partial: bool,
     read_time: datetime,
 ) -> _ProcessingInputSnapshot:
+    if dataset.unified_recipe is not None:
+        return _read_unified_inputs(data_dir, dataset, allow_partial, read_time)
     payloads: dict[str, Any] = {}
     sources: list[SourceEvidence] = []
     mtimes: list[int] = []
@@ -657,6 +697,147 @@ def _read_processing_inputs(
     )
 
 
+def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
+    from td_dataset_catalog import load_dataset_catalog, resolve_dataset
+    from td_unified_dataset import UnifiedDatasetError, read_original_evidence
+    from td_health_unified import CONTEXT_VERSION, digest, plain, timestamp, witness_for_sources
+
+    catalog = load_dataset_catalog()
+    entry = resolve_dataset(catalog, dataset.dataset_id, source=dataset.datasource_id)
+    try:
+        view = read_original_evidence(data_dir, entry, catalog=catalog)
+    except (UnifiedDatasetError, ValueError, OSError) as exc:
+        raise HealthProcessingError(f"Unified evidence is unavailable: {exc}") from exc
+    report, metadata = view["report"], view["metadata"]
+    recipe = dataset.unified_recipe
+    if (report["recipeDigest"] != recipe["recipeDigest"]
+            or report["authorityDigest"] != recipe["authorityDigest"]
+            or plain(recipe["rawInputs"]) != list(view["declarations"].values())):
+        raise HealthProcessingError("Unified health recipe/authority closure changed; rebuild explicitly")
+    sources = []
+    for item in metadata:
+        declaration = view["declarations"][item["filename"]]
+        if declaration["source"] == "mdns":
+            continue
+        role = item["role"]
+        sources.append(SourceEvidence(
+            item["filename"], item.get("sha256") or "",
+            "final" if role in {"records", "projection"} else role,
+            "valid" if item["status"] == "selected" else item["status"],
+            item.get("sourceObservedAt"),
+        ))
+    sources.sort(key=lambda source: source.filename)
+    state = report["healthState"]
+    if state not in {"complete", "partial", "degraded"}:
+        raise HealthProcessingError("Unified health requires one unambiguous observed network")
+    completeness = Completeness(state)
+    provisional = {
+        filename for filename in view["rows"]
+        if (data_dir / filename.replace(".json", ".partial.json")).exists()
+        and (data_dir / filename.replace(".json", ".partial.json")).stat().st_mtime_ns
+        > (data_dir / filename).stat().st_mtime_ns
+    }
+    if provisional:
+        completeness = Completeness.PARTIAL
+        sources = [replace(source, state="provisional") if source.filename in provisional else source
+                   for source in sources]
+    if completeness is Completeness.PARTIAL and not allow_partial:
+        raise HealthProcessingError("Unified evidence is partial; use --allow-partial")
+    payloads = dict(view["rows"])
+    evidence_files = frozenset(payloads)
+    identity_file = dataset.health_profile.identity_file
+    if identity_file in view["payloads"]:
+        identity = view["payloads"][identity_file]
+    else:
+        # This companion was verified as part of the committed generation.
+        identity, _, _ = _stable_read(data_dir / identity_file)
+    try:
+        identity_network = network_id_from_ext_pan_id(identity.get("extPanId")) if isinstance(identity, dict) else None
+    except ValueError as exc:
+        raise HealthProcessingError("Invalid Unified observed network identity") from exc
+    if identity_network != report["networkInstance"]:
+        raise HealthProcessingError("Unified identity context contradicts the selected observed network")
+    payloads[identity_file] = identity
+    outcome_file = dataset.health_profile.required_outcomes[0]
+    outcome, _, _ = _stable_read(data_dir / outcome_file)
+    if (not isinstance(outcome, dict) or outcome.get("contractVersion") != "unified-v1"
+            or outcome.get("generationId") != report["generationId"]
+            or outcome.get("snapshotSha256") != report["snapshotSha256"]
+            or outcome.get("status") != state
+            or outcome.get("sourceSetDigest") != report["sourceSetDigest"]):
+        raise HealthProcessingError("Invalid Unified health outcome contract")
+    identity_source = next((source for source in sources if source.filename == identity_file), None)
+    # Generated companions never become freshness or observation-identity inputs.
+    times = [int(timestamp(s.source_observed_at).timestamp() * 1_000_000_000)
+             for s in sources if s.filename in evidence_files and s.source_observed_at]
+    if not times:
+        raise HealthProcessingError("Original health source time is unavailable")
+    if any(timestamp(s.source_observed_at) > read_time.astimezone(timezone.utc)
+           for s in sources if s.source_observed_at):
+        raise HealthProcessingError("Original Unified evidence time is in the future")
+    qualified = []
+    for domain in ("otbr-cli", "otbr-restapi"):
+        declarations = [i for i in recipe["rawInputs"] if i["source"] == domain]
+        required = [i for i in declarations if i["required"] or i["role"] in {"identity", "outcome"}]
+        if not required:
+            continue
+        by_name = {s.filename: s for s in sources}
+        valid = all(i["file"] in by_name and by_name[i["file"]].state == "valid"
+                    and by_name[i["file"]].source_observed_at
+                    and (i["role"] != "records" or i["file"] in payloads)
+                    for i in required)
+        if domain == "otbr-restapi":
+            valid = valid and all(_outcome_state(view["payloads"].get(i["file"])) is Completeness.COMPLETE
+                                  for i in declarations if i["role"] == "outcome")
+        # A newer provisional checkpoint is not a complete negative observation.
+        valid = valid and not any(
+            (data_dir / i["file"].replace(".json", ".partial.json")).exists()
+            and (data_dir / i["file"].replace(".json", ".partial.json")).stat().st_mtime_ns
+            > (data_dir / i["file"]).stat().st_mtime_ns
+            for i in required if i["role"] == "records" and (data_dir / i["file"]).exists()
+        )
+        if valid and completeness is Completeness.COMPLETE:
+            qualified.append(domain)
+    witness = witness_for_sources(report["networkInstance"], sources, qualified[0]) if qualified else None
+    context = {
+        "version": CONTEXT_VERSION, "recipe": plain(recipe),
+        "recipeContractDigest": digest(recipe),
+        "reportContractVersion": report["contractVersion"],
+        "reportContractDigest": digest([
+            report["contractVersion"], report.get("builderContract"),
+            recipe["recipeDigest"], recipe["authorityDigest"],
+        ]),
+        "originalEvidenceFingerprint": digest([
+            dict(filename=s.filename, digest=s.digest, kind=s.kind, state=s.state,
+                 sourceObservedAt=s.source_observed_at) for s in sources
+        ]),
+        "effectiveCoverage": dict(dataset.health_profile.coverage),
+        "absenceWitness": witness,
+    }
+    if witness is None:
+        if completeness is Completeness.COMPLETE:
+            completeness = Completeness.DEGRADED
+        context["effectiveCoverage"] = {
+            key: "limited" if value == "sufficient" else value
+            for key, value in context["effectiveCoverage"].items()
+        }
+    # Revalidate after companion reads and normalization to close read races.
+    from td_unified_dataset import read_generation
+    try:
+        if read_generation(data_dir, entry, verify_inputs=True, catalog=catalog) != report:
+            raise HealthProcessingError("Unified generation changed during health processing")
+    except UnifiedDatasetError as exc:
+        raise HealthProcessingError(str(exc)) from exc
+    return _ProcessingInputSnapshot(
+        payloads, sources, times,
+        int(timestamp(identity_source.source_observed_at).timestamp() * 1_000_000_000)
+        if identity_source and identity_source.source_observed_at else None,
+        identity_source.digest if identity_source else None,
+        identity_source.source_observed_at if identity_source else None,
+        completeness, context, evidence_files,
+    )
+
+
 def build_processing_result(
     *,
     data_dir: Path,
@@ -689,24 +870,26 @@ def build_processing_result(
     if not isinstance(network_name, str):
         network_name = None
 
+    sample_dataset = replace(dataset, files=tuple(sorted(inputs.evidence_files))) if inputs.evidence_files is not None else dataset
     available_finals = {
         filename: payloads[filename]
-        for filename in dataset.files
+        for filename in sample_dataset.files
         if filename in payloads
     }
     devices, relationships, metrics, duplicate_relationship_ids, device_ipv6_addresses = _normalize_samples(
-        dataset, available_finals
+        sample_dataset, available_finals
     )
     roster_facts = tuple(
         fact
-        for filename in dataset.files if filename in available_finals
+        for filename in sample_dataset.files if filename in available_finals
         for record in _records(available_finals[filename])
         for fact in extract_roster_facts(record, filename=filename, dataset=dataset,
-                                         policy=manifest.roster_policy)
+                                         policy=manifest.roster_policy,
+                                         evidence_files=inputs.evidence_files)
     )
     partition_membership, partition_membership_evidence = (
         _partition_membership_inputs(
-            dataset=dataset,
+            dataset=sample_dataset,
             payloads=available_finals,
             devices=devices,
             network_id=network_id,
@@ -761,13 +944,17 @@ def build_processing_result(
     source_set_digest = hashlib.sha256(
         "\0".join(f"{source.filename}:{source.digest}" for source in sorted(sources, key=lambda item: item.filename)).encode("utf-8")
     ).hexdigest()
+    if inputs.unified_context:
+        source_set_digest = inputs.unified_context["originalEvidenceFingerprint"]
     observed_ns = max(mtimes, default=0)
     observed_at = datetime.fromtimestamp(observed_ns / 1_000_000_000, timezone.utc).isoformat()
     now = processing_time or datetime.now(timezone.utc)
     observation_parts = (dataset.datasource_id, dataset.dataset_id, network_id,
                          observed_at, source_set_digest)
-    if dataset.dataset_id == "otbr_cli_networkdiag_fetch_all":
+    if dataset.dataset_id == "otbr_cli_diagnostics_fetch":
         observation_parts += (ROUTE64_SAMPLE_CONTRACT_VERSION,)
+    if inputs.unified_context:
+        observation_parts += ("comparison-v1-unified", inputs.unified_context["recipeContractDigest"])
     observation_key = "\0".join(observation_parts)
     observation_id = "observation:" + hashlib.sha256(observation_key.encode("utf-8")).hexdigest()[:24]
     observation = Observation(
@@ -793,6 +980,7 @@ def build_processing_result(
             observed_at=observed_at,
             completeness=completeness,
             observed_device_ids=frozenset(device.device_id for device in devices),
+            unified_health=inputs.unified_context,
         )
         if store
         else {
@@ -804,6 +992,12 @@ def build_processing_result(
         }
     )
     roster_available = store is not None
+    if inputs.unified_context:
+        inputs.unified_context["absenceOrderingAvailable"] = bool(roster_inputs.get("absenceAvailable"))
+        inputs.unified_context["positiveDeviceIds"] = sorted(
+            set(roster_inputs.get("witnessPositiveDeviceIds", []))
+            - {device.device_id for device in devices}
+        )
     evaluation_inputs = EvaluationInputs(
         roster=(
             EvaluationInputDomain(EvaluationInputState.AVAILABLE)
@@ -815,12 +1009,15 @@ def build_processing_result(
         expected_device_ids=roster_inputs["expectedDeviceIds"],
         absence_history=(
             EvaluationInputDomain(EvaluationInputState.AVAILABLE)
-            if roster_available
+            if roster_available and (inputs.unified_context is None or roster_inputs.get("absenceAvailable"))
             else EvaluationInputDomain(
                 EvaluationInputState.UNAVAILABLE, ("input-not-retained",)
             )
         ),
-        prior_complete_absences=roster_inputs["priorCompleteAbsences"],
+        prior_complete_absences=(
+            roster_inputs["priorCompleteAbsences"]
+            if inputs.unified_context is None or roster_inputs.get("absenceAvailable") else None
+        ),
         duplicate_relationships=EvaluationInputDomain(
             EvaluationInputState.AVAILABLE
         ),
@@ -839,7 +1036,7 @@ def build_processing_result(
     assessment = evaluate_observation(
         observation,
         policy,
-        profile=dataset.health_profile,
+        profile=sample_dataset.health_profile,
         expected_device_ids=roster_inputs["expectedDeviceIds"] or frozenset(),
         prior_complete_absences=roster_inputs["priorCompleteAbsences"] or {},
         assessed_at=now.isoformat(),
@@ -850,10 +1047,12 @@ def build_processing_result(
         history_boundary=roster_inputs["historyBoundary"],
         evaluation_inputs=evaluation_inputs,
         sample_contract_version=(
-            ROUTE64_SAMPLE_CONTRACT_VERSION
-            if dataset.dataset_id == "otbr_cli_networkdiag_fetch_all"
-            else "comparison-v1"
+            "comparison-v1-unified" if inputs.unified_context else (
+                ROUTE64_SAMPLE_CONTRACT_VERSION
+                if dataset.dataset_id == "otbr_cli_diagnostics_fetch" else "comparison-v1"
+            )
         ),
+        unified_health=inputs.unified_context,
     )
     return ProcessingResult(observation, assessment, None, None, roster_facts)
 

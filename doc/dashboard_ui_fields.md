@@ -142,6 +142,12 @@ selected device and its detail panel.
 
 Selecting a topology node or table row publishes `tdash:device-selected`.
 Details, Device Settings, and Device Insights consume that shared selection.
+Unified records also expose `nativeNodeIds` in Keys and `nativeRelationships`
+in Routes/Links. Native IDs are source-local, not Matter identities. Typed native
+links retain original endpoints, transport, qualitative strength, and only
+observed directional metrics. Committed scoped IDs keep same-address records
+distinct across table, topology, selection and details.
+
 Details sections and field bindings come from `DEVICE_DETAILS_SECTIONS`; section
 containers are declared in `tdash.html`.
 

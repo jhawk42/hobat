@@ -24,6 +24,7 @@ import json
 import sys
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -64,6 +65,42 @@ class TestCatalogApi(SmokeTestBase):
         self.assertEqual(response.status, 200)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(json.loads(response.body), catalog)
+
+    async def test_catalog_responds_while_capability_inspection_is_blocked(self) -> None:
+        from td_dataset_catalog import load_dataset_catalog
+        from td_source_capabilities import SourceCapabilityService
+
+        service = SourceCapabilityService(probes={})
+        started = threading.Event()
+        release = threading.Event()
+        original = service._read_files
+
+        def delayed(*args):
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError("Catalog was blocked behind capability inspection")
+            return original(*args)
+
+        request = MagicMock()
+        request.app = {
+            td_webserver.TD_CATALOG_APP_KEY: load_dataset_catalog(),
+            td_webserver.TD_DATA_DIR_APP_KEY: self.data_dir,
+            td_webserver.TD_SOURCE_CAPABILITIES_APP_KEY: service,
+        }
+        with patch.object(service, "_read_files", side_effect=delayed) as inspect:
+            first = asyncio.create_task(td_webserver.handle_capabilities_api(request))
+            second = asyncio.create_task(td_webserver.handle_capabilities_api(request))
+            try:
+                self.assertTrue(await asyncio.to_thread(started.wait, 5))
+                response = await asyncio.wait_for(td_webserver.handle_catalog_api(request), 0.5)
+                self.assertEqual(response.status, 200)
+                self.assertFalse(first.done())
+                self.assertFalse(second.done())
+            finally:
+                release.set()
+            responses = await asyncio.gather(first, second)
+        self.assertEqual(inspect.call_count, 1)
+        self.assertEqual(json.loads(responses[0].body)["files"], json.loads(responses[1].body)["files"])
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ from td_health_comparison import (
 )
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from td_health_manifest import ROSTER_FIELDS, load_health_manifest
+from td_dataset_catalog import RETIRED_HEALTH_DATASET_IDS
 from td_health_observation_store import (
     HOBAT_DATABASE_FILENAME, HealthStoreMigrationError,
 )
@@ -64,6 +65,15 @@ _LEGACY_EVIDENCE_KIND_MAP = {
     "cumulative": "since-reset",
     "lifetime": "since-reset",
 }
+
+
+def _validate_read_dataset(dataset_id: str) -> None:
+    if dataset_id in RETIRED_HEALTH_DATASET_IDS:
+        from td_health_manifest_history import load_manifest_history
+
+        if dataset_id in load_manifest_history().declared_dataset_ids:
+            return
+    load_health_manifest().dataset(dataset_id)
 
 
 def _uses_catalog_contract(evaluator_version: object) -> bool:
@@ -842,7 +852,7 @@ class TDHealthReadService:
         offset: int = 0,
     ) -> dict[str, Any] | None:
         if dataset_id is not None:
-            load_health_manifest().dataset(dataset_id)
+            _validate_read_dataset(dataset_id)
         row = self.store.assessment_record(
             dataset_id=dataset_id,
             network_id=network_id,
@@ -984,7 +994,7 @@ class TDHealthReadService:
                     offset: int) -> dict[str, Any]:
         if not network_id.startswith("extpan:"):
             raise ValueError("network must be a canonical network ID")
-        load_health_manifest().dataset(dataset_id)
+        _validate_read_dataset(dataset_id)
         rows, total = self.store.comparison_rows(
             network_id=network_id, dataset_id=dataset_id, limit=limit, offset=offset,
         )
@@ -999,7 +1009,7 @@ class TDHealthReadService:
             character not in "0123456789abcdef" for character in network_id[7:]
         ):
             raise ValueError("network must be a canonical network ID")
-        load_health_manifest().dataset(dataset_id)
+        _validate_read_dataset(dataset_id)
         if side not in ("before", "after"):
             raise ValueError("side must be before or after")
         try:
@@ -1195,7 +1205,7 @@ class TDHealthReadService:
             character not in "0123456789abcdef" for character in network_id[7:]
         ):
             raise ValueError("network must be a canonical network ID")
-        load_health_manifest().dataset(dataset_id)
+        _validate_read_dataset(dataset_id)
         if not before_assessment_id or not after_assessment_id:
             raise ValueError("before and after assessment IDs are required")
         if scope not in ("all", *COMPARISON_SCOPES):

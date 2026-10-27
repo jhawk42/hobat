@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from td_dataset_catalog import load_dataset_catalog
+
 
 pytestmark = pytest.mark.requires_data_dir
 
@@ -25,6 +27,11 @@ def test_cached_view_capabilities_cover_catalog_and_preserve_shape(node_json) ->
         "tests/js/run-view-capability-snapshot.mjs", "data", "--shape-only", timeout=60,
     )
     expected = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    for entry in load_dataset_catalog()["datasets"]:
+        if "unified" in entry and all(
+            (ROOT / "data" / filename).is_file() for filename in entry["files"]
+        ):
+            expected[entry["value"]] = expected["otbr_restapi_topology"]
 
     assert set(actual) == set(expected)
     for dataset, snapshot in actual.items():

@@ -113,6 +113,9 @@ function identityKeysForRecord(record) {
 function indexIdentity(identityToNodeId, record, nodeId) {
   identityKeysForRecord(record).forEach((key) => {
     if (!identityToNodeId.has(key)) identityToNodeId.set(key, nodeId);
+    else if (record?._unifiedRecordId && identityToNodeId.get(key) !== nodeId) {
+      identityToNodeId.set(key, null);
+    }
   });
 }
 
@@ -246,7 +249,8 @@ export function createTopologyViewModel(
 
 export function resolveTopologyNodeId(viewModel, record) {
   for (const key of identityKeysForRecord(record)) {
-    if (viewModel.identityToNodeId.has(key)) return viewModel.identityToNodeId.get(key);
+    const nodeId = viewModel.identityToNodeId.get(key);
+    if (nodeId != null) return nodeId;
   }
   const fallback = toText(record?.id).toLowerCase();
   return viewModel.nodeMap.has(fallback) ? fallback : null;

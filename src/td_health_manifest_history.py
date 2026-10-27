@@ -48,7 +48,7 @@ _ROSTER_V1 = frozenset({
     "0c7160769a97af622b0c6de44bc2597cc9f39d98595a9ced01bc32dc30aab126",
     "942167cc426ff3415f8c7394ac4920cc82559571a81ce731f0ebd69ab6bf6ad1",
 })
-_CURRENT_SAMPLE_SUPPORT = MappingProxyType({
+_ORIGINAL_SAMPLE_SUPPORT = MappingProxyType({
     "otbr_cli_networkdiag_fetch_all": "comparison-v1-route64",
     "otbr_cli_topology_health": "comparison-v1",
     "otbr_cli_topology_mdns_health": "comparison-v1",
@@ -57,9 +57,32 @@ _CURRENT_SAMPLE_SUPPORT = MappingProxyType({
     "otbr_restapi_topology_mdns_health": "comparison-v1",
     "merged_otbr_topology_mdns_health": "comparison-v1",
 })
+_CURRENT_SAMPLE_SUPPORT = MappingProxyType({
+    "otbr_cli_diagnostics_fetch": "comparison-v1-route64",
+    "otbr_cli_topology": "comparison-v1",
+    "otbr_cli_topology_mdns": "comparison-v1",
+    "otbr_restapi_devices_diagnostics_fetch": "comparison-v1",
+    "otbr_restapi_topology": "comparison-v1",
+    "otbr_restapi_topology_mdns": "comparison-v1",
+    "multi_source_otbr_topology_mdns": "comparison-v1",
+    "otbr_cli_unified": "comparison-v1-unified",
+    "otbr_restapi_unified": "comparison-v1-unified",
+    "ha_matter_ws_unified": "comparison-v1-unified",
+    "multi_source_unified": "comparison-v1-unified",
+})
 # Reviewed schema-4 producers only; a structurally equivalent recipe is not proof.
 PRODUCER_SAMPLE_SUPPORT = MappingProxyType({
-    digest: _CURRENT_SAMPLE_SUPPORT for digest in _ROSTER_V1
+    **{digest: _ORIGINAL_SAMPLE_SUPPORT for digest in _ROSTER_V1},
+    "50b5a9f2e71c734a9fe5b8615d0fe7ee3e2a22f3965bd616af6bf1a2c3e05598": _ORIGINAL_SAMPLE_SUPPORT,
+    "9ec1668fbd091746f82c6783b219e6e447e29a2ee81b6817f8e3c2aa8c2c9e28": _CURRENT_SAMPLE_SUPPORT,
+    "5a981ad569a13253c809d36cf0c3a0668a127a9f4b20b0d8d82b8f54e2ce6752": _CURRENT_SAMPLE_SUPPORT,
+    "73e911ff0385d0de5f06bbb870dccb50467e78f64cec906bab18527125046b3e": _CURRENT_SAMPLE_SUPPORT,
+    "88ac93a9e81380ad7c02542c23e8cfe58f469cb180c589df89acc7f61b19349e": MappingProxyType({
+        key: value for key, value in _CURRENT_SAMPLE_SUPPORT.items()
+        if value != "comparison-v1-unified"
+    }),
+    "d369ccc7cca9e30cd2016ac33213039343ef94d9d224ea73d2ffd2dbcb548dd6": _CURRENT_SAMPLE_SUPPORT,
+    "c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011": _CURRENT_SAMPLE_SUPPORT,
 })
 
 
@@ -160,6 +183,10 @@ def health_projection(manifest: Mapping) -> dict:
             for entry in manifest["datasets"] if entry.get("healthEligible") is True
         ]
         datasets.sort(key=lambda entry: entry["value"])
+        entries = {entry["value"]: entry for entry in manifest["datasets"]}
+        for entry in datasets:
+            if "unifiedRecipe" in entries[entry["value"]]:
+                entry["unifiedRecipe"] = _plain(entries[entry["value"]]["unifiedRecipe"])
         profiles = {entry["healthProfile"]: _plain(manifest["healthProfiles"][entry["healthProfile"]])
                     for entry in datasets}
         authority = manifest.get("authority")
@@ -175,27 +202,36 @@ def health_projection(manifest: Mapping) -> dict:
 
 
 def dataset_declaration(dataset: HealthDataset) -> dict:
-    return {
+    result = {
         "source": dataset.datasource_id, "value": dataset.dataset_id,
         "files": list(dataset.files), "mergeStrategy": dataset.merge_strategy,
         "rowExtractor": dataset.row_extractor, "adaptor": dataset.adaptor,
         "healthProfile": dataset.health_profile.profile_id,
     }
+    if dataset.unified_recipe is not None:
+        result["unifiedRecipe"] = _plain(dataset.unified_recipe)
+    return result
 
 
 def profile_declaration(profile: HealthProfile) -> dict:
-    return {
+    result = {
         "identityFile": profile.identity_file,
         "requiredOutcomes": list(profile.required_outcomes),
         "coverage": dict(profile.coverage),
         "topologyAuthority": profile.topology_authority,
         "borderRouterAuthority": profile.border_router_authority,
     }
+    if profile.input_mode != "files":
+        result.update(inputMode=profile.input_mode, evidenceReport=profile.evidence_report)
+    return result
 
 
 def _profile(profile_id: str, raw: object) -> HealthProfile:
     _text(profile_id, "profile ID")
-    if not isinstance(raw, Mapping) or set(raw) != _PROFILE_FIELDS:
+    if not isinstance(raw, Mapping) or set(raw) not in (
+        _PROFILE_FIELDS, _PROFILE_FIELDS | {"inputMode"},
+        _PROFILE_FIELDS | {"inputMode", "evidenceReport"}
+    ):
         raise ManifestHistoryError(f"Invalid profile declaration: {profile_id}")
     coverage = raw["coverage"]
     if not isinstance(coverage, Mapping) or set(coverage) != set(COVERAGE_PILLARS):
@@ -205,10 +241,14 @@ def _profile(profile_id: str, raw: object) -> HealthProfile:
         raise ManifestHistoryError(f"Invalid coverage state: {profile_id}")
     if any(type(raw[key]) is not bool for key in ("topologyAuthority", "borderRouterAuthority")):
         raise ManifestHistoryError(f"Invalid authority flags: {profile_id}")
-    return HealthProfile(profile_id, _filename(raw["identityFile"]),
+    result = HealthProfile(profile_id, _filename(raw["identityFile"]),
                          _filenames(raw["requiredOutcomes"], "requiredOutcomes"),
                          MappingProxyType(dict(coverage)), raw["topologyAuthority"],
-                         raw["borderRouterAuthority"])
+                         raw["borderRouterAuthority"], raw.get("inputMode", "files"),
+                         raw.get("evidenceReport"))
+    from td_health_unified import validate_profile
+    validate_profile(result)
+    return result
 
 
 def _dataset(raw: Mapping, profiles: Mapping[str, HealthProfile]) -> HealthDataset:
@@ -222,10 +262,13 @@ def _dataset(raw: Mapping, profiles: Mapping[str, HealthProfile]) -> HealthDatas
     strategy = _text(raw["mergeStrategy"], "mergeStrategy")
     if strategy not in ALLOWED_MERGE_STRATEGIES:
         raise ManifestHistoryError(f"Invalid mergeStrategy: {strategy}")
+    from td_health_unified import validate_recipe
     return HealthDataset(_text(raw["source"], "datasource"), dataset_id,
                          _filenames(raw["files"], "files", required=True), strategy,
                          _text(raw["rowExtractor"], "rowExtractor"),
-                         _text(raw["adaptor"], "adaptor"), profiles[profile_id])
+                         _text(raw["adaptor"], "adaptor"), profiles[profile_id],
+                         validate_recipe(raw.get("unifiedRecipe"))
+                         if profiles[profile_id].input_mode == "unified" else None)
 
 
 def retained_replay_contract(dataset: HealthDataset, sample_contract_version: str) -> dict:
@@ -291,9 +334,14 @@ def _validate_policy(raw: object, datasets: Mapping[str, HealthDataset], digest:
         raise ManifestHistoryError("Invalid rosterPolicy limits")
     if not isinstance(raw["fields"], Mapping) or set(raw["fields"]) != fields:
         raise ManifestHistoryError("Invalid historical rosterPolicy fields")
-    allowed = {name for dataset in datasets.values() for name in dataset.files
+    allowed = {name for dataset in datasets.values() if dataset.unified_recipe is None for name in dataset.files
                if not name.startswith(("td-mdns-", "td-static-"))
                and ".outcome." not in name and ".partial." not in name}
+    from td_health_unified import sample_sources
+    allowed.update(name for dataset in datasets.values() if dataset.unified_recipe is not None
+                   for name in sample_sources(dataset)
+                   if not name.startswith("td-mdns-") and ".outcome." not in name
+                   and not name.endswith(("thread-network-info.json", "dataset-active.json")))
     for definition in raw["fields"].values():
         if not isinstance(definition, Mapping) or set(definition) != {"sources", "freshnessSeconds"}:
             raise ManifestHistoryError("Invalid rosterPolicy field definition")
@@ -357,7 +405,7 @@ def _parse_datasets(raw: object, digest: str, *, current: bool) -> Mapping[str, 
     if raw["schemaVersion"] == 2:
         from td_dataset_catalog import validate_dataset_catalog
         try:
-            validate_dataset_catalog(raw)
+            validate_dataset_catalog(raw, historical=not current)
         except (KeyError, TypeError, AttributeError, HealthManifestError) as exc:
             raise ManifestHistoryError(f"Invalid historical catalog: {exc}") from exc
         for filename in raw["authority"]["sourceDefaults"]:
@@ -377,6 +425,8 @@ class ManifestRevision:
     committed_at: str | None = None
     manifest_path: str = "src/td-dataset-manifest.json"
     is_current: bool = False
+    capture_kind: str | None = None
+    captured_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -480,7 +530,7 @@ class ManifestHistoryResolver:
         ids = tuple(sorted({item.revision_id for item in candidates}))
         if not candidates:
             reason = ("unsupported-sample-contract" if sample_contract_version not in
-                      {"comparison-v1", "comparison-v1-route64"} else "unsupported-profile")
+                      {"comparison-v1", "comparison-v1-route64", "comparison-v1-unified"} else "unsupported-profile")
             return SourceContractResolution("unresolved", (), None, (), None, reason)
         if len(digests) != 1:
             return SourceContractResolution("ambiguous", candidates, None, ids, None,
@@ -519,21 +569,27 @@ def _read(path: Path) -> bytes:
 def _revision(entry: object) -> ManifestRevision:
     fields = {"revisionId", "commit", "committedAt", "manifestPath", "manifestDigest",
               "healthContractDigest", "manifest"}
-    if not isinstance(entry, dict) or set(entry) != fields:
+    worktree_fields = fields | {"captureKind", "capturedAt"}
+    if not isinstance(entry, dict) or set(entry) not in (fields, worktree_fields):
         raise ManifestHistoryError("Unsupported archive revision fields")
     digest = entry["manifestDigest"]
     if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
         raise ManifestHistoryError("Invalid manifestDigest")
     if entry["revisionId"] != f"manifest-sha256:{digest}":
         raise ManifestHistoryError("Revision ID does not match manifestDigest")
-    if not isinstance(entry["commit"], str) or not re.fullmatch(r"[0-9a-f]{40}", entry["commit"]):
+    worktree = set(entry) == worktree_fields
+    if worktree:
+        if entry["captureKind"] != "worktree" or entry["commit"] is not None or entry["committedAt"] is not None:
+            raise ManifestHistoryError("Invalid worktree capture provenance")
+    elif not isinstance(entry["commit"], str) or not re.fullmatch(r"[0-9a-f]{40}", entry["commit"]):
         raise ManifestHistoryError("Invalid revision commit")
     try:
-        timestamp = datetime.fromisoformat(entry["committedAt"])
+        timestamp = datetime.fromisoformat(entry["capturedAt"] if worktree else entry["committedAt"])
         if timestamp.tzinfo is None:
             raise ValueError("Timestamp requires an offset")
     except (ValueError, TypeError) as exc:
-        raise ManifestHistoryError("Invalid revision committedAt") from exc
+        field = "capturedAt" if worktree else "committedAt"
+        raise ManifestHistoryError(f"Invalid revision {field}") from exc
     if entry["manifestPath"] != "src/td-dataset-manifest.json":
         raise ManifestHistoryError("Unsupported historical manifestPath")
     if canonical_digest(entry["manifest"]) != digest:
@@ -544,7 +600,8 @@ def _revision(entry: object) -> ManifestRevision:
         raise ManifestHistoryError("Historical health projection digest mismatch")
     return ManifestRevision(entry["revisionId"], digest, projection_digest,
                             _freeze(entry["manifest"]), datasets, entry["commit"],
-                            entry["committedAt"], entry["manifestPath"])
+                            entry["committedAt"], entry["manifestPath"],
+                            capture_kind=entry.get("captureKind"), captured_at=entry.get("capturedAt"))
 
 
 def load_manifest_history(manifest_path: Path = MANIFEST_PATH,
@@ -568,7 +625,7 @@ def load_manifest_history(manifest_path: Path = MANIFEST_PATH,
                                datasets, is_current=True)
     revisions = tuple(_revision(entry) for entry in archive["revisions"])
     ids = [revision.revision_id for revision in revisions]
-    commits = [revision.commit for revision in revisions]
+    commits = [revision.commit for revision in revisions if revision.commit is not None]
     if len(set(ids)) != len(ids) or len(set(commits)) != len(commits):
         raise ManifestHistoryError("Duplicate revision ID or conflicting commit declaration")
     if current.revision_id in ids:

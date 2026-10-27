@@ -43,6 +43,8 @@ class HealthProfile:
     coverage: Mapping[str, str]
     topology_authority: bool
     border_router_authority: bool
+    input_mode: str = "files"
+    evidence_report: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,7 @@ class HealthDataset:
     row_extractor: str
     adaptor: str
     health_profile: HealthProfile
+    unified_recipe: Mapping | None = None
 
 
 @dataclass(frozen=True)
@@ -100,7 +103,11 @@ def _safe_filename(value: object, *, field: str) -> str:
 def _roster_policy(raw: object, datasets: Mapping[str, HealthDataset]) -> RosterPolicy:
     if not isinstance(raw, dict) or not isinstance(raw.get("version"), str) or not raw["version"]:
         raise HealthManifestError("Manifest requires a versioned rosterPolicy")
-    declared = {filename for dataset in datasets.values() for filename in dataset.files}
+    declared = {filename for dataset in datasets.values() if dataset.unified_recipe is None
+                for filename in dataset.files}
+    from td_health_unified import sample_sources
+    declared.update(filename for dataset in datasets.values() if dataset.unified_recipe is not None
+                    for filename in sample_sources(dataset))
     excluded = {filename for filename in declared if filename.startswith("td-mdns-") or
                 filename.startswith("td-static-") or ".outcome." in filename or ".partial." in filename}
     allowed = declared - excluded
@@ -138,8 +145,10 @@ def _roster_policy(raw: object, datasets: Mapping[str, HealthDataset]) -> Roster
 
 
 def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
+    from td_dataset_catalog import unique_json_object
+
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object)
     except (OSError, json.JSONDecodeError) as exc:
         raise HealthManifestError(f"Cannot load health manifest: {exc}") from exc
 
@@ -189,7 +198,11 @@ def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
             coverage=MappingProxyType(dict(coverage)),
             topology_authority=topology_authority,
             border_router_authority=border_router_authority,
+            input_mode=value.get("inputMode", "files"),
+            evidence_report=value.get("evidenceReport"),
         )
+        from td_health_unified import validate_profile, validate_recipe
+        validate_profile(profiles[profile_id])
 
     datasets: dict[str, HealthDataset] = {}
     seen_dataset_ids: set[str] = set()
@@ -232,7 +245,14 @@ def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
             row_extractor=row_extractor,
             adaptor=adaptor,
             health_profile=profiles[profile_id],
+            unified_recipe=(
+                validate_recipe(value.get("unifiedRecipe"))
+                if profiles[profile_id].input_mode == "unified" else None
+            ),
         )
+        if datasets[dataset_id].unified_recipe is not None:
+            from td_health_unified import validate_catalog_recipe
+            validate_catalog_recipe(raw, value, profiles[profile_id])
 
     ineligible_datasets: dict[str, IneligibleHealthDataset] = {}
     for value in raw_ineligible_datasets:

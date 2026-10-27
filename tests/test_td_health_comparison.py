@@ -169,9 +169,9 @@ def test_interval_gate_fails_closed(observation_changes, assessment_changes, rea
 
 def test_route64_sample_contract_requires_matching_qualified_endpoints() -> None:
     before, after = _endpoints()
-    before = replace(before[0], dataset_id="otbr_cli_networkdiag_fetch_all"), replace(
+    before = replace(before[0], dataset_id="otbr_cli_diagnostics_fetch"), replace(
         before[1], sample_contract_version="comparison-v1-route64")
-    after = replace(after[0], dataset_id="otbr_cli_networkdiag_fetch_all"), replace(
+    after = replace(after[0], dataset_id="otbr_cli_diagnostics_fetch"), replace(
         after[1], sample_contract_version="comparison-v1-route64")
     assert _compare(before, after).compatibility.comparable
     old = before[0], replace(before[1], sample_contract_version=COMPARISON_VERSION)
@@ -258,10 +258,16 @@ def test_roster_only_digest_change_does_not_invalidate_metric_interval() -> None
 
 
 def test_source_roles_are_derived_from_approved_dataset() -> None:
-    dataset = next(iter(load_health_manifest().datasets.values()))
-    roles = source_roles_for_dataset(dataset)
-    assert set(roles) == set(dataset.files) | {dataset.health_profile.identity_file} | set(dataset.health_profile.required_outcomes)
-    assert set(roles.values()) == {"required"}
+    for dataset in load_health_manifest().datasets.values():
+        roles = source_roles_for_dataset(dataset)
+        expected = set(dataset.files) | {dataset.health_profile.identity_file} | set(dataset.health_profile.required_outcomes)
+        if dataset.unified_recipe:
+            expected.update(item["file"] for item in dataset.unified_recipe["rawInputs"])
+            assert all(roles[item["file"]] == ("required" if item["required"] else "optional")
+                       for item in dataset.unified_recipe["rawInputs"])
+        else:
+            assert set(roles.values()) == {"required"}
+        assert set(roles) == expected
 
 
 def test_missing_presence_requires_newer_complete_authoritative_source() -> None:

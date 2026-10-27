@@ -43,6 +43,7 @@ from td_device_actions import (
     validate_request_against_record,
 )
 from td_source_capabilities import SourceCapabilityService
+from td_unified_dataset import UnifiedDatasetError, read_generation, read_generation_artifact
 from td_logging import (
     configure_logging,
     redact_command_args,
@@ -150,7 +151,7 @@ class FileAction:
 
 
 def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
-    return {
+    actions = {
         # System
         # Fetches extaddr to device_label mapping file.
         EXTADDR_DEVICE_LABEL_MAP_FILENAME: FileAction(
@@ -352,6 +353,32 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s, action=["merge-dataset"], action_cost_s=2
         ),
     }
+    for entry in load_dataset_catalog()["datasets"]:
+        if "unified" not in entry:
+            continue
+        recipe = entry["unified"]
+        row_file = entry["files"][0]
+        actions[row_file] = FileAction(
+            max_age_s=default_max_age_s,
+            action=["unify-dataset", "--dataset", entry["value"], "--allow-partial", "--json"],
+            action_cost_s=40, force_async=True,
+        )
+        for filename in (recipe["reportFile"], recipe["outcomeFile"], recipe["identityFile"],
+                         row_file.removesuffix(".json") + ".network.json"):
+            if filename is not None:
+                actions[filename] = FileAction(max_age_s=default_max_age_s, action="STATIC", action_cost_s=0)
+    return actions
+
+
+def _unified_entry_for_file(filename: str) -> dict | None:
+    for entry in load_dataset_catalog()["datasets"]:
+        recipe = entry.get("unified")
+        if recipe is not None and filename in {
+            entry["files"][0], recipe["reportFile"], recipe["outcomeFile"], recipe["identityFile"],
+            entry["files"][0].removesuffix(".json") + ".network.json",
+        }:
+            return entry
+    return None
 
 
 FILE_ACTION_MAP: dict[str, FileAction] = _build_file_action_map(
@@ -377,7 +404,7 @@ def _build_checkpoint_filename_set(file_action_map: dict[str, FileAction]) -> se
     return {
         create_checkpoint_filename(filename).lower()
         for filename, fa in file_action_map.items()
-        if fa.action != "STATIC"
+        if fa.action != "STATIC" and fa.action[0] != "unify-dataset"
     }
 
 
@@ -1056,6 +1083,17 @@ async def _dispatch_long_cost(
                         ):
                             raise
                         exit_code = await run_td_cli(args, ddir, timeout_s=tmo)
+                    if exit_code == 0 and args[0] == "unify-dataset":
+                        entry = _unified_entry_for_file(filename)
+                        if entry is None:
+                            raise UnifiedDatasetError("Missing Unified action recipe")
+                        report = read_generation(ddir, entry)
+                        j.result = {
+                            "materializationState": report["materializationState"],
+                            "healthState": report["healthState"],
+                            "coverage": report["coverage"],
+                            "generationId": report["generationId"],
+                        }
             except asyncio.CancelledError:
                 j = _job_registry.get(jid)
                 if j is not None and j.status == JOB_STATUS_CANCELLING:
@@ -1900,17 +1938,32 @@ def _build_file_response(
     avoiding retransmission of unchanged data files.
     Raises ``HTTPInternalServerError`` on OS failure.
     """
+    unified = _unified_entry_for_file(file_path.name)
+    verified_payload = None
+    materialization_state = None
     try:
-        st = file_path.stat()
+        if unified is not None:
+            artifact, report = read_generation_artifact(file_path.parent, unified, file_path.name)
+            verified_payload = artifact.content
+            materialization_state = report["materializationState"]
+            file_mtime = artifact.mtime_ns / 1_000_000_000
+            etag = artifact.digest
+        else:
+            st = file_path.stat()
+            file_mtime = st.st_mtime
+            etag = f"{st.st_mtime_ns:x}-{st.st_size:x}"
+    except UnifiedDatasetError as exc:
+        logging.error("Refusing uncommitted Unified data: %s", exc)
+        raise aiohttp.web.HTTPConflict(reason=str(exc)) from exc
     except OSError as exc:
         logging.error("Failed to stat %s: %s", file_path, exc)
         raise aiohttp.web.HTTPInternalServerError()
 
-    file_mtime: float = st.st_mtime
-    etag = f"{st.st_mtime_ns:x}-{st.st_size:x}"
     cache_headers = build_cache_response_headers(
         file_action.max_age_s, file_mtime)
     cache_headers["ETag"] = f'"{etag}"'
+    if materialization_state is not None:
+        cache_headers["X-TD-Materialization-State"] = materialization_state
 
     # Conditional GET — If-None-Match takes precedence over If-Modified-Since
     # per RFC 9110 §13.1.2 and §13.1.3.
@@ -1931,7 +1984,7 @@ def _build_file_response(
                     pass  # malformed header; fall through to serve the full response
 
     try:
-        payload = file_path.read_bytes()
+        payload = verified_payload if verified_payload is not None else file_path.read_bytes()
     except OSError as exc:
         logging.error("Failed to read %s: %s", file_path, exc)
         raise aiohttp.web.HTTPInternalServerError()
@@ -2151,7 +2204,7 @@ def _validate_action_records(
         "mdns": "td-mdns-",
         "eve": "td-eve-",
     }
-    if action_request.source != "merged":
+    if action_request.source != "multi-source":
         prefix = source_prefixes.get(action_request.source)
         source_matches = prefix is None or any(
             filename.startswith(prefix) for filename in action_request.dataset_files

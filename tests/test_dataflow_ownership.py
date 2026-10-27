@@ -13,7 +13,13 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from td_dataset_catalog import load_dataset_catalog
+from td_dataset_catalog import (
+    RETIRED_HEALTH_DATASET_IDS,
+    load_dataset_catalog,
+    resolve_dataset,
+    validate_dataset_catalog,
+)
+from td_health_manifest import HealthManifestError
 from td_webserver import TD_CATALOG_APP_KEY, handle_catalog_api
 
 
@@ -39,6 +45,114 @@ ALIAS_OWNERS = {
     "td_json_key_normalizer.py:EXPLICIT_KEY_MAP": "collector wire-format conversion",
     "tdash-device-fields.js:PREFERRED_FIELD_NAMES": "canonical browser field model",
 }
+
+
+def test_canonical_catalog_aliases_and_preserved_recipes():
+    catalog = load_dataset_catalog()
+    archive = json.loads((PYTHON / "td-dataset-manifest-history.json").read_text())
+    baseline = next(revision["manifest"] for revision in archive["revisions"]
+                    if revision["manifestDigest"] == "50b5a9f2e71c734a9fe5b8615d0fe7ee3e2a22f3965bd616af6bf1a2c3e05598")
+    expected_ids = (
+        "otbr_cli_mesh", "otbr_cli_diagnostics_ftd_multicast", "otbr_cli_mesh_ftd",
+        "otbr_cli_mesh_ftd_tables_mdns", "otbr_cli_mesh_neighbors", "otbr_cli_mesh_children",
+        "otbr_cli_diagnostics_fetch", "otbr_cli_topology", "otbr_cli_topology_mdns", "otbr_cli_router_table",
+        "otbr_restapi_diagnostics_list", "otbr_restapi_devices_list", "otbr_restapi_devices_diagnostics_list",
+        "otbr_restapi_devices_fetch", "otbr_restapi_devices_diagnostics_fetch",
+        "otbr_restapi_diagnostics_fetch", "otbr_restapi_mesh_diagnostics", "otbr_restapi_topology",
+        "otbr_restapi_topology_mdns", "otbr_restapi_actions_list", "ha_matter_ws_devices",
+        "ha_matter_ws_border_routers", "ha_matter_ws_diagnostics", "ha_matter_ws_mesh_diagnostics",
+        "ha_matter_ws_matter_topology", "ha_matter_ws_thread_topology", "ha_matter_ws_topology_merge",
+        "eve_layout", "eve_topology", "thread_tools_diagnostics", "multi_source_otbr_mdns",
+        "multi_source_otbr_topology_mdns", "multi_source_merged", "mdns_border_routers",
+        "mdns_hap", "mdns_matter", "mdns_thread", "system_device_labels",
+    )
+    original_datasets = [entry for entry in catalog["datasets"] if "unified" not in entry]
+    assert tuple(entry["value"] for entry in original_datasets) == expected_ids
+    expected_aliases = {}
+    for old, new in zip(baseline["datasets"], original_datasets, strict=True):
+        assert old["files"] == new["files"]
+        for field in ("healthEligible", "healthProfile", "mergeStrategy", "rowExtractor", "adaptor",
+                      "mergeInputs", "mergeGroups"):
+            assert old.get(field) == new.get(field)
+        if old["value"] != new["value"] and not old["healthEligible"]:
+            expected_aliases[old["value"]] = new["value"]
+    assert catalog["datasetAliases"] == expected_aliases
+    assert len(expected_aliases) == 26
+    assert catalog["sourceAliases"] == {"merged": "multi-source"}
+    for old, new in zip(baseline["datasources"], catalog["datasources"], strict=True):
+        if "default_dataset_value" in old:
+            old_files = next(entry["files"] for entry in baseline["datasets"]
+                             if entry["value"] == old["default_dataset_value"])
+            assert resolve_dataset(catalog, new["default_dataset_value"])["files"] == old_files
+    for alias, target in expected_aliases.items():
+        assert resolve_dataset(catalog, alias)["value"] == target
+    for retired in RETIRED_HEALTH_DATASET_IDS:
+        with pytest.raises(HealthManifestError, match="Unsupported"):
+            resolve_dataset(catalog, retired)
+    alias = next(old for old, new in expected_aliases.items() if new == "multi_source_merged")
+    assert resolve_dataset(catalog, alias, "merged")["value"] == "multi_source_merged"
+    for dataset_id, source in (
+        ("multi_source_merged", "merged"), ("multi_source_otbr_topology_mdns", "merged"),
+        (alias, "otbr-cli"), ("unsupported", "merged"),
+    ):
+        with pytest.raises(HealthManifestError):
+            resolve_dataset(catalog, dataset_id, source)
+    for dataset_id, source in (
+        ("otbr_cli_mesh_ftd_tables_mdns", "otbr-cli"), ("otbr_cli_topology_mdns", "otbr-cli"),
+        ("otbr_restapi_topology_mdns", "otbr-restapi"),
+    ):
+        assert resolve_dataset(catalog, dataset_id, source)["source"] == source
+    registry = (JAVASCRIPT / "tdash-dataset-registry.js").as_uri()
+    script = f"""
+        import {{resolveDataset, getDatasetCatalog}} from {json.dumps(registry)};
+        const catalog = getDatasetCatalog();
+        const aliases = Object.fromEntries(Object.keys(catalog.datasetAliases)
+          .map(key => [key, resolveDataset(key).value]));
+        const pairs = {json.dumps([(alias, "merged"), ("multi_source_merged", "merged")])};
+        const results = pairs.map(([dataset, source]) => {{
+          try {{ return resolveDataset(dataset, source).value; }} catch {{ return null; }}
+        }});
+        console.log(JSON.stringify({{aliases, results}}));
+    """
+    result = subprocess.run(["node", "--input-type=module", "-e", script],
+                            capture_output=True, text=True, check=True, cwd=ROOT)
+    assert json.loads(result.stdout) == {"aliases": expected_aliases, "results": ["multi_source_merged", None]}
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda c: c["datasetAliases"].update(unknown="missing"),
+    lambda c: c["datasetAliases"].update(unknown="otbr_cli_meshdiag_topology"),
+    lambda c: c["datasetAliases"].update(otbr_cli_mesh="otbr_cli_mesh"),
+    lambda c: c["datasetAliases"].update(otbr_cli_networkdiag_fetch_all="otbr_cli_diagnostics_fetch"),
+    lambda c: c["sourceAliases"].update(merged="otbr-cli"),
+    lambda c: c["datasets"][0].update(selectable="false"),
+    lambda c: c["datasources"][0].update(default_dataset_value="mdns_thread"),
+    lambda c: c["datasources"][0].update(primary_dataset_value="missing"),
+    lambda c: c["datasources"][0].update(primary_dataset_value="mdns_thread"),
+    lambda c: next(d for d in c["datasets"] if d["value"] == "otbr_cli_mesh_ftd").update(selectable=False),
+])
+def test_catalog_additive_contracts_reject_invalid_values_in_both_runtimes(mutation):
+    catalog = load_dataset_catalog()
+    mutation(catalog)
+    with pytest.raises(HealthManifestError):
+        validate_dataset_catalog(catalog)
+    registry = (JAVASCRIPT / "tdash-dataset-registry.js").as_uri()
+    script = f"""
+        import {{validateDatasetCatalog}} from {json.dumps(registry)};
+        try {{ validateDatasetCatalog(JSON.parse(process.argv[1])); process.exit(1); }}
+        catch (error) {{ console.log(error.message); }}
+    """
+    subprocess.run(["node", "--input-type=module", "-e", script, json.dumps(catalog)],
+                   capture_output=True, text=True, check=True, cwd=ROOT)
+
+
+def test_catalog_duplicate_alias_json_keys_are_rejected(tmp_path):
+    catalog = load_dataset_catalog()
+    path = tmp_path / "catalog.json"
+    content = json.dumps(catalog)
+    path.write_text(content.replace('"datasetAliases": {', '"datasetAliases": {"duplicate": "a", "duplicate": "b",', 1))
+    with pytest.raises(HealthManifestError, match="Duplicate JSON key"):
+        load_dataset_catalog(path)
 
 
 def _text(path: Path, overrides: dict[str, str]) -> str:

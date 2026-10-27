@@ -13,8 +13,21 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Mapping
 
+from td_const import (
+    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    OTBR_CLI_THREAD_NETWORK_INFO_FILENAME,
+    OTBR_RESTAPI_DATASET_ACTIVE_FILENAME,
+    OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+)
 from td_health_comparison import (
     COMPARISON_INTERVALS, COMPARISON_VERSION, METRIC_CATALOG, ROUTE64_SAMPLE_CONTRACT_VERSION,
     ComparisonItem, ComparisonInterval, ComparisonPolicy, UnsupportedSourceContractError,
@@ -22,6 +35,7 @@ from td_health_comparison import (
     source_signature,
 )
 from td_health_manifest import HealthDataset, load_health_manifest
+from td_dataset_catalog import RETIRED_HEALTH_DATASET_IDS
 from td_health_observation_model import (
     Assessment, Completeness, Confidence, DeviceSample, HealthStatus, MetricSample,
     EvaluationInputDomain, EvaluationInputState, EvaluationInputs, Finding,
@@ -881,6 +895,15 @@ class SQLiteHealthStore:
                                 row["policy_digest"], row["evaluator_version"], row["profile_id"],
                                 HealthStatus(row["status"]), Confidence(row["confidence"]), {}, (),
                                 row["assessed_at"], row["sample_contract_version"], row["health_policy_digest"])
+        if row["sample_contract_version"] == "comparison-v1-unified":
+            observation = SQLiteHealthStore._retained_observation(connection, row)
+            assessment = replace(
+                assessment, coverage=json.loads(row["coverage_json"]),
+                reproduction_context=json.loads(row["reproduction_context_json"]),
+                roster_context_digest=row["roster_context_digest"],
+                presence_input_digest=row["presence_input_digest"],
+                network_roster_revision=row["network_roster_revision"],
+            )
         return observation, assessment
 
     @staticmethod
@@ -959,7 +982,26 @@ class SQLiteHealthStore:
     def _derive_pair(connection: sqlite3.Connection,
                      before: tuple[Observation, Assessment], after: tuple[Observation, Assessment]
                      ) -> tuple[ComparisonInterval, tuple[ComparisonItem, ...]]:
-        dataset = load_health_manifest().dataset(after[0].dataset_id)
+        dataset = SQLiteHealthStore._retained_dataset(
+            after[0].dataset_id, after[0].datasource_id,
+            after[1].profile_id, after[1].sample_contract_version,
+        )
+        endpoints = []
+        for observation, assessment in (before, after):
+            if assessment.sample_contract_version == "comparison-v1-unified":
+                context = dict(assessment.reproduction_context)
+                unified_health = context["unifiedHealth"]
+                _, available, positives = SQLiteHealthStore._unified_absences(
+                    connection, network_id=observation.network_id,
+                    witness=unified_health["absenceWitness"], expected_records=(),
+                )
+                context["unifiedHealth"] = {
+                    **unified_health, "absenceOrderingAvailable": available,
+                    "positiveDeviceIds": sorted(positives - {device.device_id for device in observation.devices}),
+                }
+                assessment = replace(assessment, reproduction_context=context)
+            endpoints.append((observation, assessment))
+        before, after = endpoints
         endpoint_facts = {}
         for observation in (before[0], after[0]):
             rows = connection.execute(
@@ -2294,23 +2336,78 @@ class SQLiteHealthStore:
         return count
 
     @staticmethod
+    def _retained_dataset(
+        dataset_id: str, datasource_id: str, profile_id: str, sample_contract: str,
+    ) -> HealthDataset:
+        if dataset_id not in RETIRED_HEALTH_DATASET_IDS:
+            return load_health_manifest().dataset(dataset_id)
+        from td_health_manifest_history import load_manifest_history
+
+        source = load_manifest_history().resolve_source(
+            dataset_id, datasource_id, profile_id, sample_contract,
+        )
+        if source.dataset is None:
+            raise sqlite3.DatabaseError(f"Unsupported retained health contract: {source.reason}")
+        return source.dataset
+
+    @staticmethod
     def _retained_observation(
         connection: sqlite3.Connection, assessment_row: sqlite3.Row,
         *, source_dataset: HealthDataset | None = None,
     ) -> Observation:
         from td_health_manifest import load_health_manifest
 
-        dataset = source_dataset or load_health_manifest().dataset(assessment_row["dataset_id"])
+        dataset = source_dataset or SQLiteHealthStore._retained_dataset(
+            assessment_row["dataset_id"], assessment_row["datasource_id"],
+            assessment_row["profile_id"], assessment_row["sample_contract_version"],
+        )
         if (
             dataset.dataset_id != assessment_row["dataset_id"]
             or dataset.datasource_id != assessment_row["datasource_id"]
         ):
             raise sqlite3.DatabaseError("Stored observation source/dataset identity mismatch")
+        if assessment_row["sample_contract_version"] == "comparison-v1-unified":
+            from td_health_unified import validate_recipe
+            from td_health_manifest_history import _profile
+            try:
+                retained_context = json.loads(assessment_row["reproduction_context_json"])
+                retained_profile = dict(retained_context["healthProfile"])
+                profile_id = retained_profile.pop("profileId")
+                retained_dataset = replace(
+                    dataset,
+                    unified_recipe=validate_recipe(retained_context["unifiedHealth"]["recipe"]),
+                    health_profile=_profile(profile_id, retained_profile),
+                )
+                if retained_dataset != dataset:
+                    if source_dataset is not None:
+                        raise ValueError("Retained Unified recipe contradicts the selected source contract")
+                    from td_health_manifest_history import load_manifest_history
+                    candidates = load_manifest_history().matching_candidates(
+                        retained_dataset.dataset_id, retained_dataset.datasource_id,
+                        retained_dataset.health_profile.profile_id, "comparison-v1-unified",
+                    )
+                    if not any(candidate.dataset == retained_dataset for candidate in candidates):
+                        raise ValueError("Unsupported retained Unified recipe/profile contract")
+                dataset = retained_dataset
+            except (TypeError, KeyError, ValueError) as exc:
+                raise sqlite3.DatabaseError("Invalid retained Unified recipe/profile") from exc
         safe_sources = {
             *dataset.files,
             dataset.health_profile.identity_file,
             *dataset.health_profile.required_outcomes,
         }
+        if dataset.unified_recipe is not None:
+            from td_health_unified import safe_sources as unified_sources, validate_context
+            try:
+                context = json.loads(assessment_row["reproduction_context_json"])
+                validate_context(context, dataset)
+            except (TypeError, ValueError) as exc:
+                raise sqlite3.DatabaseError("Invalid retained Unified health contract") from exc
+            safe_sources.update(unified_sources(dataset))
+            from td_health_unified import sample_sources
+            safe_sample_sources = sample_sources(dataset)
+        else:
+            safe_sample_sources = safe_sources
 
         def source_files(raw: str) -> tuple[str, ...]:
             try:
@@ -2318,7 +2415,7 @@ class SQLiteHealthStore:
             except (TypeError, json.JSONDecodeError) as exc:
                 raise sqlite3.DatabaseError("Invalid stored source filename list") from exc
             if not isinstance(values, list) or not all(
-                isinstance(value, str) and value in safe_sources for value in values
+                isinstance(value, str) and value in safe_sample_sources for value in values
             ):
                 raise sqlite3.DatabaseError("Stored sample references an undeclared source")
             return tuple(values)
@@ -2345,12 +2442,23 @@ class SQLiteHealthStore:
                 raise sqlite3.DatabaseError("Stored observation references an undeclared source")
             if item.source_observed_at is not None:
                 SQLiteHealthStore._utc_instant(item.source_observed_at)
+        if dataset.unified_recipe is not None:
+            from td_health_unified import digest
+            originals = [
+                dict(filename=s.filename, digest=s.digest, kind=s.kind, state=s.state,
+                     sourceObservedAt=s.source_observed_at)
+                for s in sources if s.filename in unified_sources(dataset)
+            ]
+            if digest(originals) != context["unifiedHealth"]["originalEvidenceFingerprint"]:
+                raise sqlite3.DatabaseError("Invalid retained Unified original evidence")
         verified_source_digest = hashlib.sha256(
             "\0".join(
                 f"{item.filename}:{item.digest}"
                 for item in sorted(sources, key=lambda source: source.filename)
             ).encode("utf-8")
         ).hexdigest()
+        if dataset.unified_recipe is not None:
+            verified_source_digest = digest(originals)
         if verified_source_digest != assessment_row["source_set_digest"]:
             raise sqlite3.DatabaseError("Stored observation source digest is inconsistent")
         devices: list[DeviceSample] = []
@@ -2459,7 +2567,7 @@ class SQLiteHealthStore:
                     or item["denominator"] < 0
                 )
                 or item["unit"] == "count" and item["value"] < 0
-                or item["source_file"] not in safe_sources
+                or item["source_file"] not in safe_sample_sources
             ):
                 raise sqlite3.DatabaseError("Invalid stored metric sample")
             if metric_units.get(item["metric"]) != item["unit"]:
@@ -2493,6 +2601,8 @@ class SQLiteHealthStore:
             tuple(relationships), tuple(metrics),
         )
         try:
+            if dataset.unified_recipe is not None:
+                validate_context(context, dataset, observation)
             source_signature(
                 observation, source_roles_for_dataset(dataset)
             )
@@ -2508,6 +2618,7 @@ class SQLiteHealthStore:
     ) -> tuple[Observation, Assessment, object, object, dict, EvaluationInputs]:
         from td_health_evaluator import (
             EVALUATOR_VERSION,
+            UNIFIED_EVALUATOR_VERSION,
             evaluation_inputs_from_payload,
         )
         from td_health_manifest import HealthProfile
@@ -2534,8 +2645,10 @@ class SQLiteHealthStore:
         if (
             not isinstance(context, dict)
             or context.get("schemaVersion") != 2
-            or context.get("evaluatorVersion") != EVALUATOR_VERSION
-            or row["evaluator_version"] != EVALUATOR_VERSION
+            or context.get("evaluatorVersion") != (
+                UNIFIED_EVALUATOR_VERSION if row["sample_contract_version"] == "comparison-v1-unified"
+                else EVALUATOR_VERSION)
+            or row["evaluator_version"] != context.get("evaluatorVersion")
         ):
             raise ReassessmentBaselineUnavailable(
                 "reassessment-baseline-unavailable: refresh health from retained snapshots before changing the roster"
@@ -2568,6 +2681,9 @@ class SQLiteHealthStore:
                 coverage=MappingProxyType(dict(profile_data["coverage"])),
                 topology_authority=profile_data["topologyAuthority"],
                 border_router_authority=profile_data["borderRouterAuthority"],
+                input_mode=("unified" if row["sample_contract_version"] == "comparison-v1-unified" else "files"),
+                evidence_report=(load_health_manifest().dataset(row["dataset_id"]).health_profile.evidence_report
+                                 if row["sample_contract_version"] == "comparison-v1-unified" else None),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ReassessmentBaselineUnavailable(
@@ -2668,11 +2784,15 @@ class SQLiteHealthStore:
                 old_evaluation_inputs.roster.state is EvaluationInputState.UNAVAILABLE
                 or old_evaluation_inputs.absence_history.state
                 is EvaluationInputState.UNAVAILABLE
-            ):
+            ) and previous.sample_contract_version != "comparison-v1-unified":
                 raise ReassessmentBaselineUnavailable(
                     "reassessment-baseline-unavailable: historical roster or absence context is unavailable; refresh health from retained snapshots"
                 )
             endpoint = (self._utc_instant(observation.observed_at), observation.observation_id)
+            if previous.sample_contract_version == "comparison-v1-unified":
+                witness = old_context["unifiedHealth"]["absenceWitness"]
+                if witness is not None:
+                    endpoint = (self._utc_instant(witness["sourceObservedAt"]), observation.observation_id)
             old_roster = old_context.get("rosterContext", {}).get("records", [])
             old_records = {
                 record.get("deviceId"): record
@@ -2732,6 +2852,23 @@ class SQLiteHealthStore:
                 roster_context=roster_context,
                 history_boundary=old_context.get("historyBoundary"),
             )
+            unified_health = old_context.get("unifiedHealth")
+            if previous.sample_contract_version == "comparison-v1-unified":
+                prior_absences, available, positives = self._unified_absences(
+                    connection, network_id=network_id, witness=unified_health["absenceWitness"],
+                    expected_records=roster_records,
+                )
+                unified_health = {
+                    **unified_health, "positiveDeviceIds": sorted(positives - observed_ids),
+                    "absenceOrderingAvailable": available,
+                }
+                evaluation_inputs = replace(
+                    evaluation_inputs,
+                    absence_history=EvaluationInputDomain(EvaluationInputState.AVAILABLE)
+                    if available else EvaluationInputDomain(
+                        EvaluationInputState.UNAVAILABLE, ("absence-witness-unavailable",)),
+                    prior_complete_absences=prior_absences if available else None,
+                )
             revised = evaluate_observation(
                 observation,
                 policy,
@@ -2744,6 +2881,7 @@ class SQLiteHealthStore:
                 history_boundary=old_context.get("historyBoundary"),
                 evaluation_inputs=evaluation_inputs,
                 sample_contract_version=previous.sample_contract_version,
+                unified_health=unified_health,
             )
             roster_rules = {
                 "device.missing", "device.offline", "network.offline-impact",
@@ -3418,8 +3556,11 @@ class SQLiteHealthStore:
         observed_at: str,
         completeness: Completeness,
         observed_device_ids: frozenset[str],
+        unified_health: Mapping | None = None,
     ) -> dict:
         endpoint = self._utc_instant(observed_at)
+        if unified_health is not None and unified_health["absenceWitness"] is not None:
+            endpoint = self._utc_instant(unified_health["absenceWitness"]["sourceObservedAt"])
         with closing(self._connect()) as connection:
             connection.execute("BEGIN")
             revision_row = connection.execute(
@@ -3504,9 +3645,19 @@ class SQLiteHealthStore:
                             break
                         count += 1
                     prior_absences[device_id] = count
+            available = True
+            positives = frozenset()
+            if unified_health is not None:
+                prior_absences, available, positives = self._unified_absences(
+                    connection, network_id=network_id,
+                    witness=unified_health["absenceWitness"], expected_records=context_records,
+                )
+                history_boundary = None
             return {
                 "expectedDeviceIds": expected_ids,
                 "priorCompleteAbsences": prior_absences,
+                "absenceAvailable": available,
+                "witnessPositiveDeviceIds": sorted(positives),
                 "networkRosterRevision": network_revision,
                 "rosterContext": {
                     "schemaVersion": 1,
@@ -3522,6 +3673,107 @@ class SQLiteHealthStore:
                     if history_boundary else None
                 ),
             }
+
+    @staticmethod
+    def _unified_absences(connection, *, network_id, witness, expected_records):
+        """Count qualified original collections once, never across authority domains."""
+        from td_health_unified import witness_for_sources, timestamp
+
+        if witness is None:
+            return {}, False, frozenset()
+        groups = {}
+        resolver = None
+        rows = connection.execute(
+            """SELECT o.*, a.*
+               FROM observations o JOIN assessments a USING(observation_id)
+               WHERE o.network_id=?""", (network_id,),
+        ).fetchall()
+        for row in rows:
+            sources = tuple(SourceEvidence(
+                item["filename"], item["digest"], item["kind"], item["state"],
+                item["source_observed_at"],
+            ) for item in connection.execute(
+                "SELECT * FROM observation_sources WHERE observation_id=?", (row["observation_id"],),
+            ))
+            candidate = None
+            if row["sample_contract_version"] == "comparison-v1-unified":
+                try:
+                    context = json.loads(row["reproduction_context_json"])
+                    dataset = load_health_manifest().dataset(row["dataset_id"])
+                    from td_health_unified import validate_context
+                    original = SQLiteHealthStore._retained_observation(connection, row)
+                    from td_health_unified import validate_recipe
+                    dataset = replace(dataset, unified_recipe=validate_recipe(context["unifiedHealth"]["recipe"]))
+                    retained = validate_context(context, dataset, original)
+                    candidate = retained["absenceWitness"]
+                    if candidate != witness_for_sources(network_id, sources, witness["domain"]):
+                        continue
+                except (KeyError, TypeError, ValueError, sqlite3.DatabaseError):
+                    continue
+            elif row["completeness"] == "complete":
+                from td_health_manifest_history import load_manifest_history
+                if resolver is None:
+                    resolver = load_manifest_history()
+                candidates = resolver.matching_candidates(
+                    row["dataset_id"], row["datasource_id"], row["profile_id"],
+                    row["sample_contract_version"],
+                )
+                if not candidates:
+                    continue
+                try:
+                    SQLiteHealthStore._retained_observation(
+                        connection, row, source_dataset=candidates[0].dataset,
+                    )
+                except (KeyError, TypeError, ValueError, sqlite3.DatabaseError):
+                    continue
+                domain = witness["domain"]
+                required = (
+                    {OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME, OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+                     OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
+                     OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME, OTBR_CLI_THREAD_NETWORK_INFO_FILENAME}
+                    if domain == "otbr-cli" else
+                    {OTBR_RESTAPI_DEVICES_FETCH_FILENAME, OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+                     OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME, OTBR_RESTAPI_DATASET_ACTIVE_FILENAME,
+                     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+                     OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME}
+                )
+                by_name = {s.filename: s for s in sources}
+                if required <= by_name.keys() and all(
+                    by_name[name].state == ("complete" if ".outcome." in name else "valid")
+                    and (by_name[name].source_observed_at or ".outcome." in name)
+                    for name in required
+                ):
+                    candidate = witness_for_sources(network_id, sources, domain)
+            if candidate is None or candidate["domain"] != witness["domain"]:
+                continue
+            group = groups.setdefault(candidate["key"], [candidate["sourceObservedAt"], set()])
+            group[1].update(item["device_id"] for item in connection.execute(
+                "SELECT device_id FROM device_samples WHERE observation_id=?", (row["observation_id"],),
+            ))
+        current_time = timestamp(witness["sourceObservedAt"])
+        positives = frozenset(groups.get(witness["key"], [None, set()])[1])
+        preceding = [(timestamp(value[0]), key, value[1]) for key, value in groups.items()
+                     if key != witness["key"] and timestamp(value[0]) <= current_time]
+        times = [value[0] for value in preceding] + [current_time]
+        if len(set(times)) != len(times):
+            return {}, False, positives
+        preceding.sort(reverse=True)
+        counts = {}
+        for record in expected_records:
+            if record["rosterState"] != "expected":
+                continue
+            device_id = record["deviceId"]
+            epoch = timestamp(record["expectedSince"]) if record["expectedSince"] else None
+            if epoch is not None and epoch > current_time:
+                continue
+            count = 0
+            if device_id not in positives:
+                for time, _, present in preceding:
+                    if epoch is not None and time < epoch or device_id in present:
+                        break
+                    count += 1
+            counts[device_id] = count
+        return counts, True, positives
 
     def upsert_expected_device(
         self,
@@ -3642,6 +3894,8 @@ class SQLiteHealthStore:
                     item["assessment_id"],
                 ),
             )
+            if row["sample_contract_version"] == "comparison-v1-unified":
+                self._retained_observation(connection, row)
             metadata = self.assessment_context_metadata(
                 connection, row["assessment_id"]
             )

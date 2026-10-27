@@ -34,7 +34,11 @@ from ha_matter_ws_extractor import MatterExtractionError
 from ha_matter_ws_fetch_all import MatterCollection, collect_devices
 from ha_matter_ws_native_topology import validate_native_topology
 from ha_matter_ws_roles import normalize_ha_matter_roles
-from ha_matter_ws_snapshots import MatterSnapshotSecurityError
+from ha_matter_ws_snapshots import (
+    DASHBOARD_SCHEMA_VERSION,
+    NATIVE_SNAPSHOT_SCHEMA_VERSION,
+    MatterSnapshotSecurityError,
+)
 from ha_matter_ws_snapshots import assert_snapshot_safe
 from ha_matter_ws_thread import (
     SelectedDiagnosticsResult,
@@ -81,8 +85,6 @@ EXIT_PARTIAL = 5
 EXIT_EXTRACTION = 6
 EXIT_PERSISTENCE = 7
 EXIT_CANCELLED = 130
-DASHBOARD_SCHEMA_VERSION = "1.0.0"
-NATIVE_SNAPSHOT_SCHEMA_VERSION = "1.0.0"
 PING_MAX_ATTEMPTS = 5
 
 

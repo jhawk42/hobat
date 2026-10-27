@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
+import threading
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -19,6 +22,9 @@ from td_source_capabilities import SourceCapabilityService
 from td_network_identity import NetworkScope
 from util_data import write_network_scope
 import td_webserver
+import td_unified_dataset
+from td_dataset_catalog import load_dataset_catalog
+from util_data import network_scope_path
 
 
 @pytest.mark.parametrize("state", ("child", "router", "leader", "detached", "disabled"))
@@ -187,3 +193,178 @@ def test_capability_handler_returns_no_store_response() -> None:
     }
     assert body["sources"]["mdns"]["state"] == "available"
     assert body["sources"]["system"]["state"] == "available"
+
+
+def test_each_unified_product_is_inspected_once_and_unchanged_results_are_reused(
+    tmp_path, monkeypatch,
+):
+    inspect = MagicMock(wraps=td_unified_dataset._inspect_unified_cache)
+    monkeypatch.setattr(td_unified_dataset, "_inspect_unified_cache", inspect)
+    service = SourceCapabilityService(probes={})
+    first = asyncio.run(service.capabilities(tmp_path))
+    second = asyncio.run(service.capabilities(tmp_path))
+    assert first["files"] == second["files"]
+    assert first["sources"] == second["sources"]
+    assert inspect.call_count == 5
+    assert len({call.args[1]["value"] for call in inspect.call_args_list}) == 5
+    first["files"].clear()
+    assert asyncio.run(service.capabilities(tmp_path))["files"] == second["files"]
+
+
+def _watched_unified_files():
+    names = set()
+    for entry in load_dataset_catalog()["datasets"]:
+        if "unified" not in entry:
+            continue
+        recipe = entry["unified"]
+        names.update(entry["files"])
+        names.update(item["file"] for item in recipe["inputs"])
+        names.update(recipe[key] for key in ("reportFile", "identityFile", "outcomeFile")
+                     if recipe[key] is not None)
+    return sorted(names | {network_scope_path(name).name for name in names})
+
+
+@pytest.mark.parametrize("filename", _watched_unified_files())
+def test_inspection_cache_tracks_every_artifact_input_and_companion(tmp_path, monkeypatch, filename):
+    service = SourceCapabilityService(probes={})
+    read = MagicMock(wraps=service._read_files)
+    monkeypatch.setattr(service, "_read_files", read)
+    path = tmp_path / filename
+    asyncio.run(service.capabilities(tmp_path))
+    path.write_text("[]")
+    asyncio.run(service.capabilities(tmp_path))
+    previous = path.stat()
+    path.write_text("{}")
+    os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+    changed = asyncio.run(service.capabilities(tmp_path))
+    fresh = asyncio.run(SourceCapabilityService(probes={}).capabilities(tmp_path))
+    assert changed["files"] == fresh["files"]
+    assert changed["sources"] == fresh["sources"]
+    path.unlink()
+    asyncio.run(service.capabilities(tmp_path))
+    assert read.call_count == 4
+
+
+def test_inspection_cache_tracks_catalog_and_directory(tmp_path, monkeypatch):
+    service = SourceCapabilityService(probes={})
+    catalog = load_dataset_catalog()
+    monkeypatch.setattr(td_source_capabilities, "load_dataset_catalog", lambda: deepcopy(catalog))
+    read = MagicMock(wraps=service._read_files)
+    monkeypatch.setattr(service, "_read_files", read)
+    asyncio.run(service.capabilities(tmp_path))
+    catalog["authority"]["freshnessSeconds"]["test"] = 1
+    asyncio.run(service.capabilities(tmp_path))
+    other = tmp_path / "other"
+    other.mkdir()
+    asyncio.run(service.capabilities(other))
+    assert read.call_count == 3
+
+
+def test_failed_inspection_is_shared_and_next_request_recovers(tmp_path, monkeypatch):
+    async def run():
+        service = SourceCapabilityService(probes={})
+        original = service._read_files
+        started = threading.Event()
+        release = threading.Event()
+
+        def fail(*args):
+            started.set()
+            assert release.wait(5)
+            raise OSError("inspection failed")
+
+        read = MagicMock(side_effect=fail)
+        monkeypatch.setattr(service, "_read_files", read)
+        first = asyncio.create_task(service.capabilities(tmp_path))
+        assert await asyncio.to_thread(started.wait, 5)
+        second = asyncio.create_task(service.capabilities(tmp_path))
+        await asyncio.sleep(0)
+        release.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+        assert all(isinstance(result, OSError) for result in results)
+        assert read.call_count == 1
+        monkeypatch.setattr(service, "_read_files", original)
+        assert (await service.capabilities(tmp_path))["files"]
+
+    asyncio.run(run())
+
+
+def test_cancelled_waiter_does_not_cancel_shared_inspection(tmp_path, monkeypatch):
+    async def run():
+        service = SourceCapabilityService(probes={})
+        original = service._read_files
+        started = threading.Event()
+        release = threading.Event()
+
+        def delayed(*args):
+            started.set()
+            assert release.wait(5)
+            return original(*args)
+
+        read = MagicMock(side_effect=delayed)
+        monkeypatch.setattr(service, "_read_files", read)
+        first = asyncio.create_task(service.capabilities(tmp_path))
+        assert await asyncio.to_thread(started.wait, 5)
+        second = asyncio.create_task(service.capabilities(tmp_path))
+        await asyncio.sleep(0)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        release.set()
+        result = await second
+        assert (await service.capabilities(tmp_path))["files"] == result["files"]
+        assert read.call_count == 1
+
+    asyncio.run(run())
+
+
+def test_changing_inputs_are_not_cached_as_stable(tmp_path, monkeypatch):
+    service = SourceCapabilityService(probes={})
+    original = service._read_files
+    path = tmp_path / OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME
+
+    def changing(*args):
+        files = original(*args)
+        path.write_text("[]" if not path.exists() else path.read_text() + " ")
+        return files
+
+    monkeypatch.setattr(service, "_read_files", changing)
+    with pytest.raises(td_unified_dataset.UnifiedDatasetError, match="changed during inspection"):
+        asyncio.run(service.capabilities(tmp_path))
+    monkeypatch.setattr(service, "_read_files", original)
+    assert asyncio.run(service.capabilities(tmp_path))["files"][path.name]["cached"]
+
+
+def test_one_input_change_during_inspection_retries_before_publication(tmp_path, monkeypatch):
+    service = SourceCapabilityService(probes={})
+    original = service._read_files
+    path = tmp_path / OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME
+
+    def changing_once(*args):
+        files = original(*args)
+        if not path.exists():
+            path.write_text("[]")
+        return files
+
+    read = MagicMock(side_effect=changing_once)
+    monkeypatch.setattr(service, "_read_files", read)
+    assert asyncio.run(service.capabilities(tmp_path))["files"][path.name]["cached"]
+    assert asyncio.run(service.capabilities(tmp_path))["files"][path.name]["cached"]
+    assert read.call_count == 2
+
+
+def test_catalog_change_during_inspection_fails_explicitly_then_recovers(tmp_path, monkeypatch):
+    service = SourceCapabilityService(probes={})
+    catalog = load_dataset_catalog()
+    monkeypatch.setattr(td_source_capabilities, "load_dataset_catalog", lambda: deepcopy(catalog))
+    original = service._read_files
+
+    def changing_catalog(*args):
+        files = original(*args)
+        catalog["authority"]["freshnessSeconds"]["test"] = 1
+        return files
+
+    monkeypatch.setattr(service, "_read_files", changing_catalog)
+    with pytest.raises(td_unified_dataset.UnifiedDatasetError, match="catalog changed"):
+        asyncio.run(service.capabilities(tmp_path))
+    monkeypatch.setattr(service, "_read_files", original)
+    assert asyncio.run(service.capabilities(tmp_path))["files"]

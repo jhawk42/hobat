@@ -4,7 +4,7 @@
       {
         "id": "0x1000",
         "label": "Pinned border router\n0x1000",
-        "title": "Pinned border router\nRLOC16: 0x1000",
+        "title": "Pinned border router\nRloc16: 0x1000\nRole: router",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -161,7 +161,7 @@
       {
         "id": "0x2000",
         "label": "found node\n0x2000",
-        "title": "Unknown node\nRLOC16: 0x2000",
+        "title": "Unknown node\nRloc16: 0x2000\nRole: router",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -316,7 +316,7 @@
       {
         "id": "0x3000",
         "label": "found node\n0x3000",
-        "title": "Unknown node\nRLOC16: 0x3000",
+        "title": "Unknown node\nRloc16: 0x3000\nRole: router",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -473,7 +473,7 @@
       {
         "id": "isolated-unknown-a",
         "label": "found node\nrloc16:not_found",
-        "title": "Unknown node\nIdentifier: unavailable",
+        "title": "Unknown node\nIdentifier: unavailable\nRole: unknown",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -629,7 +629,7 @@
       {
         "id": "isolated-unknown-b",
         "label": "found node\nrloc16:not_found",
-        "title": "Unknown node\nIdentifier: unavailable",
+        "title": "Unknown node\nIdentifier: unavailable\nRole: unknown",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -785,7 +785,7 @@
       {
         "id": "0x4000",
         "label": "found node\n0x4000",
-        "title": "Unknown node\nRLOC16: 0x4000",
+        "title": "Unknown node\nRloc16: 0x4000\nRole: router",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -942,7 +942,7 @@
       {
         "id": "0x1001",
         "label": "Mesh child\n0x1001",
-        "title": "Mesh child\nRLOC16: 0x1001",
+        "title": "Mesh child\nRloc16: 0x1001",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -1098,7 +1098,7 @@
       {
         "id": "0x7000",
         "label": "found node\n0x7000",
-        "title": "Unknown node\nRLOC16: 0x7000",
+        "title": "Unknown node\nRloc16: 0x7000",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -1255,7 +1255,7 @@
       {
         "id": "0x2001",
         "label": "found node\n0x2001",
-        "title": "Unknown node\nRLOC16: 0x2001",
+        "title": "Unknown node\nRloc16: 0x2001",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -1411,7 +1411,7 @@
       {
         "id": "0x3001",
         "label": "Network child\n0x3001",
-        "title": "Network child\nRLOC16: 0x3001",
+        "title": "Network child\nRloc16: 0x3001",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -1567,7 +1567,7 @@
       {
         "id": "0x6000",
         "label": "0x6000\n0x6000",
-        "title": "0x6000\nRLOC16: 0x6000",
+        "title": "0x6000\nRloc16: 0x6000",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -1724,7 +1724,7 @@
       {
         "id": "0x5000",
         "label": "0x5000\n0x5000",
-        "title": "0x5000\nRLOC16: 0x5000",
+        "title": "0x5000\nRloc16: 0x5000",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -1881,7 +1881,7 @@
       {
         "id": "0x4001",
         "label": "0x4001\n0x4001",
-        "title": "0x4001\nRLOC16: 0x4001",
+        "title": "0x4001\nRloc16: 0x4001",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -3531,7 +3531,7 @@
       {
         "id": "0x1000",
         "label": "found node\n0x1000",
-        "title": "Unknown node\nRLOC16: 0x1000",
+        "title": "Unknown node\nRloc16: 0x1000",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -3696,7 +3696,7 @@
       {
         "id": "0x2000",
         "label": "found node\n0x2000",
-        "title": "Unknown node\nRLOC16: 0x2000",
+        "title": "Unknown node\nRloc16: 0x2000",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -3861,7 +3861,7 @@
       {
         "id": "0x1001",
         "label": "found node\n0x1001",
-        "title": "Unknown node\nRLOC16: 0x1001",
+        "title": "Unknown node\nRloc16: 0x1001",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -4025,7 +4025,7 @@
       {
         "id": "cc00112233445566",
         "label": "found node\n0x1002",
-        "title": "Unknown node\nRLOC16: 0x1002",
+        "title": "Unknown node\nRloc16: 0x1002",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -4189,7 +4189,7 @@
       {
         "id": "dd00112233445566",
         "label": "found node\n0x3000",
-        "title": "Unknown node\nRLOC16: 0x3000",
+        "title": "Unknown node\nRloc16: 0x3000",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -5039,7 +5039,7 @@
       {
         "id": "0x1000",
         "label": "found node\n0x1000",
-        "title": "Unknown node\nRLOC16: 0x1000",
+        "title": "Unknown node\nRloc16: 0x1000\nRole: router",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -5194,7 +5194,7 @@
       {
         "id": "0x2000",
         "label": "found node\n0x2000",
-        "title": "Unknown node\nRLOC16: 0x2000",
+        "title": "Unknown node\nRloc16: 0x2000\nRole: router",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -5351,7 +5351,7 @@
       {
         "id": "0x3000",
         "label": "found node\n0x3000",
-        "title": "Unknown node\nRLOC16: 0x3000",
+        "title": "Unknown node\nRloc16: 0x3000",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -5508,7 +5508,7 @@
       {
         "id": "0x1001",
         "label": "found node\n0x1001",
-        "title": "Unknown node\nRLOC16: 0x1001",
+        "title": "Unknown node\nRloc16: 0x1001",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -5668,7 +5668,7 @@
       {
         "id": "0x1002",
         "label": "found node\n0x1002",
-        "title": "Unknown node\nRLOC16: 0x1002",
+        "title": "Unknown node\nRloc16: 0x1002",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -5824,7 +5824,7 @@
       {
         "id": "0x1003",
         "label": "found node\n0x1003",
-        "title": "Unknown node\nRLOC16: 0x1003",
+        "title": "Unknown node\nRloc16: 0x1003",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -7015,7 +7015,7 @@
       {
         "id": "aa00112233445566",
         "label": "Device A\n0x1000",
-        "title": "Device A\nRLOC16: 0x1000",
+        "title": "Device A\nRloc16: 0x1000\nRole: router",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -7184,7 +7184,7 @@
       {
         "id": "bb00112233445566",
         "label": "Device B\n0x2000",
-        "title": "Device B\nRLOC16: 0x2000",
+        "title": "Device B\nRloc16: 0x2000\nRole: router",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -7353,7 +7353,7 @@
       {
         "id": "0x3000",
         "label": "found node\n0x3000",
-        "title": "Unknown node\nRLOC16: 0x3000",
+        "title": "Unknown node\nRloc16: 0x3000",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -7518,7 +7518,7 @@
       {
         "id": "0x1001",
         "label": "found node\n0x1001",
-        "title": "Unknown node\nRLOC16: 0x1001",
+        "title": "Unknown node\nRloc16: 0x1001",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -7850,7 +7850,7 @@
       {
         "id": "ee00112233445566",
         "label": "found node\n0x1003",
-        "title": "Unknown node\nRLOC16: 0x1003",
+        "title": "Unknown node\nRloc16: 0x1003",
         "shape": "dot",
         "size": 27,
         "color": {
@@ -8014,7 +8014,7 @@
       {
         "id": "dd00112233445566",
         "label": "found node\n0x4000",
-        "title": "Unknown node\nRLOC16: 0x4000",
+        "title": "Unknown node\nRloc16: 0x4000",
         "shape": "hexagon",
         "size": 45,
         "color": {
@@ -8993,7 +8993,7 @@
     "nodeData": [
       {
         "label": "found node\n0x1000",
-        "title": "Unknown node\nRLOC16: 0x1000",
+        "title": "Unknown node\nRloc16: 0x1000\nRole: Router",
         "shape": "hexagon",
         "color": {
           "background": "#d9ecff",
@@ -9017,7 +9017,7 @@
       },
       {
         "label": "found node\n0x1001",
-        "title": "Unknown node\nRLOC16: 0x1001",
+        "title": "Unknown node\nRloc16: 0x1001\nRole: Child",
         "shape": "dot",
         "color": {
           "background": "#fff4cc",
@@ -9040,7 +9040,7 @@
       },
       {
         "label": "found node\n0x1002",
-        "title": "Unknown node\nRLOC16: 0x1002",
+        "title": "Unknown node\nRloc16: 0x1002\nRole: Child",
         "shape": "dot",
         "color": {
           "background": "#fff4cc",
@@ -9063,7 +9063,7 @@
       },
       {
         "label": "found node\n0x1400",
-        "title": "Unknown node\nRLOC16: 0x1400",
+        "title": "Unknown node\nRloc16: 0x1400\nRole: Router",
         "shape": "hexagon",
         "color": {
           "background": "#d9ecff",
@@ -9087,7 +9087,7 @@
       },
       {
         "label": "found node\n0x3000",
-        "title": "Unknown node\nRLOC16: 0x3000",
+        "title": "Unknown node\nRloc16: 0x3000\nRole: unknown",
         "shape": "hexagon",
         "color": {
           "background": "#e8f5e9",
@@ -9110,7 +9110,7 @@
       },
       {
         "label": "found node\n0x4000",
-        "title": "Unknown node\nRLOC16: 0x4000",
+        "title": "Unknown node\nRloc16: 0x4000\nRole: unknown",
         "shape": "hexagon",
         "color": {
           "background": "#e8f5e9",
@@ -9653,7 +9653,7 @@
     "nodeData": [
       {
         "label": "found node\n0x1000",
-        "title": "Unknown node\nRLOC16: 0x1000",
+        "title": "Unknown node\nRloc16: 0x1000\nRole: Router",
         "shape": "square",
         "color": {
           "background": "#c8e6c9",
@@ -9679,7 +9679,7 @@
       },
       {
         "label": "found node\n0x1001",
-        "title": "Unknown node\nRLOC16: 0x1001",
+        "title": "Unknown node\nRloc16: 0x1001\nRole: Reed",
         "shape": "dot",
         "color": {
           "background": "#f2f2f2",
@@ -9790,7 +9790,7 @@
     "nodeData": [
       {
         "label": "found node\n0x2000",
-        "title": "Unknown node\nRLOC16: 0x2000",
+        "title": "Unknown node\nRloc16: 0x2000\nRole: Router",
         "shape": "hexagon",
         "color": {
           "background": "#d9ecff",
@@ -9814,7 +9814,7 @@
       },
       {
         "label": "found node\n0x3000",
-        "title": "Unknown node\nRLOC16: 0x3000",
+        "title": "Unknown node\nRloc16: 0x3000\nRole: unknown",
         "shape": "hexagon",
         "color": {
           "background": "#d9ecff",

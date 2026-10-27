@@ -121,10 +121,10 @@ def parse_device_action_request(payload: object) -> DeviceActionRequest:
     source = source.strip()
     if action in {ACTION_OTBR_PING, ACTION_OTBR_RESET} and source not in {
         "otbr-cli",
-        "merged",
+        "multi-source",
     }:
         raise DeviceActionError("OTBR action requires OTBR CLI source evidence")
-    if action == ACTION_MATTER_PING and source not in {"ha-matter-ws", "merged"}:
+    if action == ACTION_MATTER_PING and source not in {"ha-matter-ws", "multi-source"}:
         raise DeviceActionError("Matter action requires HA Matter source evidence")
     if action == ACTION_SYSTEM_PING and source in {"otbr-cli", "ha-matter-ws"}:
         raise DeviceActionError("system ping cannot replace a native source action")

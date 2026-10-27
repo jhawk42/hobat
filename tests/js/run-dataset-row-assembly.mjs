@@ -69,11 +69,16 @@ function representativeArrivalOrders(fileIndexes) {
 }
 
 assert.deepEqual(ROW_EXTRACTORS["raw-array"]([{ id: 1 }]), [{ id: 1 }]);
-const otbrCliEntry = DATASET_REGISTRY.find((entry) => entry.source === "otbr-cli");
+const otbrCliEntry = DATASET_REGISTRY.find((entry) =>
+  entry.source === "otbr-cli" && entry.selectable !== false && !entry.unified);
 assert.deepEqual(getDatasetAuxiliaryFiles(otbrCliEntry), ["td-otbr-cli-thread-network-info.json"]);
-const otbrRestEntry = DATASET_REGISTRY.find((entry) => entry.source === "otbr-restapi");
+const otbrRestEntry = DATASET_REGISTRY.find((entry) =>
+  entry.source === "otbr-restapi" && entry.selectable !== false && !entry.unified);
 assert.deepEqual(getDatasetAuxiliaryFiles(otbrRestEntry), ["td-otbr-restapi-dataset-active.json"]);
 assert.deepEqual(getDatasetAuxiliaryFiles(entry({ source: "system" })), []);
+DATASET_REGISTRY.filter((entry) => entry.unified).forEach((entry) => {
+  assert.deepEqual(getDatasetAuxiliaryFiles(entry), []);
+});
 assert.equal(otbrCliEntry.files.includes("td-otbr-cli-thread-network-info.json"), false);
 assert.equal(otbrRestEntry.files.includes("td-otbr-restapi-dataset-active.json"), false);
 assert.deepEqual(ROW_EXTRACTORS["raw-array"]({ metadata: true }), []);
@@ -106,7 +111,7 @@ assert.deepEqual(ROW_EXTRACTORS["otbr-restapi"]({ data: [{ id: 1 }] }), [{ id: 1
 assert.deepEqual(ROW_EXTRACTORS["otbr-restapi"]({ meta: { count: 1 } }), []);
 
 const detailedRestEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",
+  (dataset) => dataset.value === "otbr_restapi_topology",
 );
 const detailedRestRows = buildDatasetRows(detailedRestEntry, [
   [{ extAddress: "AA", hostName: "Router A" }],
@@ -194,7 +199,7 @@ assert.equal(restVersionResult.rows[0].threadVersion, "1.3");
 assert.equal(Object.hasOwn(restVersionResult.rows[0], "version"), false);
 
 const processedEveEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "eve_topology_processed",
+  (dataset) => dataset.value === "eve_topology",
 );
 const cachedProcessedEve = JSON.parse(
   fs.readFileSync("data/td-eve-topology.json", "utf8"),
@@ -247,7 +252,7 @@ assert.throws(() => validateDatasetCatalog({ ...servedCatalog, vocabulary: {} })
 setDatasetCatalog(DATASET_CATALOG_FALLBACK);
 
 const haMatterSource = DATASOURCE_REGISTRY.find((source) => source.value === "ha-matter-ws");
-assert.equal(haMatterSource?.default_dataset_value, "ha_matter_ws_topology");
+assert.equal(haMatterSource?.default_dataset_value, "ha_matter_ws_matter_topology");
 const haMatterDashboard = {
   diagnostics: [{ nodeId: 1, branch: "diagnostics" }],
   meshDiagnostics: [{ nodeId: 2, branch: "meshDiagnostics" }],
@@ -274,20 +279,20 @@ assert.deepEqual(
 );
 assert.deepEqual(
   DATASET_REGISTRY
-    .filter((entry) => entry.source === "ha-matter-ws")
+    .filter((entry) => entry.source === "ha-matter-ws" && entry.selectable !== false)
     .map((entry) => entry.value),
   [
-    "ha_matter_ws_devices_fetch_all",
-    "ha_matter_ws_thread_border_routers",
-    "ha_matter_ws_dashboard_diagnostics",
-    "ha_matter_ws_dashboard_mesh_diagnostics",
-    "ha_matter_ws_topology",
-    "ha_matter_ws_network_topology",
-    "ha_matter_ws_merge_topology",
+    "ha_matter_ws_unified",
+    "ha_matter_ws_devices",
+    "ha_matter_ws_border_routers",
+    "ha_matter_ws_diagnostics",
+    "ha_matter_ws_mesh_diagnostics",
+    "ha_matter_ws_matter_topology",
+    "ha_matter_ws_thread_topology",
   ],
 );
 const haMatterMergeEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "ha_matter_ws_merge_topology",
+  (dataset) => dataset.value === "ha_matter_ws_topology_merge",
 );
 const haMatterMergeRows = buildDatasetRows(
   haMatterMergeEntry,
@@ -327,7 +332,7 @@ assert.deepEqual(
 assert.ok(haMatterRouteAssembly.rows.every((row) => row._row_key === undefined));
 
 const haDeviceEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "ha_matter_ws_devices_fetch_all",
+  (dataset) => dataset.value === "ha_matter_ws_devices",
 );
 const oldReedRows = buildDatasetRows(haDeviceEntry, [[
   {
@@ -397,7 +402,7 @@ assert.deepEqual(
 );
 
 const oldOtbrCliEntry = DATASET_REGISTRY.find(
-  (item) => item.value === "otbr_cli_networkdiag_fetch_all",
+  (item) => item.value === "otbr_cli_diagnostics_fetch",
 );
 const oldOtbrCliRecord = {
   extAddress: "0011223344556677",
@@ -464,15 +469,15 @@ assert.equal(Object.hasOwn(legacyOtbrLookingRows.rows[0], "isReed"), false);
 
 const otbrMdnsRecipes = [
   {
-    value: "otbr_cli_topology_mdns_health",
+    value: "otbr_cli_topology_mdns",
     eligiblePrefix: "td-otbr-cli-networkdiag-fetch-all.json",
   },
   {
-    value: "otbr_restapi_topology_mdns_health",
+    value: "otbr_restapi_topology_mdns",
     eligiblePrefix: "td-otbr-restapi-devices-fetch.json",
   },
   {
-    value: "otbr_cli_meshdiag_topology_networkdiag_multicast_network_router_neighbortables_router_childtables_mdns_scopes_thread",
+    value: "otbr_cli_mesh_ftd_tables_mdns",
     eligiblePrefix: "td-otbr-cli-networkdiag-multicast-network.json",
   },
 ];
@@ -620,7 +625,7 @@ for (const { value, eligiblePrefix } of otbrMdnsRecipes) {
 }
 
 const dashboardDiagnosticsEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "ha_matter_ws_dashboard_diagnostics",
+  (dataset) => dataset.value === "ha_matter_ws_diagnostics",
 );
 const fetchedRoleConflicts = normalizeDatasetFilePayload(
   dashboardDiagnosticsEntry,
@@ -702,7 +707,7 @@ const normalizedRoleRowsAgain = normalizeRows(
 assert.equal(normalizedRoleRowsAgain[0].isRouter, false);
 
 const oldNativeTopology = buildDatasetRows(
-  DATASET_REGISTRY.find((dataset) => dataset.value === "ha_matter_ws_network_topology"),
+  DATASET_REGISTRY.find((dataset) => dataset.value === "ha_matter_ws_thread_topology"),
   [{
     topology: {
       nodes: [
@@ -728,7 +733,7 @@ assert.deepEqual(
   ],
 );
 const nativeTopologyEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "ha_matter_ws_network_topology",
+  (dataset) => dataset.value === "ha_matter_ws_thread_topology",
 );
 const nativeTopologyRaw = [{
   topology: {
@@ -803,7 +808,7 @@ assert.equal(
 );
 
 const mergeTopologyEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "ha_matter_ws_merge_topology",
+  (dataset) => dataset.value === "ha_matter_ws_topology_merge",
 );
 const mergedNativeTopology = {
   topology: {
@@ -887,7 +892,7 @@ assert.deepEqual(
 );
 
 const oldInventory = buildDatasetRows(
-  DATASET_REGISTRY.find((dataset) => dataset.value === "ha_matter_ws_thread_border_routers"),
+  DATASET_REGISTRY.find((dataset) => dataset.value === "ha_matter_ws_border_routers"),
   [{ borderRouters: [{ extAddressHex: "AABBCCDDEEFF0011" }] }],
 );
 assert.deepEqual(
@@ -895,7 +900,7 @@ assert.deepEqual(
   [undefined, undefined],
 );
 const inventoryEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "ha_matter_ws_thread_border_routers",
+  (dataset) => dataset.value === "ha_matter_ws_border_routers",
 );
 const inventoryRaw = [{
   borderRouters: [{ extAddressHex: "AABBCCDDEEFF0011", isReed: true }],
@@ -928,7 +933,7 @@ assert.equal(Object.hasOwn(inventoryRecord, "isLeader"), false);
 assert.equal(inventoryRecord.isReed, true);
 
 const dashboardMeshEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "ha_matter_ws_dashboard_mesh_diagnostics",
+  (dataset) => dataset.value === "ha_matter_ws_mesh_diagnostics",
 );
 const dashboardMeshRaw = [{
   meshDiagnostics: [{
@@ -963,7 +968,7 @@ const nonHaLookingRow = buildDatasetRows(entry({
 assert.equal(Object.hasOwn(nonHaLookingRow.rows[0], "isRouter"), false);
 assert.equal(nonHaLookingRow.rows[0].isReed, true);
 
-for (const dataset of DATASET_REGISTRY.filter((item) => item.source === "ha-matter-ws")) {
+for (const dataset of DATASET_REGISTRY.filter((item) => item.source === "ha-matter-ws" && !item.unified)) {
   const rawFiles = dataset.files.map((filename) =>
     JSON.parse(fs.readFileSync(`data/${filename}`, "utf8")));
   const assembled = buildDatasetRows(dataset, rawFiles);
@@ -1000,8 +1005,8 @@ for (const dataset of DATASET_REGISTRY.filter((item) => item.source === "ha-matt
 assert.deepEqual(
   DATASET_REGISTRY
     .filter((entry) => [
-      "ha_matter_ws_thread_border_routers",
-      "ha_matter_ws_network_topology",
+      "ha_matter_ws_border_routers",
+      "ha_matter_ws_thread_topology",
     ].includes(entry.value))
     .map((entry) => [entry.files[0], entry.defaultView, entry.estimateActionCostSecs]),
   [
@@ -1012,8 +1017,8 @@ assert.deepEqual(
 assert.ok(
   DATASET_REGISTRY
     .filter((entry) => [
-      "ha_matter_ws_dashboard_mesh_diagnostics",
-      "ha_matter_ws_topology",
+      "ha_matter_ws_mesh_diagnostics",
+      "ha_matter_ws_matter_topology",
     ].includes(entry.value))
     .every((entry) => entry.defaultLinkFilter === "all_links"),
 );

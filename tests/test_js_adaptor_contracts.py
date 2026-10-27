@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import subprocess
 
 import pytest
+
+from td_dataset_catalog import load_dataset_catalog
 
 
 pytestmark = pytest.mark.requires_data_dir
@@ -26,6 +29,11 @@ def test_cached_adaptor_outputs_preserve_contract(node_json) -> None:
     )
     baseline = REPO_ROOT / "tests" / "fixtures" / "adaptor_output_baseline.json"
     expected = json.loads(baseline.read_text(encoding="utf-8"))
+    for entry in load_dataset_catalog()["datasets"]:
+        if "unified" in entry and all(
+            (REPO_ROOT / "data" / filename).is_file() for filename in entry["files"]
+        ):
+            expected[entry["value"]] = expected["otbr_restapi_topology"]
     assert set(actual) == set(expected)
     for dataset, snapshot in actual.items():
         assert set(snapshot) == set(expected[dataset]), dataset
@@ -73,8 +81,8 @@ def test_pinned_adaptor_outputs_match_exact_baseline(node_executable: str) -> No
 def test_source_adaptors_emit_through_shared_model() -> None:
     modules = sorted((REPO_ROOT / "src" / "js").glob("tdash-adaptor-*.js"))
     sources = [module for module in modules if module.stem not in {"tdash-adaptor-shared", "tdash-adaptor-model"}]
-    assert len(sources) == 6
+    assert len(sources) == 7
     for module in sources:
         code = module.read_text(encoding="utf-8")
         assert "emitThroughAdaptorModel(" in code or "emitAdaptorResult(" in code, module.name
-        assert "from './tdash-adaptor-model.js'" in code, module.name
+        assert re.search(r"""from ["']\./tdash-adaptor-model\.js["']""", code), module.name

@@ -35,7 +35,7 @@ import {
   registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
-import { asArray, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories } from './tdash-adaptor-shared.js';
+import { asArray, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories, registerCanonicalRelationship } from './tdash-adaptor-shared.js';
 
 const MATTER_FIELDS = Object.freeze([
   'deviceLabel', 'nodeId', 'matterId', 'fabricId', 'compressedFabricId',
@@ -285,35 +285,7 @@ function collectHaMatterRawRoute(ownerId, entry, canonicalRow, context) {
 }
 
 function registerHaMatterRelationship(relationship, model) {
-  const lqi = toFiniteNumber(relationship.metrics.lqi);
-  const sourceNode = model.devicesById.get(relationship.sourceId)?.nodeRecord;
-  const targetNode = model.devicesById.get(relationship.targetId)?.nodeRecord;
-  const presentation = {
-    ...lqStyleFromAvgLqi(lqi, 3),
-    ...buildEdgeEndpointTitles(
-      sourceNode,
-      targetNode,
-      relationship.sourceId,
-      relationship.targetId,
-    ),
-    arrows: 'to',
-    isParentChild: relationship.categories.includes(EDGE_CATEGORY_DEFAULT_CHILDREN),
-    linkCategories: relationship.categories,
-  };
-  presentation.title = buildEdgeTitle({
-    ...relationship.metrics,
-    ...presentation,
-  });
-  registerRelationship(model, {
-    sourceId: relationship.sourceId,
-    targetId: relationship.targetId,
-    category: relationship.categories.join('+'),
-    directed: true,
-    sourceName: 'ha-matter-ws',
-    metrics: relationship.metrics,
-    presentation,
-    rawRecord: { observations: relationship.records },
-  });
+  registerCanonicalRelationship({ ...relationship, sourceName: 'ha-matter-ws' }, model);
 }
 
 export function adaptHaMatterWs(

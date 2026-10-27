@@ -9,7 +9,7 @@ import {
   datasetIsAvailable,
   isFileCached,
   loadSourceCapabilities,
-  sourceIsAvailable,
+  sourceHasAvailableDatasets,
 } from "./tdash-capabilities.js";
 import {
   currentDataset,
@@ -186,7 +186,7 @@ function populateDatasourceSelect(capabilities) {
 
   for (let i = 0; i < DATASOURCE_REGISTRY.length; i++) {
     const entry = DATASOURCE_REGISTRY[i];
-    if (!sourceIsAvailable(entry.value, capabilities)) continue;
+    if (!sourceHasAvailableDatasets(entry.value, capabilities, DATASET_REGISTRY)) continue;
     const opt = document.createElement("option");
     opt.value = entry.value;
     opt.textContent = entry.label;
@@ -210,8 +210,9 @@ function populateDatasetSelect(sourceFilter = null, capabilities) {
   sel.innerHTML = ""; // Clear existing options
 
   const filteredRegistry = sourceFilter
-    ? DATASET_REGISTRY.filter((entry) => entry.source === sourceFilter && datasetIsAvailable(entry, capabilities))
-    : DATASET_REGISTRY.filter((entry) => datasetIsAvailable(entry, capabilities));
+    ? DATASET_REGISTRY.filter((entry) => entry.selectable !== false
+      && entry.source === sourceFilter && datasetIsAvailable(entry, capabilities))
+    : DATASET_REGISTRY.filter((entry) => entry.selectable !== false && datasetIsAvailable(entry, capabilities));
   const defaultDatasetValue = sourceFilter
     ? DATASOURCE_REGISTRY.find((entry) => entry.value === sourceFilter)?.default_dataset_value
     : null;
@@ -6244,10 +6245,12 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
   if (_fetchStatusEl) {
     const failedFiles = (currentDataset.entry?.files ?? [])
       .filter((filename) => !currentDataset.loadedFiles?.includes(filename));
-    _fetchStatusEl.textContent = failedFiles.length > 0
+    _fetchStatusEl.textContent = currentDataset.materializationState === "partial"
+      ? `⚠ Incomplete Unified dataset ${datasetIdentityLabel(currentDataset)}: cached source coverage is partial. Showing partial data.`
+      : failedFiles.length > 0
       ? `⚠ Incomplete dataset ${datasetIdentityLabel(currentDataset)}: ${currentDataset.loadedFiles?.length ?? 0} of ${currentDataset.entry.files.length} required files loaded; ${failedFiles.length} required file(s) unavailable. Showing partial data.`
       : "";
-    if (failedFiles.length > 0) {
+    if (currentDataset.isPartial) {
       _pinFetchStatusLineMessage(_fetchStatusEl.textContent, Number.POSITIVE_INFINITY);
     }
   }

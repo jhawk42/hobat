@@ -61,6 +61,7 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   // === Other ===
   "mode.device",
   "scope",
+  "mdnsRecords",
   "status",
   "vendorName",
 ]);

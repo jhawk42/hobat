@@ -42,7 +42,7 @@ def test_assessment_projection_groups_losslessly_and_resolves_labels(tmp_path) -
     )
 
     result = TDHealthReadService(tmp_path).assessment(
-        dataset_id="otbr_cli_networkdiag_fetch_all", grouped=True
+        dataset_id="otbr_cli_diagnostics_fetch", grouped=True
     )
 
     assert result is not None
@@ -66,6 +66,22 @@ def test_assessment_projection_groups_losslessly_and_resolves_labels(tmp_path) -
     assert device["deviceId"] == "extaddr:8672766ae0578187"
     assert "device_id" not in device
 
+
+def test_identifier_cutover_retains_original_summary_without_stitching_current_history(tmp_path):
+    from td_health_manifest import HealthManifestError
+
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result()
+    observation = replace(observation, dataset_id="otbr_cli_networkdiag_fetch_all")
+    store.save_processing_result(observation, assessment)
+    service = TDHealthReadService(tmp_path)
+    original = service.assessment(dataset_id="otbr_cli_networkdiag_fetch_all")
+    assert original["datasetId"] == "otbr_cli_networkdiag_fetch_all"
+    assert original["assessmentId"] == assessment.assessment_id
+    assert service.assessment(dataset_id="otbr_cli_diagnostics_fetch") is None
+    assert service.assessment(assessment_id=assessment.assessment_id)["datasetId"] == observation.dataset_id
+    with pytest.raises(HealthManifestError):
+        load_health_manifest().dataset("otbr_cli_networkdiag_fetch_all")
 
 def test_reprocessing_snapshot_counts_preserves_prior_assessment_and_projection(
     tmp_path,
@@ -113,7 +129,7 @@ def test_reprocessing_snapshot_counts_preserves_prior_assessment_and_projection(
         metrics=(metric,),
     )
     profile = load_health_manifest().dataset(
-        "otbr_cli_topology_mdns_health"
+        "otbr_cli_topology_mdns"
     ).health_profile
     current = evaluate_observation(
         observation, load_health_policy(), profile=profile
@@ -986,7 +1002,7 @@ def test_shortcut_candidates_use_full_retained_history_and_include_partials(tmp_
 
     page = TDHealthReadService(tmp_path).comparison_endpoints(
         network_id="extpan:78b9775b001c1cbe",
-        dataset_id="otbr_cli_networkdiag_fetch_all", side="after",
+        dataset_id="otbr_cli_diagnostics_fetch", side="after",
         limit=25, offset=0, selected_assessment_id=latest.assessment_id,
     )
     assert page["selectedAfter"]["assessmentId"] == latest.assessment_id

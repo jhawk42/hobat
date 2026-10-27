@@ -41,6 +41,31 @@ import {
 
 export function asArray(value) { return Array.isArray(value) ? value : []; }
 
+export function registerCanonicalRelationship(relationship, model) {
+  const directed = relationship.directed !== false;
+  const sourceNode = model.devicesById.get(relationship.sourceId)?.nodeRecord;
+  const targetNode = model.devicesById.get(relationship.targetId)?.nodeRecord;
+  const presentation = {
+    ...lqStyleFromAvgLqi(toFiniteNumber(relationship.metrics.lqi), 3),
+    ...buildEdgeEndpointTitles(sourceNode, targetNode, relationship.sourceId, relationship.targetId),
+    ...(directed ? { arrows: "to" } : {}),
+    isParentChild: relationship.categories.includes(EDGE_CATEGORY_DEFAULT_CHILDREN),
+    linkCategories: relationship.categories,
+  };
+  presentation.title = buildEdgeTitle({ ...relationship.metrics, ...presentation });
+  registerRelationship(model, {
+    id: relationship.id,
+    sourceId: relationship.sourceId,
+    targetId: relationship.targetId,
+    category: relationship.categories.join("+"),
+    directed,
+    sourceName: relationship.sourceName,
+    metrics: relationship.metrics,
+    presentation,
+    rawRecord: { observations: relationship.records },
+  });
+}
+
 const RELATIONSHIP_COLLECTIONS = Object.freeze([
   "children",
   "childTable",

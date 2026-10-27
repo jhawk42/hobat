@@ -97,11 +97,11 @@ class TestTopLevelCommands(unittest.TestCase):
 
     def test_health_process_dataset_command(self):
         args, extras = _parse_known(
-            ["health", "process-dataset", "--dataset", "otbr_cli_networkdiag_fetch_all"]
+            ["health", "process-dataset", "--dataset", "otbr_cli_diagnostics_fetch"]
         )
         self.assertEqual(args.command, "health")
         self.assertEqual(args.health_command, "process-dataset")
-        self.assertEqual(extras, ["--dataset", "otbr_cli_networkdiag_fetch_all"])
+        self.assertEqual(extras, ["--dataset", "otbr_cli_diagnostics_fetch"])
 
     def test_merge_dataset_command(self):
         args = _parse(["merge-dataset"])
@@ -985,12 +985,12 @@ class TestDispatchOtherCommands(unittest.TestCase):
     def test_health_process_dataset_forwards_datadir_and_extras(self):
         argv = [
             "--datadir", "/tmp/td", "health", "process-dataset",
-            "--dataset", "otbr_cli_networkdiag_fetch_all", "--json",
+            "--dataset", "otbr_cli_diagnostics_fetch", "--json",
         ]
         with patch.object(td_cli.td_health_cli, "main", return_value=0) as mocked_main:
             rc = self._dispatch(argv)
         mocked_main.assert_called_once_with(
-            ["--datadir", "/tmp/td", "process-dataset", "--dataset", "otbr_cli_networkdiag_fetch_all", "--json"]
+            ["--datadir", "/tmp/td", "process-dataset", "--dataset", "otbr_cli_diagnostics_fetch", "--json"]
         )
         self.assertEqual(rc, 0)
 

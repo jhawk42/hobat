@@ -193,8 +193,9 @@ def validate_native_topology(
     value: Any,
     *,
     limits: NativeTopologyValidationLimits = NativeTopologyValidationLimits(),
+    allow_dangling_connections: bool = False,
 ) -> dict[str, Any]:
-    """Validate and project one native Matter Server topology graph."""
+    """Validate a native graph; cache inspection may retain dangling endpoints."""
 
     node_ids: set[str] = set()
 
@@ -218,7 +219,7 @@ def validate_native_topology(
         ]
         for index, connection in enumerate(result):
             for endpoint in ("source", "target"):
-                if connection[endpoint] not in node_ids:
+                if not allow_dangling_connections and connection[endpoint] not in node_ids:
                     raise _error(
                         f"{field_path}[{index}].{endpoint}",
                         "must reference an existing node id",
