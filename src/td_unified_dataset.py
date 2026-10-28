@@ -33,14 +33,17 @@ from td_const import (
 from td_dataset_catalog import (
     load_dataset_catalog, resolve_dataset, unique_json_object, validate_dataset_catalog,
 )
-from td_device_fields import get_canonical_omr_address, get_device_identity_keys
+from td_device_fields import (
+    get_canonical_ext_address, get_canonical_omr_address, get_device_identity_keys,
+    is_placeholder_ext_address,
+)
 from td_network_identity import canonical_ext_pan_id
 from td_record_merge import values_equivalent
 from util_data import network_scope_path, resolve_data_dir
 
 
 CONTRACT_VERSION = "unified-v1"
-BUILDER_CONTRACT = "unified-assembly-v5"
+BUILDER_CONTRACT = "unified-assembly-v8"
 _NETWORK = re.compile(r"extpan:[0-9a-f]{16}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -313,62 +316,148 @@ def _record_id(record: dict, network: str | None, occurrence: int = 0) -> str:
     return _fingerprint({"network": network, "identity": identity, "occurrence": occurrence})
 
 
+def _mdns_omr_address(record: dict) -> str | None:
+    value = get_canonical_omr_address(record)
+    if not value:
+        return None
+    try:
+        address = ipaddress.IPv6Address(value)
+    except ipaddress.AddressValueError:
+        logging.warning("Invalid OMR address retained without mDNS association: %r", value)
+        return None
+    if address.is_unspecified or address.is_multicast or address.is_link_local or address.is_loopback:
+        return None
+    return str(address)
+
+
+def _mdns_service_addresses(record: dict) -> set[str]:
+    if get_canonical_omr_address(record):
+        address = _mdns_omr_address(record)
+        return {address} if address is not None else set()
+    service = record.get("serviceInfo", {})
+    addresses = set()
+    for field in ("addressesParsed", "ipv6Addresses"):
+        values = service.get(field, [])
+        if not isinstance(values, list):
+            logging.warning("Invalid advertised address list retained without mDNS association: %s", field)
+            continue
+        for value in values:
+            if not isinstance(value, str) and not (
+                isinstance(value, dict) and isinstance(value.get("hex"), str)
+            ):
+                logging.warning("Invalid advertised address retained without mDNS association: %r", value)
+                continue
+            try:
+                address = ipaddress.ip_address(
+                    bytes.fromhex(value["hex"]) if isinstance(value, dict) else value
+                )
+            except ValueError:
+                logging.warning("Invalid advertised address retained without mDNS association: %r", value)
+                continue
+            if (isinstance(address, ipaddress.IPv6Address) and not (
+                address.is_unspecified or address.is_multicast or address.is_link_local or address.is_loopback
+            )):
+                addresses.add(str(address))
+    return addresses
+
+
+def _attach_mdns_service(target: dict, service: dict, record_sources: dict, field_sources: dict) -> None:
+    target_id, service_id = target["_unifiedRecordId"], service["_unifiedRecordId"]
+    target.setdefault("mdnsRecords", []).append(service)
+    target["_source_files"] = list(dict.fromkeys([
+        *target["_source_files"], *service["_source_files"],
+    ]))
+    origins = record_sources.pop(service_id)
+    record_sources[target_id].extend(origins)
+    fields = field_sources[target_id]
+    fields.setdefault("mdnsRecords", []).extend(origins)
+    prefix = f"mdnsRecords[{_fingerprint({'_unifiedRecordId': service_id})}]"
+    for path, sources in field_sources.pop(service_id).items():
+        fields[f"{prefix}.{path}"] = sources
+
+
+def _group_mdns_services(rows: list[dict], record_sources: dict, field_sources: dict) -> list[dict]:
+    groups: dict[tuple[str | None, str], list[dict]] = {}
+    for row in rows:
+        if row.get("type") != "service":
+            continue
+        address = _mdns_omr_address(row)
+        if address is not None:
+            groups.setdefault((row["_networkInstance"], address), []).append(row)
+    replacements, removed = {}, set()
+    for (network, address), services in groups.items():
+        ext_addresses = {
+            key for service in services for key in get_device_identity_keys(service)
+            if key.startswith("extAddress:")
+        }
+        if len(services) < 2 or len(ext_addresses) > 1:
+            continue
+        group_id = _fingerprint({"mdnsOmr": address, "network": network})
+        group = {
+            "type": "service", "omrIpv6Address": address, "_networkInstance": network,
+            "_unifiedRecordId": group_id, "_source_files": [],
+        }
+        record_sources[group_id] = []
+        field_sources[group_id] = {
+            "type": [],
+            "omrIpv6Address": [
+                origin for service in services
+                for origin in field_sources[service["_unifiedRecordId"]].get("omrIpv6Address", [])
+            ],
+        }
+        for service in services:
+            _attach_mdns_service(group, service, record_sources, field_sources)
+        replacements[services[0]["_unifiedRecordId"]] = group
+        removed.update(service["_unifiedRecordId"] for service in services[1:])
+    return [replacements.get(row["_unifiedRecordId"], row)
+            for row in rows if row["_unifiedRecordId"] not in removed]
+
+
 def _embed_mdns_services(rows: list[dict], record_sources: dict, field_sources: dict) -> list[dict]:
     from ha_matter_ws_unified import is_thread_record
 
-    def address_key(record: dict) -> str | None:
-        value = get_canonical_omr_address(record)
-        if not value:
+    def ext_address_key(record: dict) -> str | None:
+        value = get_canonical_ext_address(record)
+        if is_placeholder_ext_address(value) or not re.fullmatch(r"[0-9a-f]{16}", value):
             return None
-        try:
-            address = ipaddress.IPv6Address(value)
-        except ipaddress.AddressValueError:
-            logging.warning("Invalid OMR address retained without mDNS association: %r", value)
-            return None
-        if address.is_unspecified or address.is_multicast or address.is_link_local or address.is_loopback:
-            return None
-        return str(address)
+        return value
 
     devices: dict[str, list[dict]] = {}
+    devices_by_ext_address: dict[str, list[dict]] = {}
     for row in rows:
         if row.get("type") == "service" or row.get("relationshipOnly") or not is_thread_record(row):
             continue
-        address = address_key(row)
+        address = _mdns_omr_address(row)
         if address is not None:
             devices.setdefault(address, []).append(row)
+        ext_address = ext_address_key(row)
+        if ext_address is not None:
+            devices_by_ext_address.setdefault(ext_address, []).append(row)
     embedded = set()
     for service in rows:
         scope = service.get("scope")
         is_hap_udp = isinstance(scope, str) and scope.strip().lower() == "_hap._udp.local."
+        is_meshcop = isinstance(scope, str) and scope.strip().lower() == "_meshcop._udp.local."
         if service.get("type") != "service" or not (
-            is_matter_operational_mdns_record(service) or is_hap_udp
+            is_matter_operational_mdns_record(service) or is_hap_udp or is_meshcop
         ):
             continue
-        address = address_key(service)
-        if address is None:
-            continue
+        if is_meshcop:
+            address = ext_address_key(service)
+            addresses = {address} if address is not None else set()
+        else:
+            addresses = _mdns_service_addresses(service)
+        index = devices_by_ext_address if is_meshcop else devices
         candidates = [
-            row for row in devices.get(address, []) if (
+            row for address in addresses for row in index.get(address, []) if (
                 service["_networkInstance"] is None
                 or service["_networkInstance"] == row["_networkInstance"]
             )
         ]
         if len(candidates) != 1 or not identities_compatible(candidates[0], service, "strict-omr"):
             continue
-        device = candidates[0]
-        device_id, service_id = device["_unifiedRecordId"], service["_unifiedRecordId"]
-        device.setdefault("mdnsRecords", []).append(service)
-        device["_source_files"] = list(dict.fromkeys([
-            *device["_source_files"], *service["_source_files"],
-        ]))
-        origins = record_sources.pop(service_id)
-        record_sources[device_id].extend(origins)
-        fields = field_sources[device_id]
-        fields.setdefault("mdnsRecords", []).extend(origins)
-        prefix = f"mdnsRecords[{_fingerprint({'_unifiedRecordId': service_id})}]"
-        for path, sources in field_sources.pop(service_id).items():
-            fields[f"{prefix}.{path}"] = sources
-        embedded.add(service_id)
+        _attach_mdns_service(candidates[0], service, record_sources, field_sources)
+        embedded.add(service["_unifiedRecordId"])
     return [row for row in rows if row["_unifiedRecordId"] not in embedded]
 
 
@@ -638,7 +727,8 @@ def read_generation(data_dir: Path, entry: dict, *, verify_inputs: bool = False,
     }
     if "builderContract" in report:
         if report["builderContract"] not in {
-            "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4", BUILDER_CONTRACT,
+            "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
+            "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", BUILDER_CONTRACT,
         }:
             raise UnifiedDatasetError("Unsupported Unified assembly contract")
         generation_contract["builderContract"] = report["builderContract"]
@@ -1075,6 +1165,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
     if entry["value"] == "mdns_unified":
         selected = None
     rows, record_sources, field_sources = _assemble(sources)
+    if entry["value"] == "mdns_unified":
+        rows = _group_mdns_services(rows, record_sources, field_sources)
     if ha_source or composition:
         from ha_matter_ws_unified import bind_native_relationships
         rows, unresolved_native = bind_native_relationships(rows)

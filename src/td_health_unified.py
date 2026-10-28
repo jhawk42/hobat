@@ -118,7 +118,8 @@ def validate_context(context, dataset, observation=None):
                 "unified-v1", builder_contract, dataset.unified_recipe["recipeDigest"],
                 dataset.unified_recipe["authorityDigest"],
             ]) for builder_contract in (
-                "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4", "unified-assembly-v5",
+                "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
+                "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
             )}
             or not isinstance(value.get("originalEvidenceFingerprint"), str)
             or not _DIGEST.fullmatch(value["originalEvidenceFingerprint"])

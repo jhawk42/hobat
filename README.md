@@ -123,15 +123,22 @@ survive composition; aggregate filenames never acquire evidence authority.
 Operational Matter and HAP UDP (`_hap._udp.local.`) mDNS advertisements with one
 unambiguous matching Thread-device OMR
 address are retained in that device's `mdnsRecords` array instead of separate
-top-level rows. Device details expose the full array under **MDNS**, including
+top-level rows. When the optional top-level OMR field is absent, the builder
+also checks advertised IPv6 addresses against observed device OMRs, requiring
+exactly one matching device without guessing the service's network identity.
+Device details expose the full array under **MDNS**, including
 each advertisement's fabric/node identity, properties and capture metadata.
 Normal search also finds the device through its embedded service records.
 Unmatched or ambiguous advertisements and other service types stay separate.
-mDNS Unified remains a standalone service inventory. This enrichment does not
+mDNS Unified remains a standalone service inventory. Advertisements sharing a
+normalized usable OMR address and the same observed network scope are grouped
+into one row, with all complete service records retained in `mdnsRecords`.
+Distinct fabric identities are not overwritten; conflicting extended addresses
+and unknown versus known network scopes remain separate. This enrichment does not
 give an advertisement the device's network scope or health authority.
 An accepted device observation clears a merged `relationshipOnly` marker;
 relationship-only evidence or mDNS enrichment alone does not. Explicit builds
-upgrade older generations to assembly-v5; coherent v2/v3/v4 generations remain
+upgrade older generations to assembly-v8; coherent v2-v7 generations remain
 readable without an automatic rebuild.
 HA uses its [cached converters](src/ha_matter_ws_unified.py) and the commissioned
 inventory plus three required topology/native inputs. A missing inventory is

@@ -63,15 +63,27 @@ no aggregate file rank is used. Network/fabric boundaries and uncorrelated
 services remain separate, and native links rebind to final row IDs.
 Operational Matter and HAP UDP (`_hap._udp.local.`) services with one unambiguous
 Thread-device OMR match instead remain complete records in the device's
-`mdnsRecords` array. They retain their
+`mdnsRecords` array. If the optional promoted OMR field is absent, usable IPv6
+addresses in `serviceInfo.addressesParsed` and `serviceInfo.ipv6Addresses` can
+establish that match against device OMR evidence. Multiple matching devices
+remain ambiguous; an explicit service OMR takes precedence. The builder does
+not add an inferred OMR or network scope to the original service. They retain their
 own service IDs, original scope, times, properties and per-field source lineage;
-no device field or fabric identity is overwritten. Other service types, unmatched,
+no device field or fabric identity is overwritten. MeshCoP
+(`_meshcop._udp.local.`) records use the same embedding path when exactly one
+Thread device matches their concrete extended address within the observed
+network scope; no OMR address is required. Other service types, unmatched,
 scope-conflicting and ambiguous services remain top-level rows. Standalone mDNS
-Unified is unchanged. The shared device-details mDNS section renders the array.
+Unified groups advertisements with the same normalized usable OMR address and
+identical observed scope into one service-summary row, retaining all complete
+advertisements in `mdnsRecords`. It does not choose one fabric's identity for
+the summary or merge conflicting extended addresses. Unknown and known scopes
+remain separate; Multi-source continues to replay original advertisements
+independently. The shared device-details mDNS section renders the array.
 The in-memory device merge derives `relationshipOnly` from accepted original
 contributors: a genuine device observation clears the flag, while placeholders
-and mDNS-only enrichment cannot. Assembly-v5 forces an explicit-build upgrade
-for unchanged inputs, retaining coherent v2/v3/v4 read compatibility.
+and mDNS-only enrichment cannot. Assembly-v8 forces an explicit-build upgrade
+for unchanged inputs, retaining coherent v2/v3/v4/v5/v6/v7 read compatibility.
 CLI/REST/HA Matter/Multi-source health profiles now consume verified original
 evidence with dedicated retained contracts; mDNS is enrichment-only and remains
 health-ineligible. Qualification never processes health on selection. Selector

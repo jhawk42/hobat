@@ -103,17 +103,26 @@ It preserves scoped Thread devices, distinct Matter fabrics, non-Thread members
 and uncorrelated services. Native links are rebound to final committed row IDs.
 An operational Matter or HAP UDP (`_hap._udp.local.`) mDNS advertisement with
 one matching Thread-device OMR address is embedded in the device's `mdnsRecords`
-array. The array preserves
+array. Without an explicit service OMR field, usable IPv6 addresses from
+`serviceInfo.addressesParsed` and `serviceInfo.ipv6Addresses` are compared against
+observed device OMRs. Exactly one device must match across all advertised
+addresses; explicit OMR evidence takes precedence. The array preserves
 individual fabric/node identities, capture data, original scope and lineage;
 it never overwrites the device's identity or Matter fields. Invalid/unspecified,
 multicast, link-local or loopback addresses cannot correlate services. Conflicting
 addresses/scopes or multiple device candidates retain standalone service rows.
 Genuine relationship-only placeholders cannot receive advertisements. Accepted
 device observations clear that marker without modifying the original evidence.
-Assembly-v5 applies these corrections on an explicit build, including when raw
-inputs are unchanged; coherent v2/v3/v4 generations remain readable.
+Assembly-v8 applies these corrections on an explicit build, including when raw
+inputs are unchanged; coherent v2-v7 generations remain readable.
 Other source-primary recipes are unchanged; mDNS Unified has no Thread inventory
-and retains its service rows. See the [merge contract](merge_thread_device_info.md).
+and groups services sharing a normalized usable OMR address within exactly the
+same observed network scope. Every complete advertisement, fabric/node identity,
+capture time and source lineage remains in `mdnsRecords`, without flattening
+service-specific fields into the summary. Conflicting extended addresses,
+unknown versus known scopes and invalid/unspecified/multicast/link-local/loopback
+addresses remain separate. Multi-source still consumes the original services
+independently. See the [merge contract](merge_thread_device_info.md).
 Known mismatched sources are excluded with reasons; without four complete
 sources, publication needs `--allow-partial`. No usable source is an error,
 including when an older output remains on disk.

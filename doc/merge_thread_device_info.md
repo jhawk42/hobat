@@ -63,7 +63,7 @@ original contributor and normal field conflicts. Diagnostic UUIDs are not device
 identities. Same-file inventory collisions, diagnostics without an extended
 address, conflicting addresses, and different Matter fabrics remain separate.
 mDNS advertisements do not join devices merely through an advertised extended
-address.
+address, except for the guarded MeshCoP association below.
 
 Assembly contract `unified-assembly-v3` corrects diagnostic-observation merging.
 An explicit cache-only build upgrades existing generations even when raw inputs
@@ -89,6 +89,49 @@ placeholder-only observations and mDNS enrichment alone cannot clear it.
 Genuine relationship-only placeholders remain ineligible association targets.
 Explicit builds upgrade unchanged v2/v3/v4 generations; coherent older
 generations remain readable without an implicit rebuild.
+
+Assembly contract `unified-assembly-v6` also embeds MeshCoP
+(`_meshcop._udp.local.`) advertisements by matching a concrete, normalized
+16-digit extended address, without requiring an OMR address. Exactly one
+non-placeholder Thread device must match within the advertisement's observed
+network scope. Unknown service scope remains unknown; conflicting known scopes,
+ambiguous network/fabric or same-file device identities, invalid/placeholder
+addresses and unmatched services remain separate. The full advertisement is
+retained in `mdnsRecords`, not flattened over authoritative device fields.
+Standalone mDNS Unified remains a service inventory. Explicit cache-only builds
+upgrade unchanged older generations; coherent v2/v3/v4/v5 products remain
+readable without rebuilding on display.
+
+Assembly contract `unified-assembly-v7` groups standalone mDNS Unified
+advertisements sharing a normalized, usable OMR IPv6 address and exactly the
+same observed network scope into one service-summary row. Every complete
+deduplicated advertisement remains in `mdnsRecords`, including separate Matter
+fabric/node identities, service types, capture times and original field lineage.
+The summary exposes only the shared address, not one advertisement's fabric or
+service fields as if they applied to all members. Different known networks,
+unknown versus known scope, conflicting concrete extended addresses and
+invalid/unspecified/multicast/link-local/loopback addresses do not group.
+Singletons remain unchanged. This is a service-inventory grouping, not a Thread
+device observation or health input. Multi-source still replays the original
+advertisements independently, preserving its guarded device associations.
+Explicit builds upgrade unchanged older generations; coherent v2-v6 products
+remain readable without an implicit rebuild.
+
+Assembly contract `unified-assembly-v8` also associates operational Matter and
+HAP UDP advertisements when collection did not promote an OMR field. In the
+absence of an explicit `omrIpv6Address`, the builder compares usable IPv6
+addresses from `serviceInfo.addressesParsed` and `serviceInfo.ipv6Addresses`
+against observed device OMR addresses. The combined set of matching devices
+must contain exactly one device within the service scope; it never chooses the first match
+from an ambiguous list. Explicit OMR evidence takes precedence, and the same
+extended-address, network, non-Thread and relationship-only guards still apply.
+IPv4, unspecified, multicast, link-local, loopback and malformed addresses cannot
+establish a match. Complete original advertisements and nested address lineage
+are retained without adding a guessed OMR or network scope to the service.
+Standalone mDNS grouping still requires an observed OMR; a bare advertised
+address is not independently promoted to a Thread identity. No collector or
+undeclared prefix lookup is needed. Explicit builds upgrade unchanged older
+generations; coherent v2-v7 products remain readable.
 
 Each array item is the complete deduplicated service record, with its own
 `_unifiedRecordId`, original scope, capture metadata, service properties and

@@ -39,7 +39,8 @@ def process(directory, dataset_id, store=None, **kwargs):
 
 @pytest.mark.parametrize("dataset_id", IDS)
 @pytest.mark.parametrize("builder_contract", [
-    "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4", "unified-assembly-v5",
+    "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
+    "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
 ])
 def test_original_samples_are_scoped_stable_and_reopenable(
     tmp_path, dataset_id, builder_contract, monkeypatch,

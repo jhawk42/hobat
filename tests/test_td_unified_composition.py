@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import ipaddress
 import json
 import os
 from unittest.mock import MagicMock, patch
@@ -303,6 +304,123 @@ def _hap_service(address=OMR):
     }
 
 
+def _meshcop_service(ext_address="3e31b4ee45997933"):
+    name = "Dining Room HomePod._meshcop._udp.local."
+    return {
+        "scope": "_meshcop._udp.local.", "name": name, "extAddress": ext_address,
+        "capturedAtEpoch": 1_767_225_600,
+        "serviceInfo": {
+            "name": name, "key": name.lower(), "server": "homepod.local.", "port": 49191,
+            "properties": {"xp": {"hex": NETWORK[7:]}, "tv": {"decoded": "1.4.0"}},
+        },
+    }
+
+
+def test_meshcop_embeds_by_extended_address_with_original_lineage_and_no_op(tmp_path):
+    entry = _seed_all(tmp_path)
+    cli_file = "td-otbr-cli-networkdiag-fetch-all.json"
+    service = _meshcop_service()
+    _save(tmp_path, cli_file, [{
+        "extAddress": service["extAddress"], "omrIpv6Address": OMR,
+        "type": "border router", "deviceLabel": "Thread",
+    }])
+    for item in _entry("mdns_unified")["unified"]["inputs"]:
+        _save(tmp_path, item["file"], [service] if "scopes-thread" in item["file"] else [])
+    unified.build_unified_dataset(tmp_path, TARGET)
+    rows = _rows(tmp_path, entry)
+    [device] = [row for row in rows if row.get("extAddress") == service["extAddress"]]
+    assert device["type"] == "border router"
+    assert device["deviceLabel"] == "Thread"
+    assert device["omrIpv6Address"] == OMR
+    assert "serviceInfo" not in device
+    [embedded] = device["mdnsRecords"]
+    assert all(embedded[key] == value for key, value in service.items())
+    assert embedded["_networkInstance"] == device["_networkInstance"] == NETWORK
+    assert device["mdnsRecords"] == _rows(tmp_path, _entry("mdns_unified"))
+    report = unified.read_generation(tmp_path, entry, verify_inputs=True)
+    device_id = device["_unifiedRecordId"]
+    assert embedded["_unifiedRecordId"] not in report["recordSources"]
+    fields = report["fieldSources"][device_id]
+    assert fields["mdnsRecords"] == [
+        origin for origin in report["recordSources"][device_id]
+        if origin["filename"] == "td-mdns-scopes-thread.json"
+    ]
+    version_fields = [
+        origins for path, origins in fields.items()
+        if path.startswith("mdnsRecords[") and path.endswith("properties.tv.decoded")
+    ]
+    assert version_fields == [fields["mdnsRecords"]]
+    assert all(origin["filename"] == cli_file for origin in fields["omrIpv6Address"])
+    before = _artifacts(tmp_path, entry)
+    assert unified.build_unified_dataset(tmp_path, TARGET)["noOp"] is True
+    assert _artifacts(tmp_path, entry) == before
+
+
+@pytest.mark.parametrize(("device_scope", "service_scope"), [
+    (NETWORK[7:], None), (None, None), (NETWORK[7:], NETWORK[7:]),
+])
+def test_meshcop_extended_address_match_preserves_scope_and_input(device_scope, service_scope):
+    service = _meshcop_service("3E31B4EE45997933")
+    sources = [
+        (device_scope, "td-otbr-cli-networkdiag-fetch-all.json", [{
+            "extAddress": "3e31b4ee45997933", "omrIpv6Address": OMR,
+        }]),
+        (service_scope, "td-mdns-scopes-thread.json", [service]),
+    ]
+    before = copy.deepcopy(sources)
+    rows, _, _ = unified._assemble(sources)
+    assert len(rows) == 1
+    [embedded] = rows[0]["mdnsRecords"]
+    assert embedded["_networkInstance"] == (f"extpan:{service_scope}" if service_scope else None)
+    assert sources == before
+
+
+@pytest.mark.parametrize("case", [
+    "no-device", "different-network", "ambiguous-network", "ambiguous-fabric",
+    "same-file-collision", "non-thread", "relationship-only", "missing-extaddr",
+    "placeholder-extaddr", "invalid-extaddr", "different-extaddr", "other-service",
+])
+def test_meshcop_uncertain_or_conflicting_identity_remains_standalone(case):
+    service = _meshcop_service()
+    device = {"extAddress": service["extAddress"], "omrIpv6Address": OMR}
+    service_scope = NETWORK[7:]
+    if case == "different-network":
+        service_scope = OTHER_NETWORK[7:]
+    elif case == "ambiguous-network":
+        service_scope = None
+    elif case == "non-thread":
+        device["type"] = "matterDevice"
+    elif case == "relationship-only":
+        device["relationshipOnly"] = True
+    elif case == "missing-extaddr":
+        service.pop("extAddress")
+    elif case in {"placeholder-extaddr", "invalid-extaddr"}:
+        device["extAddress"] = service["extAddress"] = (
+            "0000000000000000" if case == "placeholder-extaddr" else "not-an-extaddr"
+        )
+    elif case == "different-extaddr":
+        service["extAddress"] = "8899aabbccddeeff"
+        service["omrIpv6Address"] = OMR
+    elif case == "other-service":
+        service["scope"] = "_hap._tcp.local."
+    records = [] if case == "no-device" else [device]
+    if case == "same-file-collision":
+        records.append({**device, "deviceLabel": "duplicate"})
+    sources = [(NETWORK[7:], "td-otbr-cli-networkdiag-fetch-all.json", records)]
+    if case == "ambiguous-network":
+        sources.append((OTHER_NETWORK[7:], "td-otbr-restapi-devices-fetch.json", [device]))
+    elif case == "ambiguous-fabric":
+        for fabric in ("1111222233334444", "9999222233334444"):
+            sources.append((NETWORK[7:], "td-ha-matter-ws-devices-fetch-all.json", [{
+                **device, "type": "threadDevice",
+                "matter": {"matterId": fabric + "-0000000000000001"},
+            }]))
+    sources.append((service_scope, "td-mdns-scopes-thread.json", [service]))
+    rows, _, _ = unified._assemble(sources)
+    assert any(row.get("type") == "service" for row in rows)
+    assert all("mdnsRecords" not in row for row in rows)
+
+
 @pytest.mark.parametrize("device_first", [False, True])
 def test_real_device_contribution_clears_relationship_only_marker(device_first):
     placeholder = {
@@ -370,7 +488,10 @@ def test_mixed_mdns_records_embed_after_real_observation_resolves_placeholder():
 
 
 @pytest.mark.parametrize("include_hap", [False, True])
-def test_matter_services_embed_in_matching_thread_row_with_original_lineage(tmp_path, include_hap):
+@pytest.mark.parametrize("address_location", ["top-level", "addressesParsed", "ipv6Addresses", "packed"])
+def test_matter_services_embed_in_matching_thread_row_with_original_lineage(
+    tmp_path, include_hap, address_location,
+):
     entry = _seed_all(tmp_path)
     cli_file = "td-otbr-cli-networkdiag-fetch-all.json"
     _save(tmp_path, cli_file, [{
@@ -379,6 +500,14 @@ def test_matter_services_embed_in_matching_thread_row_with_original_lineage(tmp_
     services = [_matter_service(fabric) for fabric in ("1111222233334444", "9999222233334444")]
     if include_hap:
         services.append(_hap_service())
+    if address_location != "top-level":
+        for service in services:
+            address = service.pop("omrIpv6Address")
+            field = "ipv6Addresses" if address_location == "packed" else address_location
+            service["serviceInfo"][field] = [
+                {"hex": ipaddress.IPv6Address(address).packed.hex()}
+                if address_location == "packed" else address
+            ]
     for item in _entry("mdns_unified")["unified"]["inputs"]:
         records = services[:2] if "scopes-matter" in item["file"] else (
             services[2:] if "scopes-thread" in item["file"] else []
@@ -395,7 +524,12 @@ def test_matter_services_embed_in_matching_thread_row_with_original_lineage(tmp_
     assert device["_networkInstance"] == NETWORK
     assert len({record["_unifiedRecordId"] for record in device["mdnsRecords"]}) == len(services)
     primary = _rows(tmp_path, _entry("mdns_unified"))
-    assert device["mdnsRecords"] == primary
+    assert len(primary) == (1 if address_location == "top-level" else len(services))
+    assert device["mdnsRecords"] == [
+        service for row in primary for service in row.get("mdnsRecords", [row])
+    ]
+    if address_location != "top-level":
+        assert all("omrIpv6Address" not in service for service in device["mdnsRecords"])
     assert all(row["type"] == "service" for row in primary)
     report = unified.read_generation(tmp_path, entry, verify_inputs=True)
     sources = report["recordSources"][device["_unifiedRecordId"]]
@@ -412,6 +546,88 @@ def test_matter_services_embed_in_matching_thread_row_with_original_lineage(tmp_
     assert unified.build_unified_dataset(tmp_path, TARGET)["noOp"] is True
     assert before == _artifacts(tmp_path, entry)
     assert result["generationId"] == report["generationId"]
+
+
+@pytest.mark.parametrize("service_kind", ["matter", "hap"])
+def test_service_advertised_addresses_match_only_authoritative_device_omr(service_kind, caplog):
+    service = _matter_service("1111222233334444") if service_kind == "matter" else _hap_service()
+    service.pop("omrIpv6Address")
+    service["serviceInfo"]["addressesParsed"] = [
+        "192.0.2.1", "fe80::1", "::", "::1", "ff02::1", "invalid",
+        "fd6b:32e0:d18::9999", "FD6B:32E0:0D18:0000:32A2:337B:1B57:FB41",
+    ]
+    service["serviceInfo"]["ipv6Addresses"] = [OMR, {"hex": "c0a804ac"}, {"hex": "invalid"}]
+    before = copy.deepcopy(service)
+    rows, record_sources, field_sources = unified._assemble([
+        (NETWORK[7:], "td-otbr-cli-networkdiag-fetch-all.json", [{
+            "extAddress": "0011223344556677", "omrIpv6Address": OMR,
+        }]),
+        (None, "td-mdns-scopes-matter.json", [service]),
+    ])
+    assert len(rows) == 1
+    [embedded] = rows[0]["mdnsRecords"]
+    assert all(embedded[key] == value for key, value in before.items())
+    assert "omrIpv6Address" not in embedded
+    assert embedded["_networkInstance"] is None
+    assert service == before
+    fields = field_sources[rows[0]["_unifiedRecordId"]]
+    advertised_fields = [
+        origins for path, origins in fields.items()
+        if path.startswith("mdnsRecords[") and path.endswith("serviceInfo.addressesParsed")
+    ]
+    assert len(advertised_fields) == 1
+    assert advertised_fields[0][0]["filename"] == "td-mdns-scopes-matter.json"
+    assert len(record_sources[rows[0]["_unifiedRecordId"]]) == 2
+    assert "Invalid advertised address" in caplog.text
+    assert "c0a804ac" not in caplog.text
+
+
+@pytest.mark.parametrize("case", ["multiple-devices", "explicit-omr", "unsafe-only"])
+def test_advertised_addresses_do_not_override_explicit_or_ambiguous_evidence(case):
+    service = _matter_service("1111222233334444")
+    service.pop("omrIpv6Address")
+    other_omr = "fd6b:32e0:d18::2"
+    service["serviceInfo"]["addressesParsed"] = [OMR, other_omr]
+    devices = [{"extAddress": "0011223344556677", "omrIpv6Address": OMR}]
+    if case == "multiple-devices":
+        devices.append({"extAddress": "8899aabbccddeeff", "omrIpv6Address": other_omr})
+    elif case == "explicit-omr":
+        service["omrIpv6Address"] = other_omr
+    else:
+        service["serviceInfo"]["addressesParsed"] = [
+            "192.0.2.1", "::", "::1", "ff02::1", "fe80::1",
+        ]
+    rows, _, _ = unified._assemble([
+        (NETWORK[7:], "td-otbr-cli-networkdiag-fetch-all.json", devices),
+        (None, "td-mdns-scopes-matter.json", [service]),
+    ])
+    assert any(row.get("type") == "service" for row in rows)
+    assert all("mdnsRecords" not in row for row in rows)
+
+
+def test_v7_generation_upgrades_missing_promoted_service_addresses_on_explicit_build(
+    tmp_path, monkeypatch,
+):
+    entry = _seed_all(tmp_path)
+    _save(tmp_path, "td-otbr-cli-networkdiag-fetch-all.json", [{
+        "extAddress": "0011223344556677", "omrIpv6Address": OMR,
+    }])
+    service = _matter_service("1111222233334444")
+    service["serviceInfo"]["addressesParsed"] = [service.pop("omrIpv6Address")]
+    for item in _entry("mdns_unified")["unified"]["inputs"]:
+        _save(tmp_path, item["file"], [service] if "scopes-matter" in item["file"] else [])
+    with monkeypatch.context() as previous:
+        previous.setattr(unified, "BUILDER_CONTRACT", "unified-assembly-v7")
+        previous.setattr(unified, "_mdns_service_addresses", lambda record: set())
+        old = unified.build_unified_dataset(tmp_path, TARGET)
+    assert any(row.get("type") == "service" for row in _rows(tmp_path, entry))
+    assert unified.read_generation(tmp_path, entry)["generationId"] == old["generationId"]
+    upgraded = unified.build_unified_dataset(tmp_path, TARGET)
+    assert upgraded["noOp"] is False
+    assert upgraded["generationId"] != old["generationId"]
+    assert upgraded["rowCount"] == old["rowCount"] - 1
+    assert not any(row.get("type") == "service" for row in _rows(tmp_path, entry))
+    assert unified.build_unified_dataset(tmp_path, TARGET)["noOp"] is True
 
 
 @pytest.mark.parametrize("service_kind", ["matter", "hap"])
@@ -436,12 +652,15 @@ def test_matter_service_matching_normalizes_ipv6_without_relabelling_service(
 
 
 @pytest.mark.parametrize("service_kind", ["matter", "hap"])
+@pytest.mark.parametrize("address_location", ["top-level", "addressesParsed"])
 @pytest.mark.parametrize("case", [
     "no-device", "different-network", "ambiguous-network", "ambiguous-fabric",
     "non-thread", "conflicting-extaddr", "unspecified", "multicast", "link-local", "loopback",
     "not-matter", "relationship-only", "missing-address", "invalid-address",
 ])
-def test_unmatched_or_ambiguous_matter_services_remain_standalone(case, service_kind):
+def test_unmatched_or_ambiguous_matter_services_remain_standalone(
+    case, service_kind, address_location,
+):
     service = _matter_service("1111222233334444") if service_kind == "matter" else _hap_service()
     device = {"extAddress": "0011223344556677", "omrIpv6Address": OMR}
     device_scope, service_scope = NETWORK[7:], None
@@ -464,6 +683,8 @@ def test_unmatched_or_ambiguous_matter_services_remain_standalone(case, service_
         device["omrIpv6Address"] = service["omrIpv6Address"] = address
     elif case == "not-matter":
         service["scope"] = "_hap._tcp.local."
+    if address_location != "top-level" and "omrIpv6Address" in service:
+        service["serviceInfo"][address_location] = [service.pop("omrIpv6Address")]
     sources = [(device_scope, "td-otbr-cli-networkdiag-fetch-all.json",
                 [] if case == "no-device" else [device])]
     if case == "ambiguous-network":
@@ -481,9 +702,12 @@ def test_unmatched_or_ambiguous_matter_services_remain_standalone(case, service_
 
 
 @pytest.mark.parametrize("service_kind", ["matter", "hap"])
-def test_scoped_matter_service_can_choose_only_its_observed_network(service_kind):
+@pytest.mark.parametrize("address_location", ["top-level", "addressesParsed"])
+def test_scoped_matter_service_can_choose_only_its_observed_network(service_kind, address_location):
     device = {"extAddress": "0011223344556677", "omrIpv6Address": OMR}
     service = _matter_service("1111222233334444") if service_kind == "matter" else _hap_service()
+    if address_location != "top-level":
+        service["serviceInfo"][address_location] = [service.pop("omrIpv6Address")]
     rows, _, _ = unified._assemble([
         (NETWORK[7:], "td-otbr-cli-networkdiag-fetch-all.json", [device]),
         (OTHER_NETWORK[7:], "td-otbr-restapi-devices-fetch.json", [device]),

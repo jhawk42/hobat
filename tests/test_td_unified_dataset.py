@@ -82,9 +82,171 @@ def _artifacts(directory, entry):
             for name in names}
 
 
-@pytest.mark.parametrize("dataset_id", DATASET_IDS)
-def test_committed_rows_use_one_browser_model_without_raw_file_dispatch(tmp_path, dataset_id):
+def _mdns_omr_services():
+    address = "fd6b:32e0:d18:0:131f:4a34:d524:2457"
+    return [{
+        "scope": "_matter._tcp.local.", "name": f"{fabric}-0000000000000001._matter._tcp.local.",
+        "omrIpv6Address": address, "capturedAtEpoch": 1_767_225_600,
+        "serviceInfo": {
+            "server": "device.local.", "port": 5540,
+            "properties": {
+                "fabricIdCompressed": {"decoded": fabric},
+                "nodeId": {"decoded": "0000000000000001"},
+            },
+        },
+    } for fabric in ("1111222233334444", "9999222233334444")]
+
+
+def _seed_mdns_omr_services(directory):
+    entry = _seed(directory, "mdns_unified")
+    services = _mdns_omr_services()
+    later = copy.deepcopy(services)
+    later[0]["capturedAtEpoch"] += 1
+    later[0]["serviceInfo"]["port"] = 5541
+    later[0]["omrIpv6Address"] = "FD6B:32E0:0D18:0000:131F:4A34:D524:2457"
+    for item in entry["unified"]["inputs"]:
+        records = services if item["file"] == "td-mdns-scopes-matter.json" else (
+            later if item["file"] == "td-mdns-scopes-thread.json" else []
+        )
+        _save(directory, item["file"], records)
+    return entry
+
+
+def test_mdns_unified_groups_omr_without_losing_fabrics_events_or_lineage(tmp_path):
+    entry = _seed_mdns_omr_services(tmp_path)
+    raw_before = {item["file"]: (tmp_path / item["file"]).read_bytes()
+                  for item in entry["unified"]["inputs"]}
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    rows = json.loads((tmp_path / entry["files"][0]).read_text())
+    assert len(rows) == 1
+    [group] = rows
+    assert group["type"] == "service"
+    assert group["omrIpv6Address"] == _mdns_omr_services()[0]["omrIpv6Address"]
+    assert group["_networkInstance"] is None
+    assert "matter" not in group and "serviceInfo" not in group and "scope" not in group
+    services = group["mdnsRecords"]
+    assert len(services) == 2
+    assert {s["name"] for s in services} == {s["name"] for s in _mdns_omr_services()}
+    assert len({s["_unifiedRecordId"] for s in services}) == 2
+    assert all(s["_networkInstance"] is None for s in services)
+    first = next(s for s in services if s["name"].startswith("1111222233334444"))
+    assert first["capturedAtEpoch"] == 1_767_225_601
+    assert first["serviceInfo"]["port"] == 5541
+    assert {s["serviceInfo"]["properties"]["fabricIdCompressed"]["decoded"] for s in services} == {
+        "1111222233334444", "9999222233334444",
+    }
+    report = unified.read_generation(tmp_path, entry, verify_inputs=True)
+    group_id = group["_unifiedRecordId"]
+    assert set(report["recordSources"]) == set(report["fieldSources"]) == {group_id}
+    sources = report["recordSources"][group_id]
+    assert len(sources) == 4
+    fields = report["fieldSources"][group_id]
+    assert fields["mdnsRecords"] == sources
+    assert len(fields["omrIpv6Address"]) == 3
+    assert all(origin in sources for origin in fields["omrIpv6Address"])
+    fabric_fields = [
+        origins for path, origins in fields.items()
+        if path.startswith("mdnsRecords[") and path.endswith("properties.fabricIdCompressed.decoded")
+    ]
+    assert len(fabric_fields) == 2
+    assert all(len(origins) == 2 for origins in fabric_fields)
+    port_fields = [
+        origins for path, origins in fields.items()
+        if path.startswith("mdnsRecords[") and path.endswith("serviceInfo.port")
+    ]
+    assert any([o["filename"] for o in origins] == ["td-mdns-scopes-thread.json"]
+               for origins in port_fields)
+    assert result["healthState"] == "ineligible"
+    assert raw_before == {name: (tmp_path / name).read_bytes() for name in raw_before}
+    before = _artifacts(tmp_path, entry)
+    assert unified.build_unified_dataset(tmp_path, entry["value"])["noOp"] is True
+    assert _artifacts(tmp_path, entry) == before
+
+
+def test_mdns_grouping_requires_explicit_build_to_upgrade_v6(tmp_path, monkeypatch):
+    entry = _seed_mdns_omr_services(tmp_path)
+    with monkeypatch.context() as previous:
+        previous.setattr(unified, "BUILDER_CONTRACT", "unified-assembly-v6")
+        previous.setattr(unified, "_group_mdns_services", lambda rows, *_: rows)
+        old = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert old["rowCount"] == 2
+    assert unified.read_generation(tmp_path, entry)["generationId"] == old["generationId"]
+    assert len(json.loads((tmp_path / entry["files"][0]).read_text())) == 2
+    upgraded = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert upgraded["noOp"] is False
+    assert upgraded["rowCount"] == 1
+    assert upgraded["generationId"] != old["generationId"]
+    assert unified.build_unified_dataset(tmp_path, entry["value"])["noOp"] is True
+
+
+@pytest.mark.parametrize("case", [
+    "different-network", "unknown-vs-known-network", "conflicting-extaddr",
+    "unspecified", "multicast", "link-local", "loopback", "invalid", "missing", "different-address",
+    "singleton",
+])
+def test_mdns_omr_grouping_preserves_unrelated_or_unsafe_services(case):
+    first, second = _mdns_omr_services()
+    first_scope = second_scope = None
+    if case == "different-network":
+        first_scope, second_scope = NETWORK[7:], OTHER_NETWORK[7:]
+    elif case == "unknown-vs-known-network":
+        first_scope = NETWORK[7:]
+    elif case == "conflicting-extaddr":
+        first["extAddress"], second["extAddress"] = "0011223344556677", "8899aabbccddeeff"
+    elif case == "missing":
+        first.pop("omrIpv6Address")
+        second.pop("omrIpv6Address")
+    elif case == "different-address":
+        second["omrIpv6Address"] = "fd6b:32e0:d18::2"
+    elif case != "singleton":
+        first["omrIpv6Address"] = second["omrIpv6Address"] = {
+            "unspecified": "::", "multicast": "ff02::1", "link-local": "fe80::1",
+            "loopback": "::1", "invalid": "not-an-address",
+        }[case]
+    rows, record_sources, field_sources = unified._assemble([
+        (first_scope, "td-mdns-scopes-matter.json", [first]),
+        (second_scope, "td-mdns-scopes-thread.json", [] if case == "singleton" else [second]),
+    ])
+    before = copy.deepcopy((rows, record_sources, field_sources))
+    grouped = unified._group_mdns_services(rows, record_sources, field_sources)
+    assert (grouped, record_sources, field_sources) == before
+    assert all("mdnsRecords" not in row for row in grouped)
+
+
+@pytest.mark.parametrize("case", [
+    "different-services", "same-extaddr", "placeholder-extaddr", "scoped", "three-services",
+])
+def test_mdns_omr_groups_preserve_complete_individual_advertisements(case):
+    services = _mdns_omr_services()
+    scope = NETWORK[7:] if case == "scoped" else None
+    if case == "different-services":
+        services[1]["scope"] = "_hap._udp.local."
+    elif case in {"same-extaddr", "placeholder-extaddr"}:
+        for service in services:
+            service["extAddress"] = (
+                "0011223344556677" if case == "same-extaddr" else "0000000000000000"
+            )
+    elif case == "three-services":
+        services.append({**services[0], "name": "another-service"})
+    rows, record_sources, field_sources = unified._assemble([
+        (scope, "td-mdns-scopes-thread.json", services),
+    ])
+    before = copy.deepcopy(rows)
+    [group] = unified._group_mdns_services(rows, record_sources, field_sources)
+    assert group["mdnsRecords"] == before
+    assert group["_networkInstance"] == (f"extpan:{scope}" if scope else None)
+    assert set(record_sources) == set(field_sources) == {group["_unifiedRecordId"]}
+
+
+@pytest.mark.parametrize(("dataset_id", "group_services"), [
+    *((dataset_id, False) for dataset_id in DATASET_IDS), ("mdns_unified", True),
+])
+def test_committed_rows_use_one_browser_model_without_raw_file_dispatch(
+    tmp_path, dataset_id, group_services,
+):
     entry = _seed(tmp_path, dataset_id)
+    if group_services:
+        entry = _seed_mdns_omr_services(tmp_path)
     unified.build_unified_dataset(tmp_path, dataset_id)
     script = """
 import fs from 'node:fs';
@@ -548,7 +710,8 @@ def test_rest_diagnostic_observations_merge_without_identity_ambiguity(tmp_path,
 
 
 @pytest.mark.parametrize("previous_contract", [
-    "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
+    "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4", "unified-assembly-v5",
+    "unified-assembly-v6", "unified-assembly-v7",
 ])
 def test_previous_assembly_generation_remains_readable_but_explicit_build_upgrades(
     tmp_path, monkeypatch, previous_contract,
