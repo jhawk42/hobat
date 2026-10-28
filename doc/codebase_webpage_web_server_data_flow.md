@@ -286,6 +286,12 @@ probes are coalesced and cached for 60 seconds. They do not collect snapshots or
 invoke `td_cli`. `GET /api/device-actions` is separate and reports the effective
 policy for active Ping and Reset Counters operations.
 
+Collection automation instead calls
+[`td_cli source-probe`](help_td_cli.md#source-probe) once before each supported
+source block. It reuses the bounded probes without consulting cached evidence,
+probe TTLs, or inflight dashboard results, and does not change this API's
+cache-first behavior.
+
 ### Health and Device-Action Flows
 
 ```text

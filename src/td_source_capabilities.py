@@ -1,19 +1,31 @@
-"""Cache-first source capability inspection for the dashboard."""
+"""Cache-first dashboard capabilities and explicit live collection preflights."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import json
+import logging
 import os
 import shutil
 import subprocess
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Literal, TypedDict
+from urllib.parse import urlsplit
 
-from ha_matter_ws_client import HaMatterWsClient
-from ha_matter_ws_contract import resolve_default_ha_matter_ws_uri
-from otbr_restapi_util import OTBRRestApiClient
+from ha_matter_ws_client import HaMatterWsClient, MatterWsTransportError
+from ha_matter_ws_contract import MatterWsContractError, resolve_default_ha_matter_ws_uri
+from otbr_restapi_util import (
+    OTBRConnectionError,
+    OTBRHTTPError,
+    OTBRInvalidResponseError,
+    OTBRRestApiClient,
+    OTBRUsageError,
+    resolve_default_rest_host,
+    resolve_default_rest_port,
+)
 from td_const import (
     EXTADDR_DEVICE_LABEL_MAP_FILENAME,
     EVE_TOPOLOGY_FILENAME,
@@ -182,8 +194,10 @@ async def _probe_otbr_restapi() -> str | None:
             ),
             timeout=PROBE_TIMEOUT_SECONDS + 0.25,
         )
-    except (Exception, asyncio.TimeoutError):
+    except (OTBRConnectionError, OTBRHTTPError, OSError, asyncio.TimeoutError):
         return "unreachable"
+    except OTBRInvalidResponseError:
+        return "invalid-response"
     return None
 
 
@@ -197,8 +211,10 @@ async def _probe_ha_matter_ws() -> str | None:
             max_frames=2,
         ):
             pass
-    except Exception:
+    except (MatterWsTransportError, OSError, asyncio.TimeoutError):
         return "unreachable"
+    except MatterWsContractError:
+        return "invalid-response"
     return None
 
 
@@ -207,6 +223,110 @@ DEFAULT_PROBES: dict[str, Probe] = {
     "otbr-restapi": _probe_otbr_restapi,
     "ha-matter-ws": _probe_ha_matter_ws,
 }
+
+
+class LiveProbeResult(TypedDict):
+    source: str
+    state: Literal["live", "probe-failed", "probe-error"]
+    probe: dict[str, str]
+
+
+class ProbeConfigurationError(ValueError):
+    """Invalid preflight configuration with a safe operator-facing message."""
+
+
+def _validate_probe_configuration(source: str) -> None:
+    if source == "otbr-cli":
+        container_use = os.environ.get(TD_OTBR_CONTAINER_USE_ENV)
+        if container_use is not None and container_use not in {"0", "1"}:
+            raise ProbeConfigurationError(f"{TD_OTBR_CONTAINER_USE_ENV} must be 0 or 1")
+        if (container_use is None and TD_OTBR_CONTAINER_USE_DEFAULT) or container_use == "1":
+            container = os.environ.get(TD_OTBR_CONTAINER_NAME_ENV, TD_OTBR_CONTAINER_NAME_DEFAULT)
+            if not container.strip():
+                raise ProbeConfigurationError(f"{TD_OTBR_CONTAINER_NAME_ENV} must not be blank")
+    port_variable = {
+        "otbr-restapi": "OT_REST_LISTEN_PORT",
+        "ha-matter-ws": "TD_HA_MATTER_WS_PORT",
+    }.get(source)
+    if port_variable is not None:
+        port = os.environ.get(port_variable, "").strip()
+        if port and (
+            len(port) > 5 or not port.isascii() or not port.isdecimal()
+            or not 1 <= int(port) <= 65535
+        ):
+            raise ProbeConfigurationError(f"{port_variable} must be an integer between 1 and 65535")
+    if source == "otbr-cli":
+        return
+    endpoint = (
+        f"http://{resolve_default_rest_host()}:{resolve_default_rest_port()}"
+        if source == "otbr-restapi" else resolve_default_ha_matter_ws_uri()
+    )
+    try:
+        parsed = urlsplit(endpoint)
+        valid = (
+            parsed.hostname is not None
+            and not any(character.isspace() for character in parsed.hostname)
+            and parsed.port is not None
+            and parsed.username is None and parsed.password is None
+            and parsed.path == ("" if source == "otbr-restapi" else "/ws")
+            and not parsed.query and not parsed.fragment
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ProbeConfigurationError(f"Invalid host/port configuration for {source}")
+
+
+async def probe_source(source: str) -> LiveProbeResult:
+    """Run a fresh bounded probe without consulting files, TTLs, or inflight results."""
+    if source not in DEFAULT_PROBES:
+        raise ValueError("Source does not support a live probe")
+    _validate_probe_configuration(source)
+    try:
+        reason = await asyncio.wait_for(
+            DEFAULT_PROBES[source](), timeout=2 * PROBE_TIMEOUT_SECONDS + 0.5
+        )
+    except asyncio.TimeoutError:
+        reason = "unreachable"
+    if reason is not None and (not isinstance(reason, str) or not reason):
+        raise TypeError("Source probe must return None or a nonempty failure reason")
+    if reason is None:
+        return {"source": source, "state": "live", "probe": {"state": "success"}}
+    return {
+        "source": source,
+        "state": "probe-failed",
+        "probe": {"state": "failed", "reason": reason},
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Probe live source readiness without reading or writing caches.")
+    parser.add_argument("--source", required=True, choices=tuple(DEFAULT_PROBES))
+    parser.add_argument("--json", action="store_true", help="Write one JSON result to stdout")
+    args = parser.parse_args(argv)
+    try:
+        result = asyncio.run(probe_source(args.source))
+    except ProbeConfigurationError as exc:
+        logging.error("Invalid source-probe configuration for %s: %s.", args.source, exc)
+        result = {
+            "source": args.source, "state": "probe-error",
+            "probe": {"state": "error", "reason": "invalid-configuration"},
+        }
+    except (ValueError, RuntimeError, TypeError, OSError, OTBRUsageError) as exc:
+        logging.error("Source probe execution failed for %s (%s).", args.source, type(exc).__name__)
+        result = {
+            "source": args.source, "state": "probe-error",
+            "probe": {"state": "error", "reason": "probe-execution-error"},
+        }
+    status = {"live": 0, "probe-failed": 1, "probe-error": 2}[result["state"]]
+    if args.json:
+        print(json.dumps(result))
+    else:
+        reason = result["probe"].get("reason", "success")
+        print(f"{result['source']}: {result['state']}; {reason}")
+    if status == 1:
+        logging.warning("Source unavailable: %s (%s).", args.source, result["probe"]["reason"])
+    return status
 
 
 class SourceCapabilityService:
@@ -329,3 +449,7 @@ class SourceCapabilityService:
                 self._inflight.pop(source, None)
         self._probe_cache[source] = (now + self._probe_ttl_seconds, result)
         return result
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

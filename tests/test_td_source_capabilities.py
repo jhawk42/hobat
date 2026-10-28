@@ -7,7 +7,7 @@ import tempfile
 import threading
 from copy import deepcopy
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -23,8 +23,206 @@ from td_network_identity import NetworkScope
 from util_data import write_network_scope
 import td_webserver
 import td_unified_dataset
+import td_cli
 from td_dataset_catalog import load_dataset_catalog
 from util_data import network_scope_path
+
+
+@pytest.mark.parametrize("source", ("otbr-cli", "otbr-restapi", "ha-matter-ws"))
+def test_live_probe_bypasses_cached_files_and_probe_ttl(monkeypatch, tmp_path, source):
+    monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "0")
+    monkeypatch.setenv("TD_DATA_DIR", str(tmp_path))
+    snapshot = tmp_path / OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME
+    snapshot.write_text("[]", encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    probe = AsyncMock(side_effect=[None, "unreachable", None])
+    monkeypatch.setitem(td_source_capabilities.DEFAULT_PROBES, source, probe)
+    inspection = MagicMock(side_effect=AssertionError("live probes must not inspect caches"))
+    monkeypatch.setattr(SourceCapabilityService, "_inspect_files", inspection)
+
+    async def exercise():
+        service = SourceCapabilityService(probes={source: probe})
+        assert await service._run_probe(source, probe) is None
+        assert await service._run_probe(source, probe) is None
+        failed = await td_source_capabilities.probe_source(source)
+        assert failed == {
+            "source": source, "state": "probe-failed",
+            "probe": {"state": "failed", "reason": "unreachable"},
+        }
+        succeeded = await td_source_capabilities.probe_source(source)
+        assert succeeded == {"source": source, "state": "live", "probe": {"state": "success"}}
+
+    asyncio.run(exercise())
+    assert probe.await_count == 3
+    inspection.assert_not_called()
+    assert before == {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+
+
+@pytest.mark.parametrize(
+    ("outcome", "exit_code", "state", "reason"),
+    [
+        (None, 0, "live", None),
+        ("docker-unavailable", 1, "probe-failed", "docker-unavailable"),
+        (asyncio.TimeoutError(), 1, "probe-failed", "unreachable"),
+        (RuntimeError("secret-value"), 2, "probe-error", "probe-execution-error"),
+        (True, 2, "probe-error", "probe-execution-error"),
+    ],
+)
+def test_source_probe_cli_json_and_exit_contract(monkeypatch, capsys, caplog, outcome, exit_code, state, reason):
+    monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "0")
+    probe = AsyncMock(side_effect=outcome) if isinstance(outcome, BaseException) else AsyncMock(return_value=outcome)
+    monkeypatch.setitem(td_source_capabilities.DEFAULT_PROBES, "otbr-cli", probe)
+    assert td_cli.main(["source-probe", "--source", "otbr-cli", "--json"]) == exit_code
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["source"] == "otbr-cli"
+    assert payload["state"] == state
+    assert payload["probe"].get("reason") == reason
+    assert "secret-value" not in captured.out + captured.err + caplog.text
+    probe.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("source", "variable", "value"),
+    [
+        ("otbr-cli", "TD_OTBR_CONTAINER_USE", "invalid"),
+        ("otbr-cli", "TD_OTBR_CONTAINER_USE", "2"),
+        ("otbr-cli", "TD_OTBR_CONTAINER_NAME", " "),
+        ("otbr-restapi", "OT_REST_LISTEN_PORT", "invalid"),
+        ("otbr-restapi", "OT_REST_LISTEN_PORT", "0"),
+        ("otbr-restapi", "OT_REST_LISTEN_PORT", "65536"),
+        ("otbr-restapi", "OT_REST_LISTEN_ADDR", "host/incorrect"),
+        ("ha-matter-ws", "TD_HA_MATTER_WS_PORT", "invalid"),
+        ("ha-matter-ws", "TD_HA_MATTER_WS_PORT", "-1"),
+        ("ha-matter-ws", "TD_HA_MATTER_WS_PORT", "65536"),
+        ("ha-matter-ws", "TD_HA_MATTER_WS_HOST", "invalid host"),
+    ],
+)
+def test_source_probe_configuration_error_is_not_unavailability(monkeypatch, capsys, source, variable, value):
+    monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "1")
+    monkeypatch.setenv(variable, value)
+    probe = AsyncMock(return_value=None)
+    monkeypatch.setitem(td_source_capabilities.DEFAULT_PROBES, source, probe)
+    assert td_cli.main(["source-probe", "--source", source, "--json"]) == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "source": source, "state": "probe-error",
+        "probe": {"state": "error", "reason": "invalid-configuration"},
+    }
+    probe.assert_not_awaited()
+
+
+@pytest.mark.parametrize("source", ("mdns", "system", "unknown"))
+def test_source_probe_rejects_non_probeable_sources(monkeypatch, capsys, source):
+    probe = AsyncMock()
+    monkeypatch.setattr(td_source_capabilities, "probe_source", probe)
+    with pytest.raises(SystemExit) as exc:
+        td_cli.main(["source-probe", "--source", source, "--json"])
+    assert exc.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+    probe.assert_not_awaited()
+
+
+@pytest.mark.parametrize("source", ("otbr-restapi", "ha-matter-ws"))
+def test_live_transport_failures_are_unavailability(monkeypatch, source):
+    if source == "otbr-restapi":
+        client = MagicMock()
+        client.get_node_state.side_effect = td_source_capabilities.OTBRConnectionError("offline")
+        monkeypatch.setattr(td_source_capabilities, "OTBRRestApiClient", MagicMock(return_value=client))
+    else:
+        client = MagicMock()
+        client.__aenter__ = AsyncMock(side_effect=td_source_capabilities.MatterWsTransportError("offline"))
+        monkeypatch.setattr(td_source_capabilities, "HaMatterWsClient", MagicMock(return_value=client))
+    result = asyncio.run(td_source_capabilities.probe_source(source))
+    assert result["state"] == "probe-failed"
+    assert result["probe"]["reason"] == "unreachable"
+
+
+@pytest.mark.parametrize("source", ("otbr-restapi", "ha-matter-ws"))
+def test_live_probe_does_not_hide_unexpected_client_errors(monkeypatch, capsys, source):
+    if source == "otbr-restapi":
+        client = MagicMock()
+        client.get_node_state.side_effect = RuntimeError("bug")
+        monkeypatch.setattr(td_source_capabilities, "OTBRRestApiClient", MagicMock(return_value=client))
+    else:
+        client = MagicMock()
+        client.__aenter__ = AsyncMock(side_effect=RuntimeError("bug"))
+        monkeypatch.setattr(td_source_capabilities, "HaMatterWsClient", MagicMock(return_value=client))
+    assert td_cli.main(["source-probe", "--source", source, "--json"]) == 2
+    assert json.loads(capsys.readouterr().out)["probe"]["reason"] == "probe-execution-error"
+
+
+def test_live_probe_deadline_cancels_stalled_probe(monkeypatch):
+    cancelled = False
+
+    async def stalled():
+        nonlocal cancelled
+        try:
+            await asyncio.sleep(10)
+        finally:
+            cancelled = True
+
+    monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "0")
+    monkeypatch.setattr(td_source_capabilities, "PROBE_TIMEOUT_SECONDS", 0.001)
+    monkeypatch.setitem(td_source_capabilities.DEFAULT_PROBES, "otbr-cli", stalled)
+
+    async def exercise():
+        started = asyncio.get_running_loop().time()
+        result = await td_source_capabilities.probe_source("otbr-cli")
+        elapsed = asyncio.get_running_loop().time() - started
+        assert elapsed < 2.0
+        return result
+
+    result = asyncio.run(exercise())
+    assert cancelled
+    assert result["probe"] == {"state": "failed", "reason": "unreachable"}
+
+
+@pytest.mark.parametrize("source", ("otbr-restapi", "ha-matter-ws"))
+def test_live_protocol_failures_report_invalid_response(monkeypatch, source):
+    if source == "otbr-restapi":
+        client = MagicMock()
+        client.get_node_state.side_effect = td_source_capabilities.OTBRInvalidResponseError("bad")
+        monkeypatch.setattr(td_source_capabilities, "OTBRRestApiClient", MagicMock(return_value=client))
+    else:
+        client = MagicMock()
+        client.__aenter__ = AsyncMock(side_effect=td_source_capabilities.MatterWsContractError("bad"))
+        monkeypatch.setattr(td_source_capabilities, "HaMatterWsClient", MagicMock(return_value=client))
+    result = asyncio.run(td_source_capabilities.probe_source(source))
+    assert result["probe"] == {"state": "failed", "reason": "invalid-response"}
+
+
+def test_source_probe_cli_does_not_create_requested_datadir(monkeypatch, tmp_path, capsys):
+    data_dir = tmp_path / "must not be created"
+    monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "0")
+    probe = AsyncMock(return_value=None)
+    monkeypatch.setitem(td_source_capabilities.DEFAULT_PROBES, "otbr-cli", probe)
+    assert td_cli.main([
+        "--datadir", str(data_dir), "source-probe", "--source", "otbr-cli", "--json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "live"
+    assert not data_dir.exists()
+
+
+@pytest.mark.parametrize("error", (KeyError("secret-value"), AttributeError("secret-value")))
+def test_source_probe_unexpected_dispatch_failure_is_safe_error(monkeypatch, capsys, caplog, error):
+    monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "0")
+    monkeypatch.setitem(td_source_capabilities.DEFAULT_PROBES, "otbr-cli", AsyncMock(side_effect=error))
+    assert td_cli.main(["source-probe", "--source", "otbr-cli", "--json"]) == 2
+    output = capsys.readouterr()
+    assert "secret-value" not in output.out + output.err + caplog.text
+    assert "source probe execution failed" in output.err
+
+
+@pytest.mark.parametrize("option", ("--output", "--log-thread-secrets"))
+def test_source_probe_rejects_output_and_secret_overrides(monkeypatch, capsys, option):
+    probe = MagicMock()
+    monkeypatch.setattr(td_source_capabilities, "main", probe)
+    argv = [option, "unused"] if option == "--output" else [option]
+    with pytest.raises(SystemExit) as exc:
+        td_cli.main([*argv, "source-probe", "--source", "otbr-cli", "--json"])
+    assert exc.value.code == 2
+    assert "does not accept output overrides or Thread secrets" in capsys.readouterr().err
+    probe.assert_not_called()
 
 
 @pytest.mark.parametrize("state", ("child", "router", "leader", "detached", "disabled"))

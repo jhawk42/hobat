@@ -25,6 +25,7 @@ import eve_process
 import td_health_cli
 import td_system_cli
 import td_unified_dataset
+import td_source_capabilities
 
 import otbr_cli_thread_network_info
 import otbr_cli_bbr
@@ -590,6 +591,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_process_commands(subparsers)
     _add_system_commands(subparsers)
     _add_merge_commands(subparsers)
+    subparsers.add_parser(
+        "source-probe", add_help=False,
+        help="Run a fresh, bounded live source preflight without using cached evidence",
+    )
 
     # --- hand-crafted "Commands usage:" epilog ---
     parser.epilog = """Commands usage:
@@ -613,6 +618,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     system
         usage: td_cli system [-h] backups {create,restore} ...
+
+    source-probe
+        usage: td_cli source-probe [-h] --source {otbr-cli,otbr-restapi,ha-matter-ws} [--json]
 
     merge-dataset
         usage: td_cli merge-dataset [-h] ...
@@ -1167,7 +1175,16 @@ def _dispatch_unified(
     )
 
 
+def _dispatch_source_probe(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    if getattr(args, "output", None) is not None or getattr(args, "log_thread_secrets", False):
+        parser.error("source-probe does not accept output overrides or Thread secrets")
+    return td_source_capabilities.main(extra_args)
+
+
 _FAMILY_DISPATCHERS = {
+    "source-probe": _dispatch_source_probe,
     "unify-dataset": _dispatch_unified,
     "otbr-cli": _dispatch_otbr_cli,
     "mdns": _dispatch_mdns,
@@ -1230,7 +1247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.command == "ha-matter-ws"
         and args.ha_matter_command == "device"
         and args.ha_matter_device_command == "ping"
-    ) or (args.command in {"health", "system", "unify-dataset"} and "--json" in extras) or (
+    ) or (args.command in {"health", "system", "unify-dataset", "source-probe"} and "--json" in extras) or (
         args.command == "system"
         and args.system_command == "device"
         and args.device_action == "ping"
@@ -1273,6 +1290,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Interrupted.", file=sys.stderr)
         return 130
     except Exception as exc:
+        if args.command == "source-probe":
+            print("Error: source probe execution failed.", file=sys.stderr)
+            logging.error("Unhandled source probe execution error (%s).", type(exc).__name__)
+            return 2
         safe_error = redact_sensitive_text(str(exc))
         print(f"Error: {safe_error}", file=sys.stderr)
         logging.error("Unhandled exception during command dispatch: %s", safe_error)

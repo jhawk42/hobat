@@ -56,6 +56,7 @@ only when the process log destination, access, and retention are controlled.
 | `process-eve` | Parse and enhance an Eve Thread layout file |
 | `health` | Process, inspect, or purge health history |
 | `system` | Create or restore data-directory backups or run a bounded host ping |
+| `source-probe` | Run a fresh live readiness probe for one supported collector source |
 | `unify-dataset` | Materialize a declared source-primary product using cached inputs only |
 | `merge-dataset` (`merge-data`) | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file; `merge-data` is a compatibility alias |
 | `merge-extaddr` | Read or upsert one device label, or bulk-merge missing extaddr entries into the static map |
@@ -63,6 +64,92 @@ only when the process log destination, access, and retention are controlled.
 ---
 
 ## Commands Usage
+
+### `source-probe`
+
+```bash
+PYTHONPATH=src python3 -m td_cli source-probe --source otbr-cli --json
+```
+
+Supported sources are `otbr-cli`, `otbr-restapi`, and `ha-matter-ws`. This
+explicit live-only command reuses the bounded source capability probes, but
+does not inspect cached files, reuse earlier probe results, or read/write the
+data directory. The dashboard capabilities endpoint remains cache-first:
+its `cached` state does not establish live reachability.
+
+| Exit status | Meaning | JSON state |
+|---|---|---|
+| 0 | Probe succeeded; attempt collection | `live` |
+| 1 | Source unavailable or response unusable; skip collection | `probe-failed` |
+| 2 | Invalid configuration, usage, or probe execution error | `probe-error` for completed error reports; usage errors print help to stderr |
+
+`--json` writes one result to stdout without CLI banners; logging stays on
+stderr. Usage errors and unexpected dispatcher failures may emit only stderr
+and status 2. For example:
+
+```json
+{"source":"otbr-cli","state":"probe-failed","probe":{"state":"failed","reason":"docker-unavailable"}}
+```
+
+Branch on the exit status rather than grepping output. The scripts log the
+JSON directly for diagnostics; consumers can extract a failed probe's reason
+with `jq -er '.probe.reason'`. Stable failure reasons include `unreachable`,
+`docker-unavailable`, `executable-unavailable`, `command-failed`, and
+`invalid-response`; errors use `invalid-configuration` or
+`probe-execution-error`. Preflights reject invalid configured ports instead
+of silently falling back to defaults. `TD_OTBR_CONTAINER_USE` must be `0` or
+`1`, and a configured container name must not be blank when container use
+is enabled. Configuration/probe error logs omit endpoint and exception values
+that might contain credentials.
+
+These are readiness checks, not mesh-health checks or guarantees that every
+collection command will succeed. CLI checks `ot-ctl state` (including
+`disabled`/`detached`); REST reads node state; HA Matter opens a WebSocket and
+validates its server-info handshake. They do not run diagnostics or mDNS
+discovery. mDNS and system have no equivalent endpoint preflight and are not
+accepted sources.
+
+The local full and quick collection scripts probe each supported source once,
+immediately before its collection block. Unavailable sources are skipped;
+configuration/execution errors are reported separately. Both retain cached
+snapshots, continue with later sources, and always attempt mDNS normally.
+REST still verifies the active dataset's Extended PAN ID before collecting
+other REST snapshots. A collector failure is logged and recorded even after
+a successful preflight; a later successful command cannot erase it.
+Final per-source summaries distinguish `collected`, `skipped`, and `failed`.
+
+Skipped/failed collection does not prevent the existing cache-only Unified
+and health stages from using retained evidence under their `--allow-partial`
+policy. Their success does not mean skipped sources were refreshed. The final
+script status is 1 for unavailable/skipped sources, collection failures, or
+Unified/health failures, and 2 for preflight errors (which take precedence).
+Final elapsed-time output and the full script's tabular exports are retained.
+
+#### Collection script modes
+
+The [full collection script](../script/td-fetch.sh) owns both collection modes:
+
+```bash
+script/td-fetch.sh          # Full collection (default)
+script/td-fetch.sh --quick  # Reduced collection
+script/td-fetch.sh --help   # Help only; no activation, probes, or collection
+```
+
+The [quick compatibility script](../script/td-fetch-quick.sh) delegates to
+`td-fetch.sh --quick` using `exec`, forwarding any arguments and preserving
+the exit status. Existing quick-script cron jobs can continue unchanged.
+Unknown arguments exit with status 2 before environment activation or probes.
+
+| Operation | Full mode | Quick mode |
+|---|---|---|
+| CLI meshdiag neighbor, child-table, and child-IP tables | Collect | Skip |
+| CLI `networkdiag fetch-all` | Existing full options | Add `-cno` / `--children-no` |
+| REST diagnostics and mesh-diagnostics `fetch-all` | Collect | Skip |
+| Final tabular exports | Produce | Skip |
+| HA Matter, mDNS, source preflights, merge, Unified, and health | Shared pipeline | Shared pipeline |
+
+Both modes use the full script's existing repository-local data-directory
+setup, network-identity guard, failure reporting, and retained-cache policy.
 
 ### `unify-dataset`
 
@@ -94,6 +181,12 @@ do not become fresh complete collections. See
 [Unified qualification and retained evidence](thread_network_health.md#unified-health-qualification).
 This does not change legacy collector or merge
 commands, fast defaults, or existing health profiles.
+
+The local full and quick collection scripts build the four source primaries,
+then build Multi-source once only if all four commands succeed. Health runs
+only after successful Unified materialization. A failed Unified or health
+command makes the script exit nonzero, while final elapsed-time output and
+the full script's tabular exports are still produced.
 
 Multi-source prepares/reuses the four catalog-owned source-primary generations
 once under the outer build lock. It verifies reports, companions and original

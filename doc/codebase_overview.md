@@ -50,7 +50,7 @@ uses vendored vis-network; dashboard table sorting is application-owned.
 | `td_webserver.py` | aiohttp application, dataset catalog, source capabilities, file action registry, HTTP caching, background jobs, health APIs, device actions, and device-label API |
 | `td_logging.py` | Shared CLI logging configuration and redaction of Thread secrets in sensitive output |
 | `td_dataset_catalog.py` | Dataset manifest validation and runtime catalog loading, including health roster policy projections |
-| `td_source_capabilities.py` | Cached source/file inventory and deduplicated, bounded live availability probes |
+| `td_source_capabilities.py` | Cached source/file inventory and deduplicated, bounded dashboard availability probes; fresh live-only collection preflights through `td_cli source-probe` |
 | `td_source_authority.py` | Source-priority and per-field authority resolution from the catalog |
 | `td_network_identity.py` | Canonical Extended PAN ID parsing and normalization |
 | `td_device_actions.py` | Validation and allowlisted command construction for transient device diagnostics |
