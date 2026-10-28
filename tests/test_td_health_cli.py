@@ -10,6 +10,7 @@ import sqlite3
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from contextlib import closing, redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -29,7 +30,7 @@ from td_health_migration import (
 from td_health_policy import load_health_policy
 from td_health_manifest_history import load_manifest_history
 from td_health_processor import process_health
-from test_td_health_sqlite import _result
+from test_td_health_sqlite import _database_dump, _result
 from test_td_health_migrations import _create_schema_fixture
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
@@ -1557,6 +1558,146 @@ def test_age_purge_defaults_to_configured_retention() -> None:
     args = td_health_cli.build_parser().parse_args(["purge"])
 
     assert args.keep_days == td_health_cli.DEFAULT_HEALTH_PURGE_KEEP_DAYS == 30
+
+
+@pytest.fixture
+def age_purge_history(tmp_path) -> Iterator[SQLiteHealthStore]:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    for suffix in ("1", "2", "3"):
+        store.save_processing_result(*_result(suffix))
+    with closing(store._connect()) as connection:
+        assert [tuple(row) for row in connection.execute(
+            """SELECT before_assessment_id, after_assessment_id, item_count
+               FROM comparisons ORDER BY after_observed_at"""
+        )] == [("assessment-1", "assessment-2", 2), ("assessment-2", "assessment-3", 2)]
+    with patch.object(td_health_cli, "datetime") as clock:
+        clock.now.return_value = datetime(2026, 9, 2, 0, 0, 2, tzinfo=timezone.utc)
+        yield store
+
+
+@pytest.mark.parametrize("keep_days", [1, 0])
+def test_age_purge_json_preview_and_apply_include_comparison_counts(
+    age_purge_history, keep_days, capsys
+) -> None:
+    store = age_purge_history
+    baseline = _database_dump(store)
+    argv = [
+        "--datadir", str(store.path.parent), "health", "purge",
+        "--keep-days", str(keep_days), "--json",
+    ]
+    with patch("builtins.input", side_effect=AssertionError("unexpected confirmation")):
+        assert td_cli.main([*argv, "--dry-run"]) == 0
+        preview = json.loads(capsys.readouterr().out)
+        assert set(preview) == {"command", "cutoff", "dryRun", "deleted"}
+        assert preview["command"] == "purge"
+        assert preview["dryRun"] is True
+        assert preview["cutoff"] == (
+            "2026-09-01T00:00:02+00:00" if keep_days else "2026-09-02T00:00:02+00:00"
+        )
+        assert preview["deleted"]["observations"] == (1 if keep_days else 3)
+        assert preview["deleted"]["comparisons"] == (1 if keep_days else 2)
+        assert preview["deleted"]["comparison_items"] == (2 if keep_days else 4)
+        assert _database_dump(store) == baseline
+
+        assert td_cli.main([*argv, "--yes"]) == 0
+        applied = json.loads(capsys.readouterr().out)
+    assert applied == {**preview, "dryRun": False}
+    with closing(store._connect()) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == (
+            2 if keep_days else 0
+        )
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == (
+            1 if keep_days else 0
+        )
+        assert connection.execute("SELECT COUNT(*) FROM comparison_items").fetchone()[0] == (
+            2 if keep_days else 0
+        )
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_age_purge_text_output_includes_comparison_counts(
+    age_purge_history, dry_run, capsys
+) -> None:
+    store = age_purge_history
+    baseline = _database_dump(store)
+    with patch("builtins.input", side_effect=AssertionError("unexpected confirmation")):
+        assert td_cli.main([
+            "--datadir", str(store.path.parent), "health", "purge",
+            "--keep-days", "1", "--dry-run" if dry_run else "--yes",
+        ]) == 0
+    text = capsys.readouterr().out
+    assert ("Would delete" if dry_run else "Deleted") + " health records:" in text
+    assert "- comparisons: 1" in text.splitlines()
+    assert "- comparison_items: 2" in text.splitlines()
+    assert "Cutoff (exclusive): 2026-09-01T00:00:02+00:00" in text
+    assert (_database_dump(store) == baseline) is dry_run
+
+
+@pytest.mark.parametrize("answer", ["n", "y"])
+def test_age_purge_requires_confirmation(age_purge_history, answer, capsys) -> None:
+    store = age_purge_history
+    baseline = _database_dump(store)
+    with patch("builtins.input", return_value=answer) as confirm:
+        assert td_cli.main([
+            "--datadir", str(store.path.parent), "health", "purge", "--keep-days", "1",
+        ]) == 0
+    confirm.assert_called_once()
+    text = capsys.readouterr().out
+    if answer == "n":
+        assert "Purge cancelled." in text
+        assert _database_dump(store) == baseline
+    else:
+        assert "- comparisons: 1" in text.splitlines()
+        assert "- comparison_items: 2" in text.splitlines()
+        with closing(store._connect()) as connection:
+            assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 1
+            assert connection.execute("SELECT COUNT(*) FROM comparison_items").fetchone()[0] == 2
+
+
+def test_age_purge_negative_days_reports_error_without_deletions(
+    age_purge_history, capsys
+) -> None:
+    store = age_purge_history
+    baseline = _database_dump(store)
+    argv = ["--datadir", str(store.path.parent), "health", "purge", "--keep-days", "-1", "--yes"]
+    assert td_cli.main(argv) == 1
+    captured = capsys.readouterr()
+    assert "--keep-days must be zero or greater" in captured.err
+    assert "Deleted health records:" not in captured.out
+    assert _database_dump(store) == baseline
+    with pytest.raises(ValueError, match="--keep-days must be zero or greater"):
+        td_health_cli.main([
+            "--datadir", str(store.path.parent), "purge", "--keep-days", "-1", "--yes",
+        ])
+    assert _database_dump(store) == baseline
+
+
+@pytest.mark.parametrize(
+    ("argv", "description", "raises_exit"),
+    [
+        (
+            ["health", "--help"],
+            "Delete old health records and associated comparisons",
+            False,
+        ),
+        (
+            ["health", "purge", "--help"],
+            "Delete health observations older than a UTC cutoff and comparisons "
+            "with either endpoint older than that cutoff.",
+            True,
+        ),
+    ],
+)
+def test_age_purge_help_describes_comparison_cleanup(
+    argv, description, raises_exit, capsys
+) -> None:
+    if raises_exit:
+        with pytest.raises(SystemExit) as exc:
+            td_cli.main(argv)
+        assert exc.value.code == 0
+    else:
+        assert td_cli.main(argv) == 0
+    assert description in " ".join(capsys.readouterr().out.split())
 
 
 def test_purge_by_device_requires_confirmation(tmp_path) -> None:

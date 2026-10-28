@@ -3288,6 +3288,12 @@ class SQLiteHealthStore:
             connection.execute("BEGIN IMMEDIATE")
             before = self._table_counts(connection)
             connection.execute(
+                """DELETE FROM comparisons
+                   WHERE julianday(before_observed_at) < julianday(?)
+                      OR julianday(after_observed_at) < julianday(?)""",
+                (cutoff_text, cutoff_text),
+            )
+            connection.execute(
                 "DELETE FROM observations WHERE julianday(observed_at) < julianday(?)",
                 (cutoff_text,),
             )

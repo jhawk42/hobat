@@ -132,6 +132,11 @@ def _reconstruct_observation(
         return SQLiteHealthStore._retained_observation(connection, row)
 
 
+def _database_dump(store: SQLiteHealthStore) -> tuple[str, ...]:
+    with closing(store._connect()) as connection:
+        return tuple(connection.iterdump())
+
+
 def test_atomic_save_is_idempotent_and_sets_sqlite_guards(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
     observation, assessment = _result()
@@ -472,9 +477,12 @@ def test_age_purge_is_exclusive_preserves_roster_and_supports_dry_run(tmp_path) 
 
     preview = store.purge_before(cutoff, dry_run=True)
     assert preview.deleted["observations"] == 2
+    assert preview.deleted["comparisons"] == 2
+    assert preview.deleted["comparison_items"] == 4
     assert store.store_capabilities()["observationCount"] == 3
 
     result = store.purge_before(cutoff)
+    assert result.deleted == preview.deleted
     assert result.cutoff == "2026-09-01T00:00:03+00:00"
     assert result.deleted["observations"] == 2
     assert result.deleted["expected_devices"] == 0
@@ -482,6 +490,229 @@ def test_age_purge_is_exclusive_preserves_roster_and_supports_dry_run(tmp_path) 
     assert store.latest_assessment(
         "extpan:78b9775b001c1cbe", "otbr_cli_diagnostics_fetch"
     )["assessment_id"] == "assessment-3"
+
+
+@pytest.mark.parametrize(
+    "cutoff_text",
+    ["2026-09-01T00:00:02+00:00", "2026-09-01T01:00:02+01:00"],
+)
+def test_age_purge_comparison_counts_reads_and_retained_rows(tmp_path, cutoff_text) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    for suffix in ("1", "2", "3"):
+        store.save_processing_result(*_result(suffix))
+    with closing(store._connect()) as connection, connection:
+        connection.execute("CREATE TABLE other_hobat_data(value TEXT)")
+        connection.execute("INSERT INTO other_hobat_data VALUES ('keep')")
+        pairs = connection.execute(
+            """SELECT comparison_id, before_assessment_id, after_assessment_id,
+                      item_count FROM comparisons ORDER BY after_observed_at"""
+        ).fetchall()
+        assert [tuple(row)[1:] for row in pairs] == [
+            ("assessment-1", "assessment-2", 2),
+            ("assessment-2", "assessment-3", 2),
+        ]
+        expired_id, retained_id = (row["comparison_id"] for row in pairs)
+        connection.execute(
+            "UPDATE comparisons SET created_at=? WHERE comparison_id=?",
+            ("2026-09-02T00:00:00+00:00", expired_id),
+        )
+        connection.execute(
+            "UPDATE comparisons SET created_at=? WHERE comparison_id=?",
+            ("2026-08-01T00:00:00+00:00", retained_id),
+        )
+        preserved_tables = (
+            "schema_migrations", "sqlite_master", "other_hobat_data",
+        )
+        preserved = {
+            table: connection.execute(f"SELECT * FROM {table}").fetchall()
+            for table in preserved_tables
+        }
+        retained_header = connection.execute(
+            "SELECT * FROM comparisons WHERE comparison_id=?", (retained_id,)
+        ).fetchall()
+        retained_items = connection.execute(
+            "SELECT * FROM comparison_items WHERE comparison_id=? ORDER BY item_id",
+            (retained_id,),
+        ).fetchall()
+    service = TDHealthReadService(tmp_path)
+    query = {
+        "network_id": "extpan:78b9775b001c1cbe",
+        "dataset_id": "otbr_cli_diagnostics_fetch",
+        "limit": 25, "offset": 0,
+    }
+    assert service.comparisons(**query)["total"] == 2
+    assert service.comparison(comparison_id=expired_id, limit=25, offset=0) is not None
+    retained_detail = service.comparison(comparison_id=retained_id, limit=25, offset=0)
+    baseline = _database_dump(store)
+    cutoff = datetime.fromisoformat(cutoff_text)
+
+    preview = store.purge_before(cutoff, dry_run=True)
+    assert _database_dump(store) == baseline
+    assert {table: count for table, count in preview.deleted.items() if count} == {
+        "observations": 1,
+        "device_samples": 1,
+        "assessments": 1,
+        "health_assessment_preferences": 1,
+        "comparisons": 1,
+        "comparison_items": 2,
+    }
+    result = store.purge_before(cutoff)
+    assert result.deleted == preview.deleted
+    assert result.cutoff == "2026-09-01T00:00:02+00:00"
+    listing = service.comparisons(**query)
+    assert listing["total"] == 1
+    assert [row["comparisonId"] for row in listing["items"]] == [retained_id]
+    assert service.comparison(comparison_id=expired_id, limit=25, offset=0) is None
+    assert service.comparison(
+        comparison_id=retained_id, limit=25, offset=0
+    ) == retained_detail
+    with closing(store._connect()) as connection:
+        assert connection.execute(
+            "SELECT * FROM comparisons WHERE comparison_id=?", (retained_id,)
+        ).fetchall() == retained_header
+        assert connection.execute(
+            "SELECT * FROM comparison_items ORDER BY item_id"
+        ).fetchall() == retained_items
+        assert connection.execute(
+            "SELECT assessment_id FROM current_assessments"
+        ).fetchone()[0] == "assessment-3"
+        assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 2
+        for table in preserved_tables:
+            assert connection.execute(f"SELECT * FROM {table}").fetchall() == preserved[table]
+    assert all(count == 0 for count in store.purge_before(cutoff).deleted.values())
+
+
+@pytest.mark.parametrize("legacy_scope", [False, True])
+def test_age_purge_removes_comparisons_with_already_pruned_endpoints(
+    tmp_path, legacy_scope
+) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    for suffix in ("1", "2", "3"):
+        store.save_processing_result(*_result(suffix))
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            "DELETE FROM observations WHERE observation_id IN (?, ?)",
+            ("observation-1", "observation-2"),
+        )
+        if legacy_scope:
+            connection.execute(
+                "UPDATE comparisons SET dataset_id=?, network_id=?",
+                ("retired-health-dataset", "extpan:1111111111111111"),
+            )
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 2
+        assert connection.execute("SELECT COUNT(*) FROM comparison_items").fetchone()[0] == 4
+    baseline = _database_dump(store)
+    cutoff = datetime(2026, 9, 1, 0, 0, 3, tzinfo=timezone.utc)
+
+    preview = store.purge_before(cutoff, dry_run=True)
+    assert preview.deleted["observations"] == 0
+    assert preview.deleted["comparisons"] == 2
+    assert preview.deleted["comparison_items"] == 4
+    assert _database_dump(store) == baseline
+    assert store.purge_before(cutoff).deleted == preview.deleted
+    with closing(store._connect()) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM comparison_items").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
+
+
+def test_age_purge_checks_after_endpoint_independently(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    for suffix in ("1", "2"):
+        store.save_processing_result(*_result(suffix))
+    with closing(store._connect()) as connection, connection:
+        # Reverse stored times only to isolate the otherwise unreachable after-only branch.
+        connection.execute(
+            "UPDATE comparisons SET before_observed_at=?, after_observed_at=?",
+            ("2026-09-01T00:00:03+00:00", "2026-09-01T00:00:01+00:00"),
+        )
+    result = store.purge_before(datetime(2026, 9, 1, 0, 0, 2, tzinfo=timezone.utc))
+    assert result.deleted["comparisons"] == 1
+    assert result.deleted["comparison_items"] == 2
+    with closing(store._connect()) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM comparison_items").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("before_time", "expired"),
+    [
+        ("2026-09-01T01:00:02+01:00", False),
+        ("2026-08-31T20:00:01-04:00", True),
+    ],
+)
+def test_age_purge_compares_endpoint_instants_not_timestamp_text(
+    tmp_path, before_time, expired
+) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    for suffix, observed_at in (
+        ("1", before_time), ("2", "2026-08-31T20:00:03-04:00"),
+    ):
+        observation, assessment = _result(suffix)
+        store.save_processing_result(
+            replace(observation, observed_at=observed_at, ingested_at=observed_at),
+            replace(assessment, assessed_at=observed_at),
+        )
+    result = store.purge_before(datetime(2026, 9, 1, 0, 0, 2, tzinfo=timezone.utc))
+    assert result.deleted["observations"] == int(expired)
+    assert result.deleted["comparisons"] == int(expired)
+    assert result.deleted["comparison_items"] == 2 * int(expired)
+    with closing(store._connect()) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == (
+            0 if expired else 1
+        )
+        assert connection.execute("SELECT COUNT(*) FROM comparison_items").fetchone()[0] == (
+            0 if expired else 2
+        )
+
+
+def test_age_purge_preserves_recent_count_pruned_comparison(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME, max_observations=2)
+    for suffix in ("1", "2", "3"):
+        store.save_processing_result(*_result(suffix))
+    service = TDHealthReadService(tmp_path)
+    listing = service.comparisons(
+        network_id="extpan:78b9775b001c1cbe",
+        dataset_id="otbr_cli_diagnostics_fetch", limit=1, offset=1,
+    )
+    comparison_id = listing["items"][0]["comparisonId"]
+    detail = service.comparison(comparison_id=comparison_id, limit=25, offset=0)
+    assert detail["baselineState"] == "pruned"
+    baseline = _database_dump(store)
+
+    result = store.purge_before(datetime(2026, 9, 1, 0, 0, 1, tzinfo=timezone.utc))
+    assert all(count == 0 for count in result.deleted.values())
+    assert _database_dump(store) == baseline
+    assert service.comparison(comparison_id=comparison_id, limit=25, offset=0) == detail
+
+
+def test_age_purge_rolls_back_comparison_cascades_and_observations(
+    tmp_path, monkeypatch
+) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    for suffix in ("1", "2", "3"):
+        store.save_processing_result(*_result(suffix))
+    baseline = _database_dump(store)
+
+    def fail(connection: sqlite3.Connection) -> None:
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM comparison_items").fetchone()[0] == 2
+        assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 2
+        raise RuntimeError("injected purge failure")
+
+    monkeypatch.setattr(store, "_delete_orphans", fail)
+    with pytest.raises(RuntimeError, match="injected purge failure"):
+        store.purge_before(datetime(2026, 9, 1, 0, 0, 2, tzinfo=timezone.utc))
+    assert _database_dump(store) == baseline
+
+
+def test_age_purge_rejects_naive_cutoff_without_deletions(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    for suffix in ("1", "2"):
+        store.save_processing_result(*_result(suffix))
+    baseline = _database_dump(store)
+    with pytest.raises(ValueError, match="Purge cutoff must include a timezone"):
+        store.purge_before(datetime(2026, 9, 1, 0, 0, 2))
+    assert _database_dump(store) == baseline
 
 
 def test_purge_all_removes_health_records_but_preserves_other_tables(tmp_path) -> None:

@@ -297,7 +297,13 @@ not reconstructed historical layouts. See
 [Thread Network Health](doc/thread_network_health.md).
 
 Health purge commands support dry-run previews and require confirmation unless
-`--yes` is supplied. `system backups create` uses SQLite's backup API and writes
+`--yes` is supplied. Age-based purge also deletes comparisons with either
+endpoint older than the cutoff and all associated comparison items, including
+expired pairs whose observations were already deleted. Preview counts include
+both comparison tables; physical compaction remains a separate
+`system database repack` command. See the
+[purge and backup workflow](doc/thread_network_health.md#purge-and-backup).
+`system backups create` uses SQLite's backup API and writes
 a checksummed full-data-directory backup outside the active data directory.
 Stop the web server and all writers before `system backups restore`; restore
 validates and stages the backup before replacing the data directory. Backups

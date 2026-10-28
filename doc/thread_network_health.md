@@ -698,11 +698,12 @@ available as history.
 The store retains at most 2,000 observations and 2,000 comparison headers.
 Up to five unique comparisons may be added for one processed assessment, so
 the unchanged comparison cap can shorten the stored-pair time horizon.
-Pruning occurs in the same write transaction and never deletes collector
-snapshots. Retained comparisons with pruned endpoints become Unknown on reads;
-their original endpoint IDs and timestamps remain unchanged. The new endpoint
-selectors list retained assessments only; use a stored comparison ID to
-inspect older pair headers whose endpoint was pruned. Automatic byte retention,
+Automatic count pruning occurs in the same write transaction and never deletes
+collector snapshots. Retained comparisons with pruned endpoints become Unknown
+on reads; their original endpoint IDs and timestamps remain unchanged. Explicit
+age purge instead deletes expired comparisons and their items, as described
+below. The new endpoint selectors list retained assessments only; use a stored
+comparison ID to inspect older pair headers whose endpoint was pruned. Automatic byte retention,
 redaction, scheduling, probes, duration, rates, trends, and firmware compliance
 are not implemented.
 
@@ -715,20 +716,44 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --dry-run
 PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 30 --yes
 ```
 
-`observedAt` values strictly older than the UTC cutoff are removed. Cascading
-health rows and stale current pointers are removed in the same transaction;
-roster records are preserved. `purge-all` removes all health-domain records,
-including roster records, while preserving `hobat_v1.db`, schema migrations,
+`observedAt` values strictly older than the UTC cutoff are removed. Comparisons
+are removed when either stored endpoint observation time is strictly older than
+the same cutoff, along with all their comparison items. This also cleans up
+expired comparisons whose original observations were deleted by an earlier
+purge. Endpoints exactly at the cutoff are retained unless the other endpoint
+is older. Cascading health rows and stale current pointers are removed in the
+same transaction; roster records are preserved.
+
+`purge-all` removes all health-domain records, including roster records,
+while preserving `hobat_v1.db`, schema migrations,
 and non-health tables. `purge-by-device --device EXTADDR` removes that identity's
 health samples, relationships, and roster entry and deletes assessments derived
 from affected observations. Shared observation/source records remain. None of
 these commands removes data from collector snapshots, exports, or backups.
 Purge-by-device also removes comparisons that reference an affected endpoint
-observation; ordinary age/count retention leaves comparison headers available
-with a pruned-baseline read state. Dry-run deletion counts match apply counts.
+observation. Automatic count pruning still leaves comparison headers available
+with a pruned-baseline read state; explicit age purge removes expired pairs.
 
 All purge commands support `--dry-run` and `--json`. Mutation requires an
-interactive confirmation or `--yes`.
+interactive confirmation or `--yes`. Preview counts include `comparisons` and
+`comparison_items` and match apply counts for the same database state and
+cutoff. Active writers or the later cutoff of a subsequent command can change
+the counts.
+
+Create and verify a backup before destructive cleanup. For example, to retain
+one day of health history and then optionally compact the database:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 1 --dry-run --json
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 1 --yes
+PYTHONPATH=src python3 -m td_cli --datadir ./data system database repack
+```
+
+Purge removes records but does not guarantee an immediate reduction in the
+database file size. Repack is a separate, optional `VACUUM` operation; stop the
+web server and other database users before repacking to avoid lock contention.
+Allow working disk space for the purge's WAL growth and repack's temporary
+files. No exact reclaimed size or runtime is guaranteed.
 
 Create and restore a complete data-directory backup:
 

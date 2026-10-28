@@ -119,7 +119,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     schema_migrate.add_argument("--json", action="store_true", dest="json_output")
     for name, help_text in (
-        ("purge", "Delete health records older than a UTC cutoff"),
+        (
+            "purge",
+            "Delete health observations older than a UTC cutoff and comparisons "
+            "with either endpoint older than that cutoff.",
+        ),
         ("purge-all", "Delete all health-domain records"),
         ("purge-by-device", "Delete health records for one device"),
     ):
