@@ -1543,7 +1543,7 @@ def test_ha_unified_converter_has_no_live_client_imports():
 
 def _run_fetch_script_stub(
     tmp_path, script_name, *, fail_dataset="", fail_guard=False, stage_only=False, fail_health=False,
-    probe_results=None, fail_collection="", script_args=(),
+    probe_results=None, fail_collection="", script_args=(), ext_pan_id=NETWORK[7:],
 ):
     repo = tmp_path / "fetch-repo"
     scripts = repo / "script"
@@ -1569,6 +1569,11 @@ def _run_fetch_script_stub(
     python_stub.write_text(f"#!{sys.executable}\n" + """
 import json, os, sys
 args = sys.argv[1:]
+if args[0] == "-c" and len(args) == 3:
+    sys.path.insert(0, os.environ["FETCH_TEST_SOURCE"])
+    sys.argv = args[1:]
+    exec(args[1])
+    sys.exit(0)
 with open(os.environ["FETCH_TEST_CALLS"], "a") as stream:
     stream.write(json.dumps({"args": args, "data": os.environ["TD_DATA_DIR"]}) + "\\n")
 if args[0] == "-c":
@@ -1604,12 +1609,13 @@ if "unify-dataset" in args:
         "PATH": f"{binaries}{os.pathsep}{os.environ['PATH']}",
         "TD_DATA_DIR": str(external_data),
         "FETCH_TEST_CALLS": str(calls),
+        "FETCH_TEST_SOURCE": str(ROOT / "src"),
         "FETCH_TEST_GUARD": "fail" if fail_guard else "success",
         "FETCH_TEST_FAIL": fail_dataset,
         "FETCH_TEST_HEALTH": "fail" if fail_health else "success",
         "FETCH_TEST_PROBES": json.dumps(probe_results or {}),
         "FETCH_TEST_COLLECTION": fail_collection,
-        "TD_EXT_PAN_ID": NETWORK[7:],
+        "TD_EXT_PAN_ID": ext_pan_id,
     }
     result = subprocess.run(
         ["bash", str(script), *script_args], cwd=repo, env=environment,
@@ -1637,7 +1643,7 @@ def test_fetch_scripts_build_five_cache_only_products_before_health(tmp_path, sc
         if dataset == "mdns_unified":
             assert "--network" not in args
         else:
-            assert args[args.index("--network") + 1] == "extpan:78b9775b001c1cbe"
+            assert args[args.index("--network") + 1] == NETWORK
     merge = arguments.index(["-m", "td_cli", "merge-dataset"])
     health = ["-m", "td_cli", "health", "process-dataset", "--dataset", "all", "--allow-partial"]
     assert arguments[merge + 1:] == [*stage, health]
@@ -1647,6 +1653,8 @@ def test_fetch_scripts_build_five_cache_only_products_before_health(tmp_path, sc
     assert ["-m", "td_cli", "ha-matter-ws", "devices", "fetch-all"] in arguments
     rest_fetches = [args for args in arguments if args[:4] == ["-m", "td_cli", "otbr-restapi", "devices"]]
     assert bool(rest_fetches) is not fail_guard
+    if not fail_guard:
+        assert rest_fetches == [["-m", "td_cli", "otbr-restapi", "devices", "fetch"]]
     if fail_guard:
         assert "skipping REST collection and continuing with HA Matter" in result.stderr
     if script_name == "td-fetch-quick.sh":
@@ -1775,6 +1783,39 @@ def test_fetch_script_new_stage_preserves_quoted_effective_datadir(tmp_path, scr
         args = command["args"]
         assert args[2:5] == ["--datadir", str(repo / "cached data"), "unify-dataset"]
         assert command["data"] == str(repo / "cached data")
+
+
+@pytest.mark.parametrize(
+    ("ext_pan_id", "network"),
+    [
+        ("", None),
+        ("fedcba0987654321", "extpan:fedcba0987654321"),
+        ("0xFEDCBA0987654321", "extpan:fedcba0987654321"),
+        ("fe:dc:ba:09:87:65:43:21", "extpan:fedcba0987654321"),
+        ("18364757930599072545", "extpan:fedcba0987654321"),
+    ],
+)
+def test_fetch_script_unified_network_is_configurable(tmp_path, ext_pan_id, network):
+    result, commands, _ = _run_fetch_script_stub(
+        tmp_path, "td-fetch.sh", stage_only=True, ext_pan_id=ext_pan_id,
+    )
+    assert result.returncode == 0, result.stderr
+    assert len(commands) == 5
+    for command in commands:
+        args = command["args"]
+        if ext_pan_id and args[args.index("--dataset") + 1] != "mdns_unified":
+            assert args[args.index("--network") + 1] == network
+        else:
+            assert "--network" not in args
+
+
+def test_fetch_script_unified_rejects_invalid_network(tmp_path):
+    result, commands, _ = _run_fetch_script_stub(
+        tmp_path, "td-fetch.sh", stage_only=True, ext_pan_id="invalid",
+    )
+    assert result.returncode == 1
+    assert "invalid TD_EXT_PAN_ID" in result.stderr
+    assert not commands
 
 
 @pytest.mark.parametrize("script_name", ["td-fetch.sh", "td-fetch-quick.sh"])

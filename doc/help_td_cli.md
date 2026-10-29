@@ -150,6 +150,11 @@ Unknown arguments exit with status 2 before environment activation or probes.
 
 Both modes use the full script's existing repository-local data-directory
 setup, network-identity guard, failure reporting, and retained-cache policy.
+The scripts use `script/py-activate.sh` when present, otherwise `.venv/bin/activate`
+when available, or the current Python environment. Install the normal Python
+requirements first; full-mode tabular exports also require `jq` and `column`.
+Set `TD_EXT_PAN_ID` to select an explicit network; otherwise the REST identity
+guard compares the observed REST and cached CLI network identities.
 
 ### `unify-dataset`
 

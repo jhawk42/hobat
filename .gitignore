@@ -99,6 +99,8 @@ docker-compose.*.local.yml
 
 script/*
 !script/build_dataset_catalog.py
+!script/td-fetch.sh
+!script/td-fetch-quick.sh
 downloads/
 plan/
 data/
