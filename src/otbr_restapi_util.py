@@ -7,7 +7,7 @@ import random
 import re
 import time
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -446,6 +446,266 @@ def _classify_child_mode(
     if any(value != classifications[0] for value in classifications[1:]):
         return "unknown", "conflicting"
     return classifications[0], None
+
+
+_MAX_ROUTER_ID = 62
+_MAX_CHILD_ID = 511
+_RLOC16_CHILD_MASK = 0x03FF
+_KNOWN_TERMINAL_DIAGNOSTIC_ERRORS = (OTBRActionFailedError, OTBRInvalidResponseError)
+_KNOWN_TERMINAL_DIAGNOSTIC_ERROR_NAMES = frozenset(
+    cls.__name__ for cls in _KNOWN_TERMINAL_DIAGNOSTIC_ERRORS
+)
+RLOC_EXPANSION_PROGRESS_PREFIX = "rloc:"
+
+
+class _RlocIdentityError(OTBRInvalidResponseError):
+    """Raised when an RLOC diagnostic response does not identify the requested child."""
+
+    def __init__(self, message: str, reason_code: str) -> None:
+        self.reason_code = reason_code
+        super().__init__(message)
+
+
+@dataclass
+class _RlocExpansionTarget:
+    destination: str
+    rloc16: int
+    parent_ext_address: str | None
+    parent_rloc16: int
+    child_id: int
+    child_mode: object
+    status: str | None = None
+    conflicts: list[dict[str, Any]] = field(default_factory=list)
+    covered_ext_address: str | None = None
+
+
+def _diagnostic_identity_view(item: object) -> Mapping[str, Any]:
+    """Return a flat attribute view without rewriting raw JSON:API envelopes."""
+    if not isinstance(item, Mapping):
+        return {}
+    data = item.get("data")
+    if isinstance(data, Mapping) and isinstance(data.get("attributes"), Mapping):
+        return data["attributes"]
+    return item
+
+
+def _parse_rloc16(value: object) -> int | None:
+    if type(value) is int:
+        return value if 0 <= value <= 0xFFFF else None
+    if isinstance(value, str) and re.fullmatch(r"0x[0-9a-fA-F]{1,4}", value):
+        return int(value, 16)
+    return None
+
+
+def _parse_router_rloc16(value: object) -> tuple[int | None, str | None]:
+    rloc16 = _parse_rloc16(value)
+    if rloc16 is None:
+        return None, "invalid_parent_rloc16"
+    if rloc16 & _RLOC16_CHILD_MASK:
+        return None, "parent_rloc16_not_router"
+    if rloc16 >> 10 > _MAX_ROUTER_ID:
+        return None, "parent_router_id_out_of_range"
+    return rloc16, None
+
+
+def _parse_child_id(value: object) -> int | None:
+    if type(value) is int and 1 <= value <= _MAX_CHILD_ID:
+        return value
+    return None
+
+
+def _usable_ext_address(value: object) -> str | None:
+    if (
+        isinstance(value, str)
+        and re.fullmatch(r"[0-9a-fA-F]{16}", value)
+        and value.strip("0")
+    ):
+        return value.lower()
+    return None
+
+
+def _child_rloc_destination(parent_rloc16: int, child_id: int) -> tuple[int, str]:
+    child_rloc16 = (parent_rloc16 & 0xFC00) | child_id
+    return child_rloc16, f"{child_rloc16:06x}"
+
+
+def _format_rloc16(value: int) -> str:
+    return f"0x{value:04x}"
+
+
+def _with_child_table_tlv(types: Sequence[str | int]) -> list[str | int]:
+    requested = list(types)
+    if DIAG_TLV_CHILD_TABLE in requested or 16 in requested:
+        return requested
+    return [*requested, DIAG_TLV_CHILD_TABLE]
+
+
+def _is_unresolved_action_error(error_type: object) -> bool:
+    return (
+        isinstance(error_type, str)
+        and error_type not in _KNOWN_TERMINAL_DIAGNOSTIC_ERROR_NAMES
+    )
+
+
+def _base_sweep_has_unresolved_action(
+    device_results: Sequence[Mapping[str, Any]],
+) -> bool:
+    for record in device_results:
+        error = record.get("error")
+        if isinstance(error, Mapping) and _is_unresolved_action_error(
+            error.get("type")
+        ):
+            return True
+        for attempt_error in record.get("attemptErrors") or []:
+            if isinstance(attempt_error, Mapping) and _is_unresolved_action_error(
+                attempt_error.get("type")
+            ):
+                return True
+    return False
+
+
+def _derive_child_rloc_targets(
+    items: Sequence[Any],
+    device_results: Sequence[Mapping[str, Any]],
+) -> tuple[list[_RlocExpansionTarget], list[dict[str, Any]], int]:
+    """Freeze one-level child RLOC targets from current-run parent responses."""
+    issues: list[dict[str, Any]] = []
+    covered: dict[int, set[str]] = {}
+    parents: list[tuple[str | None, int, list[Any]]] = []
+    parent_exts: dict[int, set[str | None]] = {}
+
+    for record in device_results:
+        if record.get("role") == "child":
+            continue
+        if (
+            record.get("status") == "failed"
+            or record.get("skipReasonCode") == "unresolved_mesh_local_iid"
+        ):
+            issues.append(
+                {
+                    "code": "parent_unavailable",
+                    "deviceId": record.get("deviceId"),
+                    "role": record.get("role"),
+                    "status": record.get("status"),
+                    "skipReasonCode": record.get("skipReasonCode"),
+                }
+            )
+
+    for index, item in enumerate(items):
+        view = _diagnostic_identity_view(item)
+        ext_address = _usable_ext_address(view.get("extAddress"))
+        raw_rloc16 = view.get("rloc16")
+        any_rloc16 = _parse_rloc16(raw_rloc16)
+        if ext_address is not None and any_rloc16 is not None:
+            covered.setdefault(any_rloc16, set()).add(ext_address)
+        context = {
+            "itemIndex": index,
+            "extAddress": view.get("extAddress"),
+            "rloc16": raw_rloc16,
+        }
+        if "childTable" not in view:
+            if any_rloc16 is None:
+                issues.append({"code": "parent_evidence_unavailable", **context})
+            elif not any_rloc16 & _RLOC16_CHILD_MASK:
+                issues.append({"code": "parent_child_table_missing", **context})
+            continue
+        parent_rloc16, reason = _parse_router_rloc16(raw_rloc16)
+        if parent_rloc16 is None:
+            issues.append({"code": reason, **context})
+            continue
+        table = view.get("childTable")
+        if not isinstance(table, list):
+            issues.append({"code": "malformed_child_table", **context})
+            continue
+        parents.append((ext_address, parent_rloc16, table))
+        parent_exts.setdefault(parent_rloc16, set()).add(ext_address)
+
+    conflicted_parents = {
+        rloc16 for rloc16, exts in parent_exts.items() if len(exts) > 1
+    }
+    for rloc16 in sorted(conflicted_parents):
+        issues.append(
+            {
+                "code": "conflicting_parent_identity",
+                "parentRloc16": _format_rloc16(rloc16),
+                "parentExtAddresses": sorted(
+                    ext or "" for ext in parent_exts[rloc16]
+                ),
+            }
+        )
+
+    targets: dict[int, _RlocExpansionTarget] = {}
+    for parent_ext, parent_rloc16, table in parents:
+        for entry_index, entry in enumerate(table):
+            child_id = (
+                _parse_child_id(entry.get("childId"))
+                if isinstance(entry, Mapping)
+                else None
+            )
+            if child_id is None:
+                issues.append(
+                    {
+                        "code": "invalid_child_entry",
+                        "parentExtAddress": parent_ext,
+                        "parentRloc16": _format_rloc16(parent_rloc16),
+                        "entryIndex": entry_index,
+                        "childId": (
+                            entry.get("childId")
+                            if isinstance(entry, Mapping)
+                            else None
+                        ),
+                    }
+                )
+                continue
+            child_mode = entry.get("mode")
+            child_rloc16, destination = _child_rloc_destination(
+                parent_rloc16, child_id
+            )
+            existing = targets.get(child_rloc16)
+            if existing is None:
+                target = _RlocExpansionTarget(
+                    destination=destination,
+                    rloc16=child_rloc16,
+                    parent_ext_address=parent_ext,
+                    parent_rloc16=parent_rloc16,
+                    child_id=child_id,
+                    child_mode=(
+                        dict(child_mode)
+                        if isinstance(child_mode, Mapping)
+                        else child_mode
+                    ),
+                )
+                if parent_rloc16 in conflicted_parents:
+                    target.status = "conflict"
+                    target.conflicts.append({"code": "conflicting_parent_identity"})
+                targets[child_rloc16] = target
+                continue
+            if existing.parent_ext_address != parent_ext:
+                existing.status = "conflict"
+                existing.conflicts.append(
+                    {
+                        "code": "conflicting_parent_identity",
+                        "parentExtAddress": parent_ext,
+                    }
+                )
+            elif existing.child_mode != child_mode:
+                existing.status = "conflict"
+                existing.conflicts.append(
+                    {"code": "conflicting_child_mode", "childMode": child_mode}
+                )
+
+    for target in targets.values():
+        if target.status is not None:
+            continue
+        covering = covered.get(target.rloc16)
+        if covering:
+            target.status = "covered"
+            target.covered_ext_address = sorted(covering)[0]
+
+    parent_count = len(
+        {rloc16 for _ext, rloc16, _table in parents} - conflicted_parents
+    )
+    return list(targets.values()), issues, parent_count
 
 
 @dataclass(frozen=True)
@@ -1540,10 +1800,10 @@ class OTBRRestApiClient:
             msg = f"Completed action {action_id} has no result relationship"
             if destination_type != DestinationType.EXTENDED:
                 msg += (
-                    f" (server bug: destinationType='{destination_type}' triggers"
-                    " uninitialized extAddr in FillDiagnosticCollection —"
-                    " diagnostic data was discarded; use destinationType='extended'"
-                    " with the device extAddress as device_id to work around this)"
+                    f" for destinationType='{destination_type}' destination"
+                    f" {device_id!r}; the server returned no diagnostic result"
+                    " reference. Older OTBR builds may not match non-extended"
+                    " destinations to diagnostic results"
                 )
             raise OTBRInvalidResponseError(msg)
 
@@ -1577,6 +1837,7 @@ class OTBRRestApiClient:
         children_fetch_fast: bool = True,
         children_fetch_detail: bool = False,
         child_retry_enabled: bool = True,
+        children_expand_by_rloc: bool = False,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
         on_pass_checkpoint: (
@@ -1598,6 +1859,10 @@ class OTBRRestApiClient:
                              time out; if False, raise on first failure.
             include_basic_fallback: Include the final basic TLV retry when
                                     progressive_fallback is enabled.
+            children_expand_by_rloc: After the extended-address sweep, query
+                                     uncovered children from current-run parent
+                                     childTable entries by RLOC16. Requires
+                                     destination_type 'extended'.
             raw: Return raw diagnostic envelopes.
 
         Returns:
@@ -1608,6 +1873,11 @@ class OTBRRestApiClient:
         if child_collection_policy not in {"legacy", "mode-aware"}:
             raise OTBRUsageError(
                 "child_collection_policy must be 'legacy' or 'mode-aware'"
+            )
+        if children_expand_by_rloc and destination_type != DestinationType.EXTENDED:
+            raise OTBRUsageError(
+                "children_expand_by_rloc requires destination_type "
+                f"'{DestinationType.EXTENDED}'"
             )
         ActionTimingPolicy.resolve(
             task_timeout=task_timeout,
@@ -1828,6 +2098,7 @@ class OTBRRestApiClient:
                     poll_interval=poll_interval,
                     destination_type=destination_type,
                     raw=raw,
+                    augment_child_table=children_expand_by_rloc,
                 )
                 if attempt_error is not None:
                     raise attempt_error
@@ -1889,12 +2160,39 @@ class OTBRRestApiClient:
                     on_progress(idx, total, device_id, time.monotonic() - t_start, status)
                 if on_checkpoint is not None:
                     on_checkpoint(results, idx, total, device_id, status)
+        expansion: dict[str, Any] | None = None
+        if children_expand_by_rloc:
+            expansion = self._expand_children_by_rloc(
+                results,
+                device_results,
+                types=types,
+                fallback_types=fallback_types,
+                progressive_fallback=progressive_fallback,
+                include_basic_fallback=include_basic_fallback,
+                task_timeout=task_timeout,
+                poll_timeout=poll_timeout,
+                child_task_timeout=child_task_timeout,
+                child_poll_timeout=child_timing.poll_timeout,
+                poll_interval=poll_interval,
+                skip_on_failure=skip_on_failure,
+                child_collection_policy=child_collection_policy,
+                children_fetch_fast=children_fetch_fast,
+                children_fetch_detail=children_fetch_detail,
+                child_retry_enabled=child_retry_enabled,
+                on_progress=on_progress,
+                on_checkpoint=on_checkpoint,
+                on_pass_checkpoint=on_pass_checkpoint,
+                raw=raw,
+            )
         if items_only:
             return results
-        return {
+        outcome = {
             "items": results,
             "deviceResults": device_results,
-            "partial": any(item["status"] != "completed" for item in device_results),
+            "partial": (
+                any(item["status"] != "completed" for item in device_results)
+                or (expansion is not None and expansion["partial"])
+            ),
             "clearedDiagnostics": cleared_diagnostics,
             "startedAt": started_at,
             "completedAt": datetime.now(timezone.utc).isoformat(),
@@ -1910,6 +2208,381 @@ class OTBRRestApiClient:
             "childTaskTimeout": child_task_timeout,
             "childPollTimeout": child_timing.poll_timeout,
         }
+        if expansion is not None:
+            outcome["childrenExpansion"] = expansion
+        return outcome
+
+    def _expand_children_by_rloc(
+        self,
+        results: list[Any],
+        device_results: Sequence[Mapping[str, Any]],
+        *,
+        types: Sequence[str | int],
+        fallback_types: Sequence[str | int] | None,
+        progressive_fallback: bool,
+        include_basic_fallback: bool,
+        task_timeout: int,
+        poll_timeout: float | None,
+        child_task_timeout: int,
+        child_poll_timeout: float,
+        poll_interval: float,
+        skip_on_failure: bool,
+        child_collection_policy: str,
+        children_fetch_fast: bool,
+        children_fetch_detail: bool,
+        child_retry_enabled: bool,
+        on_progress: Callable[[int, int, str, float, str], None] | None,
+        on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None,
+        on_pass_checkpoint: (
+            Callable[[list[Any], int, int, str, str], None] | None
+        ),
+        raw: object,
+    ) -> dict[str, Any]:
+        targets, issues, parent_count = _derive_child_rloc_targets(
+            results, device_results
+        )
+        stop_reason: str | None = None
+        if _base_sweep_has_unresolved_action(device_results):
+            stop_reason = "unresolved_prior_action"
+            issues.append(
+                {
+                    "code": stop_reason,
+                    "message": (
+                        "The base sweep reported an action that may still be "
+                        "active; child RLOC expansion was not started"
+                    ),
+                }
+            )
+        queue = [target for target in targets if target.status is None]
+        total = len(queue)
+        logging.info(
+            "Child RLOC expansion: parents=%d targets=%d queued=%d issues=%d",
+            parent_count,
+            len(targets),
+            total,
+            len(issues),
+        )
+        records: dict[int, dict[str, Any]] = {}
+        for idx, target in enumerate(queue, start=1):
+            label = f"{RLOC_EXPANSION_PROGRESS_PREFIX}{target.destination}"
+            t_start = time.monotonic()
+            status = "not_attempted"
+            try:
+                if stop_reason is not None:
+                    records[target.rloc16] = self._rloc_target_record(
+                        target,
+                        status=status,
+                        reasonCode=stop_reason,
+                        attempts=0,
+                        attemptedTypes=[],
+                        attemptErrors=[],
+                        elapsed=0.0,
+                    )
+                    continue
+                record, error = self._collect_rloc_target(
+                    target,
+                    results,
+                    idx=idx,
+                    total=total,
+                    label=label,
+                    types=types,
+                    fallback_types=fallback_types,
+                    progressive_fallback=progressive_fallback,
+                    include_basic_fallback=include_basic_fallback,
+                    task_timeout=task_timeout,
+                    poll_timeout=poll_timeout,
+                    child_task_timeout=child_task_timeout,
+                    child_poll_timeout=child_poll_timeout,
+                    poll_interval=poll_interval,
+                    child_collection_policy=child_collection_policy,
+                    children_fetch_fast=children_fetch_fast,
+                    children_fetch_detail=children_fetch_detail,
+                    child_retry_enabled=child_retry_enabled,
+                    on_pass_checkpoint=on_pass_checkpoint,
+                    raw=raw,
+                )
+                record["elapsed"] = time.monotonic() - t_start
+                records[target.rloc16] = record
+                status = record["status"]
+                if error is not None and not isinstance(
+                    error, _KNOWN_TERMINAL_DIAGNOSTIC_ERRORS
+                ):
+                    stop_reason = "unresolved_prior_action"
+                    logging.warning(
+                        "Stopping child RLOC expansion after unresolved action for %s: %s",
+                        target.destination,
+                        error,
+                    )
+                if error is not None and status in {"failed", "invalid_response"}:
+                    if not skip_on_failure:
+                        raise error
+                    logging.warning(
+                        "Skipping child RLOC %s: %s", target.destination, error
+                    )
+            finally:
+                if on_progress is not None:
+                    on_progress(
+                        idx, total, label, time.monotonic() - t_start, status
+                    )
+                if on_checkpoint is not None:
+                    on_checkpoint(results, idx, total, label, status)
+
+        target_results: list[dict[str, Any]] = []
+        for target in targets:
+            if target.status == "covered":
+                target_results.append(
+                    self._rloc_target_record(
+                        target,
+                        status="covered",
+                        reasonCode="already_collected",
+                        extAddress=target.covered_ext_address,
+                        attempts=0,
+                    )
+                )
+            elif target.status == "conflict":
+                target_results.append(
+                    self._rloc_target_record(
+                        target,
+                        status="conflict",
+                        reasonCode="conflicting_evidence",
+                        conflicts=list(target.conflicts),
+                        attempts=0,
+                    )
+                )
+            else:
+                target_results.append(records[target.rloc16])
+
+        return {
+            "enabled": True,
+            "partial": bool(issues)
+            or any(
+                record["status"] not in {"completed", "covered"}
+                for record in target_results
+            ),
+            "parentCount": parent_count,
+            "targetCount": len(targets),
+            "attemptedCount": sum(
+                record.get("attempts", 0) > 0 for record in target_results
+            ),
+            "completedCount": sum(
+                record["status"] == "completed" for record in target_results
+            ),
+            "coveredCount": sum(
+                record["status"] == "covered" for record in target_results
+            ),
+            "results": target_results,
+            "issues": issues,
+        }
+
+    @staticmethod
+    def _rloc_target_record(
+        target: _RlocExpansionTarget, **fields: Any
+    ) -> dict[str, Any]:
+        classification, warning = _classify_child_mode(target.child_mode)
+        record: dict[str, Any] = {
+            "destination": target.destination,
+            "destinationType": DestinationType.RLOC,
+            "rloc16": _format_rloc16(target.rloc16),
+            "parentExtAddress": target.parent_ext_address,
+            "parentRloc16": _format_rloc16(target.parent_rloc16),
+            "childId": target.child_id,
+            "childMode": target.child_mode,
+            "modeClassification": classification,
+        }
+        if warning is not None:
+            record["modeWarning"] = warning
+        record.update(fields)
+        return record
+
+    def _collect_rloc_target(
+        self,
+        target: _RlocExpansionTarget,
+        results: list[Any],
+        *,
+        idx: int,
+        total: int,
+        label: str,
+        types: Sequence[str | int],
+        fallback_types: Sequence[str | int] | None,
+        progressive_fallback: bool,
+        include_basic_fallback: bool,
+        task_timeout: int,
+        poll_timeout: float | None,
+        child_task_timeout: int,
+        child_poll_timeout: float,
+        poll_interval: float,
+        child_collection_policy: str,
+        children_fetch_fast: bool,
+        children_fetch_detail: bool,
+        child_retry_enabled: bool,
+        on_pass_checkpoint: (
+            Callable[[list[Any], int, int, str, str], None] | None
+        ),
+        raw: object,
+    ) -> tuple[dict[str, Any], OTBRClientError | None]:
+        accepted_ext: list[str] = []
+        expected = _format_rloc16(target.rloc16)
+
+        def validate(context: Any) -> None:
+            item = context.get("item") if isinstance(context, Mapping) else None
+            view = _diagnostic_identity_view(item)
+            ext_address = _usable_ext_address(view.get("extAddress"))
+            if ext_address is None:
+                raise _RlocIdentityError(
+                    f"RLOC diagnostic for {target.destination} has no valid extAddress",
+                    "identity_missing",
+                )
+            if _parse_rloc16(view.get("rloc16")) != target.rloc16:
+                raise _RlocIdentityError(
+                    f"RLOC diagnostic for {target.destination} returned rloc16 "
+                    f"{view.get('rloc16')!r}, expected {expected}",
+                    "rloc16_mismatch",
+                )
+            if accepted_ext:
+                if ext_address != accepted_ext[0]:
+                    raise _RlocIdentityError(
+                        f"RLOC diagnostic for {target.destination} returned "
+                        f"extAddress {ext_address}, expected {accepted_ext[0]}",
+                        "identity_changed",
+                    )
+                return
+            for existing in results:
+                existing_ext = _usable_ext_address(
+                    _diagnostic_identity_view(existing).get("extAddress")
+                )
+                if existing_ext == ext_address:
+                    raise _RlocIdentityError(
+                        f"RLOC diagnostic for {target.destination} returned "
+                        f"extAddress {ext_address}, already collected at another "
+                        "address in this run",
+                        "identity_conflict",
+                    )
+            accepted_ext.append(ext_address)
+
+        def identity_fields(error: OTBRClientError | None) -> dict[str, Any]:
+            fields: dict[str, Any] = {}
+            if accepted_ext:
+                fields["extAddress"] = accepted_ext[0]
+            if isinstance(error, _RlocIdentityError):
+                fields["reasonCode"] = error.reason_code
+            return fields
+
+        classification, mode_warning = _classify_child_mode(target.child_mode)
+        if child_collection_policy == "mode-aware" and classification != "unknown":
+            pass_specs: list[tuple[str, Sequence[str | int]]] = []
+            if classification == "mtd":
+                if children_fetch_fast:
+                    pass_specs.append(("fast", BASIC_DIAGNOSTIC_TLVS))
+                if children_fetch_detail:
+                    pass_specs.append(("detail", CHILD_MEDIUM_DIAGNOSTIC_TLVS))
+            else:
+                pass_specs.append(("medium", CHILD_MEDIUM_DIAGNOSTIC_TLVS))
+
+            def pass_checkpoint(items, index, count, _destination, pass_name):
+                if on_pass_checkpoint is not None:
+                    on_pass_checkpoint(items, index, count, label, pass_name)
+
+            outcome = self._fetch_mode_aware_diagnostic_attempts(
+                target.destination,
+                classification,
+                pass_specs,
+                idx=idx,
+                total=total,
+                destination_type=DestinationType.RLOC,
+                task_timeout=child_task_timeout,
+                poll_timeout=child_poll_timeout,
+                poll_interval=poll_interval,
+                child_retry_enabled=child_retry_enabled,
+                raw=raw,
+                results=results,
+                on_pass_checkpoint=pass_checkpoint,
+                validate_context=validate,
+            )
+            status = outcome.status
+            if outcome.context is None and isinstance(
+                outcome.error, _RlocIdentityError
+            ):
+                status = "invalid_response"
+            record = self._rloc_target_record(
+                target,
+                policy="mode-aware",
+                status=status,
+                attempts=len(outcome.attempted_types),
+                attemptedTypes=outcome.attempted_types,
+                successfulTypes=outcome.selected_types,
+                retryRecovered=outcome.retry_recovered,
+                selectedPass=outcome.selected_pass,
+                passes=outcome.passes,
+                attemptErrors=outcome.attempt_errors,
+                diagnosticId=(
+                    outcome.context.get("diagnosticId")
+                    if outcome.context is not None
+                    else None
+                ),
+                error=(
+                    _diagnostic_attempt_error(outcome.error)
+                    if outcome.error is not None
+                    else None
+                ),
+                **identity_fields(outcome.error),
+            )
+            if status == "skipped":
+                record["reasonCode"] = "child_passes_disabled"
+                record["skipReason"] = "both MTD diagnostic passes are disabled"
+            return record, outcome.error
+
+        policy = "legacy" if child_collection_policy == "legacy" else "legacy-unknown-mode"
+        if policy == "legacy-unknown-mode":
+            logging.warning(
+                "Child RLOC %s has %s mode evidence; using the legacy child diagnostic policy",
+                target.destination,
+                mode_warning,
+            )
+        context, attempted_types, attempt_errors, error = self._fetch_diagnostic_attempts(
+            target.destination,
+            "child",
+            idx=idx,
+            total=total,
+            types=types,
+            fallback_types=fallback_types,
+            progressive_fallback=progressive_fallback,
+            include_basic_fallback=include_basic_fallback,
+            task_timeout=task_timeout,
+            poll_timeout=poll_timeout,
+            child_task_timeout=child_task_timeout,
+            child_poll_timeout=child_poll_timeout,
+            poll_interval=poll_interval,
+            destination_type=DestinationType.RLOC,
+            raw=raw,
+            validate_context=validate,
+        )
+        if context is None:
+            if error is None:
+                error = OTBRInvalidResponseError(
+                    f"No diagnostic result returned for child RLOC {target.destination}"
+                )
+            status = (
+                "invalid_response"
+                if isinstance(error, _RlocIdentityError)
+                else "failed"
+            )
+        else:
+            results.append(context["item"])
+            status = "partial" if len(attempted_types) > 1 else "completed"
+        record = self._rloc_target_record(
+            target,
+            policy=policy,
+            status=status,
+            attempts=len(attempted_types),
+            attemptedTypes=attempted_types,
+            successfulTypes=attempted_types[-1] if context is not None else None,
+            fallbackRecovered=context is not None and len(attempted_types) > 1,
+            attemptErrors=attempt_errors,
+            diagnosticId=context.get("diagnosticId") if context is not None else None,
+            error=_diagnostic_attempt_error(error) if error is not None else None,
+            **identity_fields(error),
+        )
+        return record, error
 
     def _fetch_diagnostic_attempts(
         self,
@@ -1929,6 +2602,8 @@ class OTBRRestApiClient:
         poll_interval: float,
         destination_type: str,
         raw: object,
+        augment_child_table: bool = False,
+        validate_context: Callable[[Any], None] | None = None,
     ) -> tuple[
         Any,
         list[list[str | int]],
@@ -1955,6 +2630,8 @@ class OTBRRestApiClient:
         elif fallback_types:
             fallback_sets.append(fallback_types)
         type_sets = [primary_types, *fallback_sets]
+        if augment_child_table and not is_child:
+            type_sets = [_with_child_table_tlv(type_set) for type_set in type_sets]
         attempted_types: list[list[str | int]] = []
         attempt_errors: list[dict[str, Any]] = []
         context = None
@@ -1972,7 +2649,7 @@ class OTBRRestApiClient:
                     " ".join(map(str, attempt_types)),
                 )
                 try:
-                    context = self.fetch_device_diagnostics(
+                    candidate = self.fetch_device_diagnostics(
                         device_id,
                         types=attempt_types,
                         destination_type=destination_type,
@@ -1982,7 +2659,13 @@ class OTBRRestApiClient:
                         return_context=True,
                         raw=raw,
                     )
+                    if validate_context is not None:
+                        validate_context(candidate)
+                    context = candidate
                     break
+                except _RlocIdentityError as exc:
+                    attempt_errors.append(_diagnostic_attempt_error(exc))
+                    raise
                 except (OTBRActionFailedError, OTBRInvalidResponseError) as exc:
                     attempt_errors.append(_diagnostic_attempt_error(exc))
                     if attempt_index + 1 >= len(type_sets):
@@ -2014,6 +2697,7 @@ class OTBRRestApiClient:
         on_pass_checkpoint: (
             Callable[[list[Any], int, int, str, str], None] | None
         ),
+        validate_context: Callable[[Any], None] | None = None,
     ) -> _ModeAwareDiagnosticOutcome:
         attempted_types: list[list[str | int]] = []
         attempt_errors: list[dict[str, Any]] = []
@@ -2051,7 +2735,7 @@ class OTBRRestApiClient:
                     " ".join(map(str, request_types)),
                 )
                 try:
-                    pass_context = self.fetch_device_diagnostics(
+                    candidate = self.fetch_device_diagnostics(
                         device_id,
                         types=request_types,
                         destination_type=destination_type,
@@ -2061,6 +2745,15 @@ class OTBRRestApiClient:
                         return_context=True,
                         raw=raw,
                     )
+                    if validate_context is not None:
+                        validate_context(candidate)
+                    pass_context = candidate
+                    break
+                except _RlocIdentityError as exc:
+                    error = _diagnostic_attempt_error(exc)
+                    pass_attempt_errors.append(error)
+                    attempt_errors.append(error)
+                    pass_error = exc
                     break
                 except (OTBRActionFailedError, OTBRInvalidResponseError) as exc:
                     error = _diagnostic_attempt_error(exc)

@@ -421,3 +421,31 @@ def test_rest_fetch_all_refreshes_device_collection_by_default(resource):
     else:
         client.fetch_device_collection.assert_called_once_with(items_only=True)
     client.list_devices.assert_not_called()
+
+
+def test_rloc_expansion_checkpoints_use_expansion_stages(tmp_path) -> None:
+    client = Mock()
+    client.list_devices.return_value = []
+
+    def fetch_all(_selected, **kwargs):
+        kwargs["on_checkpoint"]([{"id": "base"}], 1, 1, "1111111111111111", "completed")
+        kwargs["on_pass_checkpoint"]([{"id": "fast"}], 1, 1, "rloc:00382a", "fast")
+        kwargs["on_checkpoint"]([{"id": "child"}], 1, 1, "rloc:00382a", "completed")
+        return {"items": [{"id": "child"}], "deviceResults": [], "partial": False}
+
+    client.fetch_all_devices_diagnostics.side_effect = fetch_all
+    args = cli_module.build_parser().parse_args(
+        ["diagnostics", "fetch-all", "--no-update-devices", "--children-expand-by-rloc"]
+    )
+    args.resolved_output_path = str(tmp_path / OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME)
+
+    with patch.object(
+        diagnostics_module, "_write_checkpoint_best_effort"
+    ) as write_checkpoint, patch.object(diagnostics_module, "emit_rest_command_output"):
+        diagnostics_module.dispatch_diagnostics(client, args, raw_arg=False, fields=None)
+
+    assert [call.args[3] for call in write_checkpoint.call_args_list] == [
+        "device",
+        "expansion-pass:fast",
+        "expansion",
+    ]

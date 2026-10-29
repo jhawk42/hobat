@@ -1467,6 +1467,44 @@ def test_mode_aware_completion_does_not_invent_unrequested_child_health_inputs(
     }.intersection({"totalMacErrorRatio", "parentChanges", "routerRolePercent"})
 
 
+def test_partial_rloc_child_expansion_stays_incomplete_without_rloc_devices(
+    tmp_path,
+) -> None:
+    _write_rest_seed(
+        tmp_path,
+        {
+            "items": [],
+            "deviceResults": [{"deviceId": "8672766ae0578187", "status": "completed"}],
+            "partial": True,
+            "completedAt": "2026-09-01T00:00:00+00:00",
+            "childrenExpansion": {
+                "enabled": True,
+                "partial": True,
+                "results": [
+                    {
+                        "destination": "00382a",
+                        "destinationType": "rloc",
+                        "rloc16": "0x382a",
+                        "status": "failed",
+                    }
+                ],
+            },
+        },
+    )
+
+    result = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_restapi_devices_diagnostics_fetch",
+        policy=load_health_policy(),
+        allow_partial=True,
+    )
+
+    assert result.observation.completeness is Completeness.PARTIAL
+    assert [device.device_id for device in result.observation.devices] == [
+        "extaddr:8672766ae0578187"
+    ]
+
+
 def test_complete_rest_topology_mdns_profile_reports_border_router_redundancy(tmp_path) -> None:
     dataset_id = "otbr_restapi_topology_mdns"
     (tmp_path / "td-otbr-restapi-dataset-active.json").write_text(

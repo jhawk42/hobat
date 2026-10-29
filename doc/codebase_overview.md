@@ -124,6 +124,15 @@ dispatchers retain an all-guarded empty diagnostic snapshot and persist the
 current skip outcome separately. `queriedCount` includes normalized skips,
 while `attemptedCount` counts only devices with a diagnostic attempt.
 
+Opt-in `diagnostics fetch-all --children-expand-by-rloc` adds a second,
+one-level phase in the same client call. It derives six-character child RLOC
+destinations from this run's parent `rloc16` and `childTable`, reuses the child
+pass policies, and validates the returned identity before publishing or
+checkpointing. Results are kept in a separate `childrenExpansion` outcome
+object, so base counters keep their meaning. The dispatcher only labels
+expansion checkpoints and preserves the prior snapshot when an incomplete
+expansion yields no items. Topology does not enable this phase.
+
 Transport methods do not write files. Resource dispatchers or composite
 workflows own command output because they know the command and resolved path.
 Mutating action POSTs are not retried after an ambiguous response because the

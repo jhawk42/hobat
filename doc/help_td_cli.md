@@ -596,6 +596,12 @@ These options must be placed after `otbr-restapi` and before its subcommand.
 | `mesh-diagnostics` | `children`, `child-ipv6`, `router-neighbors`, `fetch`, `fetch-all` | Fetch mesh-diagnostic TLV datasets |
 | `topology` | *(none)* | Run full sweep: devices fetch + diagnostics fetch-all + mesh-diagnostics fetch-all |
 
+`otbr-restapi diagnostics fetch-all --children-expand-by-rloc` is an opt-in,
+off-by-default second phase that queries children from parent `childTable`
+entries by RLOC16. `topology` does not enable it. See the
+[REST CLI help](help_td_restapi_cli.md#child-expansion-by-rloc---children-expand-by-rloc)
+for scope, compatibility, and load limits.
+
 `otbr-restapi node dataset active get` saves JSON to `td-otbr-restapi-dataset-active.json`
 in the data directory by default, along with its network identity sidecar. Use
 `--no-auto-output` to print it without saving; `get --text` does not auto-save.

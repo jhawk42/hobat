@@ -1118,3 +1118,187 @@ def test_mesh_fetch_all_routers_only_selector_remains_accepted():
     )
 
     assert args.routers_only is True
+
+def test_children_expand_by_rloc_requires_extended_destination_before_discovery():
+    client = Mock()
+    args = cli_module.build_parser().parse_args(
+        [
+            "diagnostics",
+            "fetch-all",
+            "--children-expand-by-rloc",
+            "--destination-type",
+            "rloc",
+        ]
+    )
+
+    with pytest.raises(OTBRUsageError, match="--children-expand-by-rloc"):
+        diagnostics_module.dispatch_diagnostics(
+            client, args, raw_arg=False, fields=None
+        )
+
+    client.fetch_device_collection.assert_not_called()
+    client.list_devices.assert_not_called()
+    client.fetch_all_devices_diagnostics.assert_not_called()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_children_expand_by_rloc_is_forwarded_only_when_enabled(enabled):
+    client = Mock()
+    client.list_devices.return_value = []
+    client.fetch_all_devices_diagnostics.return_value = {
+        "items": [],
+        "deviceResults": [],
+        "partial": False,
+    }
+    command = ["--no-progress", "diagnostics", "fetch-all", "--no-update-devices"]
+    if enabled:
+        command.append("--children-expand-by-rloc")
+    args = cli_module.build_parser().parse_args(command)
+    args.resolved_output_path = None
+
+    diagnostics_module.dispatch_diagnostics(client, args, raw_arg=False, fields=None)
+
+    kwargs = client.fetch_all_devices_diagnostics.call_args.kwargs
+    if enabled:
+        assert kwargs["children_expand_by_rloc"] is True
+    else:
+        assert "children_expand_by_rloc" not in kwargs
+
+
+def _incomplete_expansion_outcome(items):
+    return {
+        "items": items,
+        "deviceResults": [],
+        "partial": True,
+        "clearedDiagnostics": False,
+        "inputCount": 0,
+        "queriedCount": 0,
+        "attemptedCount": 0,
+        "childrenExpansion": {
+            "enabled": True,
+            "partial": True,
+            "parentCount": 0,
+            "targetCount": 1,
+            "attemptedCount": 1,
+            "completedCount": 0,
+            "coveredCount": 0,
+            "results": [
+                {
+                    "destination": "00382a",
+                    "destinationType": "rloc",
+                    "status": "failed",
+                }
+            ],
+            "issues": [],
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("output_name", "outcome_name"),
+    [
+        ("diagnostics-export.json", "diagnostics-export.outcome.json"),
+        (
+            OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+            OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("items_only", "raw"),
+    [(True, False), (False, False), (True, True), (False, True)],
+)
+def test_incomplete_empty_rloc_expansion_retains_prior_dataset(
+    tmp_path, output_name, outcome_name, items_only, raw
+):
+    output_path = tmp_path / output_name
+    checkpoint_path = tmp_path / f"{output_path.stem}.partial.json"
+    old_dataset = b'[{"id":"previous-diagnostic"}]'
+    old_scope = b'{"previous":"network-scope"}'
+    old_checkpoint = b'[{"id":"previous-checkpoint"}]'
+    output_path.write_bytes(old_dataset)
+    network_scope_path(output_path).write_bytes(old_scope)
+    checkpoint_path.write_bytes(old_checkpoint)
+    outcome = _incomplete_expansion_outcome([])
+    client = Mock()
+    client.list_devices.return_value = []
+
+    def fetch_all(_selected, **kwargs):
+        kwargs["on_checkpoint"]([], 1, 1, "rloc:00382a", "failed")
+        return outcome
+
+    client.fetch_all_devices_diagnostics.side_effect = fetch_all
+    command = [
+        "diagnostics",
+        "fetch-all",
+        "--no-update-devices",
+        "--children-expand-by-rloc",
+    ]
+    if items_only:
+        command.append("--items-only")
+    args = cli_module.build_parser().parse_args(command)
+    args.resolved_output_path = str(output_path)
+
+    with patch.object(
+        diagnostics_module,
+        "emit_rest_command_output",
+        side_effect=AssertionError("incomplete empty expansion must not be written"),
+    ):
+        diagnostics_module.dispatch_diagnostics(client, args, raw_arg=raw, fields=None)
+
+    assert output_path.read_bytes() == old_dataset
+    assert network_scope_path(output_path).read_bytes() == old_scope
+    assert checkpoint_path.read_bytes() == old_checkpoint
+    saved = json.loads((tmp_path / outcome_name).read_text(encoding="utf-8"))
+    assert saved["childrenExpansion"]["results"][0]["status"] == "failed"
+    assert saved["childrenExpansion"]["partial"] is True
+
+
+def test_usable_base_snapshot_is_published_when_rloc_children_fail(tmp_path):
+    output_path = tmp_path / OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME
+    parent = {"id": "diag-parent", "extAddress": "9af0b8a484b741ab", "rloc16": "0x3800"}
+    client = Mock()
+    client.list_devices.return_value = []
+    client.fetch_all_devices_diagnostics.return_value = _incomplete_expansion_outcome(
+        [parent]
+    )
+    args = cli_module.build_parser().parse_args(
+        [
+            "diagnostics",
+            "fetch-all",
+            "--no-update-devices",
+            "--no-enrich-mac-counters",
+            "--children-expand-by-rloc",
+            "--items-only",
+        ]
+    )
+    args.resolved_output_path = str(output_path)
+
+    with patch.object(diagnostics_module, "emit_rest_command_output") as emit:
+        diagnostics_module.dispatch_diagnostics(client, args, raw_arg=False, fields=None)
+
+    emit.assert_called_once()
+    assert emit.call_args.args[0][0]["extAddress"] == parent["extAddress"]
+    saved = json.loads(
+        (tmp_path / OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert saved["partial"] is True
+
+
+def test_incomplete_rloc_expansion_without_output_path_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = Mock()
+    client.list_devices.return_value = []
+    client.fetch_all_devices_diagnostics.return_value = _incomplete_expansion_outcome([])
+    args = cli_module.build_parser().parse_args(
+        ["diagnostics", "fetch-all", "--no-update-devices", "--children-expand-by-rloc"]
+    )
+    args.resolved_output_path = None
+
+    with patch.object(diagnostics_module, "emit_rest_command_output") as emit:
+        diagnostics_module.dispatch_diagnostics(client, args, raw_arg=False, fields=None)
+
+    emit.assert_not_called()
+    assert list(tmp_path.iterdir()) == []

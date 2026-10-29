@@ -1342,3 +1342,734 @@ def test_cli_discovery_forwards_safe_attempts_and_structured_mode() -> None:
     kwargs = client.fetch_device_collection.call_args.kwargs
     assert kwargs["whole_action_attempts"] == 2
     assert kwargs["items_only"] is False
+
+
+# ---------------------------------------------------------------------------
+# S3-03A: --children-expand-by-rloc
+# ---------------------------------------------------------------------------
+
+import copy
+
+from otbr_restapi_util import (
+    CHILD_DETAILED_DIAGNOSTIC_TLVS as _CHILD_DETAILED,
+    DestinationType,
+    RLOC_EXPANSION_PROGRESS_PREFIX,
+    _child_rloc_destination,
+    _derive_child_rloc_targets,
+    _parse_child_id,
+    _parse_router_rloc16,
+)
+
+PARENT_EXT = "9af0b8a484b741ab"
+OTHER_ROUTER_EXT = "1234567812345678"
+MTD_MODE = {"rxOnWhenIdle": False, "fullThreadDevice": False, "device": "MTD"}
+FTD_MODE = {"rxOnWhenIdle": True, "fullThreadDevice": True, "device": "FTD"}
+
+
+def _parent_item(ext=PARENT_EXT, rloc16="0x3800", child_table=None):
+    item = {"id": f"diag-{ext}", "extAddress": ext, "rloc16": rloc16}
+    if child_table is not None:
+        item["childTable"] = child_table
+    return item
+
+
+def _child_item(ext, rloc16):
+    return {"id": f"diag-{ext}", "extAddress": ext, "rloc16": rloc16}
+
+
+def _rloc_fetch(responses, calls):
+    """Return a fake fetch_device_diagnostics keyed by (destination, destinationType)."""
+
+    def fetch(destination, **kwargs):
+        calls.append((destination, kwargs))
+        value = responses[(destination, kwargs["destination_type"])]
+        if isinstance(value, list):
+            value = value.pop(0)
+        if isinstance(value, BaseException):
+            raise value
+        diagnostic_id = f"diag-{destination}-{len(calls)}"
+        return {
+            "item": copy.deepcopy(value),
+            "action": completed_action(f"action-{len(calls)}", diagnostic_id),
+            "diagnosticId": diagnostic_id,
+        }
+
+    return fetch
+
+
+@pytest.mark.parametrize(
+    ("parent_rloc16", "child_id", "child_rloc16", "destination"),
+    [
+        (0x9400, 53, 0x9435, "009435"),
+        (0x9400, 14, 0x940E, "00940e"),
+        (0x3800, 42, 0x382A, "00382a"),
+    ],
+)
+def test_child_rloc_destination_matches_plan_examples(
+    parent_rloc16, child_id, child_rloc16, destination
+) -> None:
+    assert _child_rloc_destination(parent_rloc16, child_id) == (
+        child_rloc16,
+        destination,
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0x3800, (0x3800, None)),
+        ("0x3800", (0x3800, None)),
+        ("0x0", (0x0000, None)),
+        (0xF800, (0xF800, None)),
+        (0x3801, (None, "parent_rloc16_not_router")),
+        ("0x382a", (None, "parent_rloc16_not_router")),
+        (0xFC00, (None, "parent_router_id_out_of_range")),
+        (True, (None, "invalid_parent_rloc16")),
+        (14336.0, (None, "invalid_parent_rloc16")),
+        ("3800", (None, "invalid_parent_rloc16")),
+        ("0X3800", (None, "invalid_parent_rloc16")),
+        ("0x10000", (None, "invalid_parent_rloc16")),
+        (0x10000, (None, "invalid_parent_rloc16")),
+        (-1024, (None, "invalid_parent_rloc16")),
+        (None, (None, "invalid_parent_rloc16")),
+    ],
+)
+def test_parent_rloc16_parsing_rejects_without_coercion(value, expected) -> None:
+    assert _parse_router_rloc16(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (1, 1),
+        (511, 511),
+        (0, None),
+        (512, None),
+        (1023, None),
+        (1024, None),
+        (-1, None),
+        (True, None),
+        ("42", None),
+        (42.0, None),
+        (None, None),
+    ],
+)
+def test_child_id_parsing_accepts_only_real_thread_child_ids(value, expected) -> None:
+    assert _parse_child_id(value) == expected
+
+
+def test_target_derivation_dedupes_classifies_and_does_not_mutate_inputs() -> None:
+    items = [
+        _parent_item(
+            child_table=[
+                {"childId": 42, "mode": MTD_MODE},
+                {"childId": 42, "mode": dict(MTD_MODE)},
+                {"childId": 7, "mode": FTD_MODE},
+                {"childId": 7, "mode": MTD_MODE},
+                {"childId": 0},
+                {"childId": 512},
+                {"childId": True},
+                "not-an-entry",
+                {"childId": 9, "mode": MTD_MODE},
+            ]
+        ),
+        _parent_item(ext=OTHER_ROUTER_EXT, rloc16="0x9400", child_table=[]),
+        _child_item("abababababababab", "0x3809"),
+    ]
+    snapshot = copy.deepcopy(items)
+
+    targets, issues, parent_count = _derive_child_rloc_targets(items, [])
+
+    assert items == snapshot
+    assert parent_count == 2
+    assert [(t.destination, t.status) for t in targets] == [
+        ("00382a", None),
+        ("003807", "conflict"),
+        ("003809", "covered"),
+    ]
+    assert targets[1].conflicts == [
+        {"code": "conflicting_child_mode", "childMode": MTD_MODE}
+    ]
+    assert targets[2].covered_ext_address == "abababababababab"
+    assert [issue["code"] for issue in issues] == ["invalid_child_entry"] * 4
+    assert all(issue["parentExtAddress"] == PARENT_EXT for issue in issues)
+    assert [issue["entryIndex"] for issue in issues] == [4, 5, 6, 7]
+
+
+def test_target_derivation_records_parent_coverage_limitations() -> None:
+    items = [
+        _parent_item(ext=PARENT_EXT, rloc16="0x3800"),
+        _parent_item(ext=OTHER_ROUTER_EXT, rloc16="0x3801", child_table=[]),
+        _parent_item(ext="5555555555555555", rloc16="0x9400", child_table="bad"),
+        {"id": "no-identity"},
+        _parent_item(ext="6666666666666666", rloc16="0x0400", child_table=[{"childId": 1}]),
+        _parent_item(ext="7777777777777777", rloc16="0x0400", child_table=[{"childId": 2}]),
+    ]
+    device_results = [
+        {"deviceId": "8888888888888888", "role": "router", "status": "failed"},
+        {
+            "deviceId": "9999999999999999",
+            "role": "router",
+            "status": "skipped",
+            "skipReasonCode": "unresolved_mesh_local_iid",
+        },
+        {"deviceId": "aaaaaaaaaaaaaaaa", "role": "child", "status": "failed"},
+    ]
+
+    targets, issues, parent_count = _derive_child_rloc_targets(items, device_results)
+
+    assert parent_count == 0
+    assert [(t.destination, t.status) for t in targets] == [
+        ("000401", "conflict"),
+        ("000402", "conflict"),
+    ]
+    assert [issue["code"] for issue in issues] == [
+        "parent_unavailable",
+        "parent_unavailable",
+        "parent_child_table_missing",
+        "parent_rloc16_not_router",
+        "malformed_child_table",
+        "parent_evidence_unavailable",
+        "conflicting_parent_identity",
+    ]
+
+
+def test_expansion_disabled_keeps_requested_types_and_omits_outcome(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "fetch_device_diagnostics",
+        _rloc_fetch(
+            {(PARENT_EXT, "extended"): _parent_item(child_table=[{"childId": 42}])},
+            calls,
+        ),
+    )
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [{"id": PARENT_EXT, "role": "router"}],
+        types=["extAddress", "rloc16"],
+        fallback_types=["extAddress"],
+    )
+
+    assert [kwargs["types"] for _dest, kwargs in calls] == [["extAddress", "rloc16"]]
+    assert "childrenExpansion" not in outcome
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("types", "expected"),
+    [
+        (["extAddress", "rloc16"], ["extAddress", "rloc16", "childTable"]),
+        ([0, 1, 16], [0, 1, 16]),
+        (["childTable", "rloc16"], ["childTable", "rloc16"]),
+    ],
+)
+def test_expansion_augments_parent_primary_and_fallback_types_only(
+    monkeypatch, types, expected
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "fetch_device_diagnostics",
+        _rloc_fetch(
+            {
+                (PARENT_EXT, "extended"): [
+                    OTBRActionFailedError("failed", action_id="a", status="failed"),
+                    _parent_item(child_table=[]),
+                ],
+                ("1111111111111111", "extended"): _child_item(
+                    "1111111111111111", "0x3801"
+                ),
+            },
+            calls,
+        ),
+    )
+    original_recommended = list(RECOMMENDED_DIAGNOSTIC_TLVS)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {"id": PARENT_EXT, "role": "router"},
+            {"id": "1111111111111111", "role": "child"},
+        ],
+        types=types,
+        fallback_types=["extAddress"],
+        children_expand_by_rloc=True,
+    )
+
+    assert [kwargs["types"] for _dest, kwargs in calls] == [
+        expected,
+        ["extAddress", "childTable"],
+        types,
+    ]
+    assert RECOMMENDED_DIAGNOSTIC_TLVS == original_recommended
+    assert outcome["childrenExpansion"]["targetCount"] == 0
+    assert outcome["childrenExpansion"]["partial"] is False
+
+
+def test_expansion_queries_uncovered_children_by_rloc_with_mode_policies(
+    monkeypatch,
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    zero_iid_child = "2222222222222222"
+    responses = {
+        (PARENT_EXT, "extended"): _parent_item(
+            child_table=[
+                {"childId": 42, "mode": MTD_MODE, "linkQuality": 3},
+                {"childId": 7, "mode": FTD_MODE},
+                {"childId": 9},
+                {"childId": 1, "mode": MTD_MODE},
+            ]
+        ),
+        ("1111111111111111", "extended"): _child_item("1111111111111111", "0x3801"),
+        ("00382a", "rloc"): _child_item(zero_iid_child, "0x382a"),
+        ("003807", "rloc"): _child_item("3333333333333333", "0x3807"),
+        ("003809", "rloc"): _child_item("4444444444444444", "0x3809"),
+    }
+    monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+    clear = MagicMock()
+    monkeypatch.setattr(client, "delete_all_diagnostics", clear)
+    progress = []
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {"id": PARENT_EXT, "role": "leader"},
+            {"id": "1111111111111111", "role": "child", "mode": MTD_MODE},
+            {
+                "id": zero_iid_child,
+                "role": "child",
+                "mode": MTD_MODE,
+                "mlEidIid": "0000000000000000",
+            },
+        ],
+        clear_diagnostics=True,
+        progressive_fallback=True,
+        child_collection_policy="mode-aware",
+        children_expand_by_rloc=True,
+        on_progress=lambda *args: progress.append(args[:3] + args[4:]),
+    )
+
+    clear.assert_called_once()
+    rloc_calls = [
+        (dest, kwargs["destination_type"], kwargs["types"], kwargs["task_timeout"])
+        for dest, kwargs in calls
+        if kwargs["destination_type"] == DestinationType.RLOC
+    ]
+    assert rloc_calls == [
+        ("00382a", "rloc", BASIC_DIAGNOSTIC_TLVS, 30),
+        ("003807", "rloc", CHILD_MEDIUM_DIAGNOSTIC_TLVS, 30),
+        ("003809", "rloc", _CHILD_DETAILED, 30),
+    ]
+    assert len(calls) == 5
+    assert [item["extAddress"] for item in outcome["items"]] == [
+        PARENT_EXT,
+        "1111111111111111",
+        zero_iid_child,
+        "3333333333333333",
+        "4444444444444444",
+    ]
+    assert outcome["deviceResults"][2]["skipReasonCode"] == "unresolved_mesh_local_iid"
+    assert outcome["attemptedCount"] == 2
+    assert outcome["queriedCount"] == 3
+    expansion = outcome["childrenExpansion"]
+    assert {
+        key: expansion[key]
+        for key in (
+            "enabled",
+            "partial",
+            "parentCount",
+            "targetCount",
+            "attemptedCount",
+            "completedCount",
+            "coveredCount",
+        )
+    } == {
+        "enabled": True,
+        "partial": False,
+        "parentCount": 1,
+        "targetCount": 4,
+        "attemptedCount": 3,
+        "completedCount": 3,
+        "coveredCount": 1,
+    }
+    assert outcome["partial"] is True
+    records = {record["destination"]: record for record in expansion["results"]}
+    assert records["00382a"]["extAddress"] == zero_iid_child
+    assert records["00382a"]["parentExtAddress"] == PARENT_EXT
+    assert records["00382a"]["parentRloc16"] == "0x3800"
+    assert records["00382a"]["childMode"] == MTD_MODE
+    assert records["00382a"]["selectedPass"] == "fast"
+    assert records["003809"]["policy"] == "legacy-unknown-mode"
+    assert records["003801"]["status"] == "covered"
+    assert all("deviceId" not in record for record in expansion["results"])
+    assert progress[-3:] == [
+        (1, 3, f"{RLOC_EXPANSION_PROGRESS_PREFIX}00382a", "completed"),
+        (2, 3, f"{RLOC_EXPANSION_PROGRESS_PREFIX}003807", "completed"),
+        (3, 3, f"{RLOC_EXPANSION_PROGRESS_PREFIX}003809", "completed"),
+    ]
+
+
+def test_expansion_does_not_recurse_into_child_tables(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    child_with_table = _child_item("3333333333333333", "0x382a")
+    child_with_table["childTable"] = [{"childId": 5}]
+    responses = {
+        (PARENT_EXT, "extended"): _parent_item(child_table=[{"childId": 42, "mode": FTD_MODE}]),
+        ("00382a", "rloc"): child_with_table,
+    }
+    monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [PARENT_EXT],
+        child_collection_policy="mode-aware",
+        children_expand_by_rloc=True,
+    )
+
+    assert [dest for dest, _kwargs in calls] == [PARENT_EXT, "00382a"]
+    assert outcome["childrenExpansion"]["targetCount"] == 1
+
+
+@pytest.mark.parametrize(
+    ("response", "reason"),
+    [
+        (_child_item("3333333333333333", "0x3829"), "rloc16_mismatch"),
+        ({"id": "x", "rloc16": "0x382a"}, "identity_missing"),
+        (_child_item("0000000000000000", "0x382a"), "identity_missing"),
+        (_child_item(PARENT_EXT, "0x382a"), "identity_conflict"),
+    ],
+)
+def test_expansion_identity_validation_blocks_publication(
+    monkeypatch, response, reason
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    responses = {
+        (PARENT_EXT, "extended"): _parent_item(child_table=[{"childId": 42, "mode": MTD_MODE}]),
+        ("00382a", "rloc"): response,
+    }
+    monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+    checkpoints = []
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [PARENT_EXT],
+        child_collection_policy="mode-aware",
+        children_expand_by_rloc=True,
+        on_pass_checkpoint=lambda results, *_args: checkpoints.append(list(results)),
+    )
+
+    record = outcome["childrenExpansion"]["results"][0]
+    assert record["status"] == "invalid_response"
+    assert record["reasonCode"] == reason
+    assert record["attempts"] == 1
+    assert "extAddress" not in record
+    assert outcome["items"] == [_parent_item(child_table=[{"childId": 42, "mode": MTD_MODE}])]
+    assert checkpoints == []
+    assert outcome["partial"] is True
+    assert len(calls) == 2
+
+
+def test_expansion_detail_failure_or_identity_change_keeps_validated_fast(
+    monkeypatch,
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    fast = _child_item("3333333333333333", "0x382a")
+    responses = {
+        (PARENT_EXT, "extended"): _parent_item(child_table=[{"childId": 42, "mode": MTD_MODE}]),
+        ("00382a", "rloc"): [fast, _child_item("4444444444444444", "0x382a")],
+    }
+    monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+    checkpoints = []
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [PARENT_EXT],
+        child_collection_policy="mode-aware",
+        children_fetch_detail=True,
+        children_expand_by_rloc=True,
+        on_pass_checkpoint=lambda results, _i, _t, label, pass_name: checkpoints.append(
+            (label, pass_name, [item["extAddress"] for item in results])
+        ),
+    )
+
+    record = outcome["childrenExpansion"]["results"][0]
+    assert record["status"] == "partial"
+    assert record["selectedPass"] == "fast"
+    assert record["reasonCode"] == "identity_changed"
+    assert record["extAddress"] == "3333333333333333"
+    assert outcome["items"][-1] == fast
+    assert checkpoints == [
+        (f"{RLOC_EXPANSION_PROGRESS_PREFIX}00382a", "fast", [PARENT_EXT, "3333333333333333"])
+    ]
+    assert [kwargs["types"] for _dest, kwargs in calls[1:]] == [
+        BASIC_DIAGNOSTIC_TLVS,
+        CHILD_MEDIUM_DIAGNOSTIC_TLVS,
+    ]
+    assert outcome["childrenExpansion"]["partial"] is True
+
+
+def test_expansion_unresolved_action_stops_later_children(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    responses = {
+        (PARENT_EXT, "extended"): _parent_item(
+            child_table=[
+                {"childId": 42, "mode": FTD_MODE},
+                {"childId": 43, "mode": FTD_MODE},
+            ]
+        ),
+        ("00382a", "rloc"): OTBRActionTimeoutError(
+            "timed out", action_id="a", status="active"
+        ),
+        ("00382b", "rloc"): _child_item("3333333333333333", "0x382b"),
+    }
+    monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+    progress = []
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [PARENT_EXT],
+        child_collection_policy="mode-aware",
+        children_expand_by_rloc=True,
+        on_progress=lambda idx, total, label, _elapsed, status: progress.append(
+            (idx, total, label, status)
+        ),
+    )
+
+    assert [dest for dest, _kwargs in calls] == [PARENT_EXT, "00382a"]
+    results = outcome["childrenExpansion"]["results"]
+    assert [(r["status"], r.get("reasonCode")) for r in results] == [
+        ("failed", None),
+        ("not_attempted", "unresolved_prior_action"),
+    ]
+    assert results[0]["attempts"] == 1
+    assert progress[-1] == (
+        2,
+        2,
+        f"{RLOC_EXPANSION_PROGRESS_PREFIX}00382b",
+        "not_attempted",
+    )
+
+
+def test_unresolved_base_action_prevents_any_expansion_action(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    responses = {
+        (PARENT_EXT, "extended"): _parent_item(child_table=[{"childId": 42, "mode": FTD_MODE}]),
+        (OTHER_ROUTER_EXT, "extended"): OTBRIndeterminateEnqueueError(
+            "indeterminate",
+            OTBRHTTPError(500, "Internal Server Error", "http://example.test/api/actions"),
+        ),
+    }
+    monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {"id": PARENT_EXT, "role": "router"},
+            {"id": OTHER_ROUTER_EXT, "role": "router"},
+        ],
+        children_expand_by_rloc=True,
+    )
+
+    assert [dest for dest, _kwargs in calls] == [PARENT_EXT, OTHER_ROUTER_EXT]
+    expansion = outcome["childrenExpansion"]
+    assert expansion["attemptedCount"] == 0
+    assert expansion["results"][0]["status"] == "not_attempted"
+    assert {issue["code"] for issue in expansion["issues"]} == {
+        "parent_unavailable",
+        "unresolved_prior_action",
+    }
+    assert expansion["partial"] is True
+
+
+def test_expansion_known_terminal_failure_advances_and_fail_fast_raises(
+    monkeypatch,
+) -> None:
+    def build(skip_on_failure):
+        client = OTBRRestApiClient(base_url="http://example.test")
+        calls = []
+        responses = {
+            (PARENT_EXT, "extended"): _parent_item(
+                child_table=[
+                    {"childId": 42, "mode": FTD_MODE},
+                    {"childId": 43, "mode": FTD_MODE},
+                ]
+            ),
+            ("00382a", "rloc"): OTBRActionFailedError(
+                "failed", action_id="a", status="failed"
+            ),
+            ("00382b", "rloc"): _child_item("3333333333333333", "0x382b"),
+        }
+        monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+        return client, calls
+
+    client, calls = build(True)
+    outcome = client.fetch_all_devices_diagnostics(
+        [PARENT_EXT],
+        child_collection_policy="mode-aware",
+        children_expand_by_rloc=True,
+    )
+    assert [dest for dest, _kwargs in calls] == [PARENT_EXT, "00382a", "00382a", "00382b"]
+    assert [r["status"] for r in outcome["childrenExpansion"]["results"]] == [
+        "failed",
+        "completed",
+    ]
+
+    client, calls = build(False)
+    with pytest.raises(OTBRActionFailedError):
+        client.fetch_all_devices_diagnostics(
+            [PARENT_EXT],
+            child_collection_policy="mode-aware",
+            children_expand_by_rloc=True,
+            skip_on_failure=False,
+        )
+    assert [dest for dest, _kwargs in calls] == [PARENT_EXT, "00382a", "00382a"]
+
+
+def test_expansion_disabled_passes_no_retry_and_custom_policy(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    failure = OTBRActionFailedError("failed", action_id="a", status="failed")
+    responses = {
+        (PARENT_EXT, "extended"): _parent_item(
+            child_table=[
+                {"childId": 42, "mode": MTD_MODE},
+                {"childId": 43, "mode": FTD_MODE},
+            ]
+        ),
+        ("00382b", "rloc"): failure,
+    }
+    monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [PARENT_EXT],
+        child_collection_policy="mode-aware",
+        children_fetch_fast=False,
+        children_fetch_detail=False,
+        child_retry_enabled=False,
+        children_expand_by_rloc=True,
+    )
+
+    results = outcome["childrenExpansion"]["results"]
+    assert [(r["status"], r.get("reasonCode")) for r in results] == [
+        ("skipped", "child_passes_disabled"),
+        ("failed", None),
+    ]
+    assert [dest for dest, _kwargs in calls] == [PARENT_EXT, "00382b"]
+    assert outcome["childrenExpansion"]["partial"] is True
+
+    custom_calls = []
+    responses = {
+        (PARENT_EXT, "extended"): _parent_item(child_table=[{"childId": 42, "mode": MTD_MODE}]),
+        ("00382a", "rloc"): [failure, _child_item("3333333333333333", "0x382a")],
+    }
+    monkeypatch.setattr(
+        client, "fetch_device_diagnostics", _rloc_fetch(responses, custom_calls)
+    )
+    outcome = client.fetch_all_devices_diagnostics(
+        [PARENT_EXT],
+        types=["extAddress", "rloc16", "mode"],
+        fallback_types=["extAddress", "rloc16"],
+        child_task_timeout=40,
+        children_expand_by_rloc=True,
+    )
+    assert [
+        (dest, kwargs["types"], kwargs["task_timeout"])
+        for dest, kwargs in custom_calls[1:]
+    ] == [
+        ("00382a", ["extAddress", "rloc16", "mode"], 40),
+        ("00382a", ["extAddress", "rloc16"], 40),
+    ]
+    record = outcome["childrenExpansion"]["results"][0]
+    assert record["policy"] == "legacy"
+    assert record["status"] == "partial"
+    assert record["fallbackRecovered"] is True
+
+
+def test_zero_child_expansion_is_complete_without_actions(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    responses = {(PARENT_EXT, "extended"): _parent_item(child_table=[])}
+    monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [PARENT_EXT], children_expand_by_rloc=True
+    )
+
+    assert len(calls) == 1
+    assert outcome["partial"] is False
+    assert outcome["childrenExpansion"] == {
+        "enabled": True,
+        "partial": False,
+        "parentCount": 1,
+        "targetCount": 0,
+        "attemptedCount": 0,
+        "completedCount": 0,
+        "coveredCount": 0,
+        "results": [],
+        "issues": [],
+    }
+
+
+def test_expansion_reads_raw_envelope_identity_without_rewriting(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+
+    def envelope(attributes):
+        return {"data": {"id": "d", "type": "networkDiagnostics", "attributes": attributes}}
+
+    child = envelope(_child_item("3333333333333333", "0x382a"))
+    responses = {
+        (PARENT_EXT, "extended"): envelope(_parent_item(child_table=[{"childId": 42, "mode": FTD_MODE}])),
+        ("00382a", "rloc"): child,
+    }
+    monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch(responses, calls))
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [PARENT_EXT],
+        child_collection_policy="mode-aware",
+        children_expand_by_rloc=True,
+        raw=True,
+    )
+
+    assert outcome["items"][-1] == child
+    assert outcome["childrenExpansion"]["completedCount"] == 1
+
+
+def test_expansion_requires_extended_base_destination_before_side_effects(
+    monkeypatch,
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    clear = MagicMock()
+    fetch = MagicMock()
+    monkeypatch.setattr(client, "delete_all_diagnostics", clear)
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    with pytest.raises(OTBRUsageError, match="extended"):
+        client.fetch_all_devices_diagnostics(
+            [PARENT_EXT],
+            destination_type=DestinationType.RLOC,
+            clear_diagnostics=True,
+            children_expand_by_rloc=True,
+        )
+    clear.assert_not_called()
+    fetch.assert_not_called()
+
+
+def test_rloc_missing_result_message_does_not_blame_fixed_upstream_bug(
+    monkeypatch,
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    monkeypatch.setattr(
+        client, "run_action", lambda *_args, **_kwargs: completed_action("action-9")
+    )
+
+    with pytest.raises(OTBRInvalidResponseError) as excinfo:
+        client.fetch_device_diagnostics("00382a", destination_type=DestinationType.RLOC)
+
+    message = str(excinfo.value)
+    assert "has no result relationship" in message
+    assert "destinationType='rloc'" in message
+    assert "Older OTBR builds may not" in message
+    assert "server bug" not in message

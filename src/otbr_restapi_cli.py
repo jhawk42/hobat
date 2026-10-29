@@ -359,6 +359,16 @@ def _add_diagnostics_commands(
     )
     _add_child_diagnostic_options(diagnostics_fetch_all)
     diagnostics_fetch_all.add_argument(
+        "--children-expand-by-rloc",
+        dest="children_expand_by_rloc",
+        action="store_true",
+        default=False,
+        help=(
+            "Expand child diagnostics from parent childTable using RLOC "
+            "destinations (default: disabled)"
+        ),
+    )
+    diagnostics_fetch_all.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
         help=f"Destination addressing mode (default: {DestinationType.EXTENDED})",
     )

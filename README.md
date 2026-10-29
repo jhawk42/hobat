@@ -238,6 +238,9 @@ PYTHONPATH=src python3 -m td_cli system device ping --address 2001:db8::1 --atte
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices list
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices fetch
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi diagnostics fetch-all
+# Opt-in: also query parent childTable entries by RLOC16 (adds mesh load)
+PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi diagnostics fetch-all \
+  --children-expand-by-rloc
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi topology
 
 # Home Assistant Matter Server snapshots

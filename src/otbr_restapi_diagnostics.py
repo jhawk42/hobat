@@ -13,9 +13,11 @@ from otbr_restapi_util import (
     CHILD_DIAGNOSTIC_TIMING_POLICY,
     DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
     DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
+    DestinationType,
     FULL_DIAGNOSTIC_TLVS,
     MINIMAL_DIAGNOSTIC_TLVS,
     RECOMMENDED_DIAGNOSTIC_TLVS,
+    RLOC_EXPANSION_PROGRESS_PREFIX,
     OTBRActionFailedError,
     OTBRActionTimeoutError,
     OTBRInvalidResponseError,
@@ -516,6 +518,12 @@ def _dispatch_diagnostics_fetch_all(
     finish: Callable[..., Any],
     output_path: str | Path | None,
 ) -> Any:
+    expand_by_rloc = bool(getattr(args, "children_expand_by_rloc", False))
+    if expand_by_rloc and args.destination_type != DestinationType.EXTENDED:
+        raise OTBRUsageError(
+            "--children-expand-by-rloc requires --destination-type "
+            f"{DestinationType.EXTENDED}"
+        )
     resolved_types = resolve_types(args)
     fallback_types = resolve_fallback_types(args)
     progressive_fallback = use_progressive_fallback(args)
@@ -579,16 +587,31 @@ def _dispatch_diagnostics_fetch_all(
             raw=raw_arg is True,
         )
 
-    def _on_checkpoint(results, _idx, _total, _device_id, _status):
-        _write_checkpoint(results, "device")
+    def _on_checkpoint(results, _idx, _total, device_id, _status):
+        _write_checkpoint(
+            results,
+            "expansion"
+            if isinstance(device_id, str)
+            and device_id.startswith(RLOC_EXPANSION_PROGRESS_PREFIX)
+            else "device",
+        )
 
     def _on_pass_checkpoint(
-        results, _idx, _total, _device_id, pass_name
+        results, _idx, _total, device_id, pass_name
     ):
-        _write_checkpoint(results, f"pass:{pass_name}")
+        prefix = (
+            "expansion-"
+            if isinstance(device_id, str)
+            and device_id.startswith(RLOC_EXPANSION_PROGRESS_PREFIX)
+            else ""
+        )
+        _write_checkpoint(results, f"{prefix}pass:{pass_name}")
 
     progress_fn = make_progress_fn(
         len(selected_devices), not getattr(args, "no_progress", False)
+    )
+    expansion_kwargs = (
+        {"children_expand_by_rloc": True} if expand_by_rloc else {}
     )
     outcome = client.fetch_all_devices_diagnostics(
         selected_devices,
@@ -611,8 +634,13 @@ def _dispatch_diagnostics_fetch_all(
         on_progress=progress_fn,
         on_checkpoint=_on_checkpoint,
         on_pass_checkpoint=_on_pass_checkpoint,
+        **expansion_kwargs,
     )
     guard_affected = _has_unresolved_iid_skip(outcome)
+    expansion = outcome.get("childrenExpansion")
+    expansion_incomplete = isinstance(expansion, dict) and bool(
+        expansion.get("partial")
+    )
     if output_path is not None:
         _write_guard_affected_outcome(
             outcome,
@@ -639,11 +667,12 @@ def _dispatch_diagnostics_fetch_all(
             payload = convert_keys_to_camel_case(diagnostics)
         else:
             payload = convert_keys_to_camel_case(outcome)
-    preserve_prior_dataset = guard_affected and not diagnostics
+    preserve_prior_dataset = (guard_affected or expansion_incomplete) and not diagnostics
     if preserve_prior_dataset:
         logging.warning(
             "OTBR REST diagnostics fetch-all produced no diagnostics for an "
-            "unresolved-IID skip; retaining the prior dataset at %s",
+            "%s; retaining the prior dataset at %s",
+            "unresolved-IID skip" if guard_affected else "incomplete child RLOC expansion",
             output_path if output_path is not None else "(no output path resolved)",
         )
     return finish(payload, write=not preserve_prior_dataset)

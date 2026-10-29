@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 import otbr_restapi_cli as cli_module
 
@@ -48,6 +48,24 @@ class OTBRRestApiCLIIncompleteHelpTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertIn("usage:", out)
                 self.assertIn(expected, out)
+
+    def test_children_expand_by_rloc_is_diagnostics_fetch_all_only(self) -> None:
+        parser = cli_module.build_parser()
+        default = parser.parse_args(["diagnostics", "fetch-all"])
+        enabled = parser.parse_args(
+            ["diagnostics", "fetch-all", "--children-expand-by-rloc"]
+        )
+        self.assertIs(default.children_expand_by_rloc, False)
+        self.assertIs(enabled.children_expand_by_rloc, True)
+
+        rc, out = self._run_and_capture(["diagnostics", "fetch-all", "--help"])
+        self.assertEqual(rc, 0)
+        self.assertIn("--children-expand-by-rloc", out)
+        for argv in (["topology"], ["mesh-diagnostics", "fetch-all"]):
+            with self.subTest(argv=argv):
+                with io.StringIO() as err, redirect_stderr(err):
+                    with self.assertRaises(SystemExit):
+                        parser.parse_args([*argv, "--children-expand-by-rloc"])
 
 
 if __name__ == "__main__":

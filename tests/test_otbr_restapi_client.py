@@ -117,6 +117,30 @@ class OTBRClientTests(unittest.TestCase):
             attributes["types"], ["extAddress", "eui", "threadVersion", "mleCounters"]
         )
 
+    def test_child_rloc_diagnostic_task_posts_six_char_rloc_destination(self) -> None:
+        payload = b'{"data":[{"id":"action-1","type":"getNetworkDiagnosticTask","attributes":{}}]}'
+
+        with patch.object(
+            client_module,
+            "urlopen",
+            return_value=FakeResponse(payload, "application/vnd.api+json"),
+        ) as urlopen:
+            self.client.enqueue_get_network_diagnostic_task(
+                destination="00382a",
+                destination_type="rloc",
+                types=["extAddress", "rloc16"],
+                timeout=30,
+            )
+
+        attributes = json.loads(urlopen.call_args.args[0].data)["data"][0]["attributes"]
+        self.assertEqual(attributes["destination"], "00382a")
+        self.assertEqual(attributes["destinationType"], "rloc")
+        self.assertEqual(attributes["types"], ["extAddress", "rloc16"])
+        with self.assertRaises(client_module.OTBRUsageError):
+            self.client.enqueue_get_network_diagnostic_task(
+                destination="382a", destination_type="rloc", types=["extAddress"]
+            )
+
     def test_legacy_network_diagnostic_type_names_remain_input_only(self) -> None:
         payload = b'{"data":[{"id":"action-1","type":"getNetworkDiagnosticTask","attributes":{}}]}'
 

@@ -407,6 +407,7 @@ diagnostics fetch-all [--device-ids ID ...]
                       [--preset {recommended,full,minimal,basic}]
                       [--task-timeout SECS]
                       [--destination-type TYPE]
+                      [--children-expand-by-rloc]
                       [--no-update-devices]
                       [--no-fallback]
                       [--fallback-preset {medium,minimal,basic}]
@@ -426,6 +427,7 @@ diagnostics fetch-all [--device-ids ID ...]
 | `--children-fetch-fast` / `--children-fetch-fast-no` | fast enabled | Enable or disable MTD fast TLVs 0, 1, 2, 8 |
 | `--children-fetch-detail` / `--children-fetch-detail-no` | detail disabled | Enable or disable optional MTD detail TLVs 0, 1, 2, 8, 9 |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
+| `--children-expand-by-rloc` | off | After the extended-address sweep, query children listed in selected parents' `childTable` by RLOC16; requires `--destination-type extended` |
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
 | `--no-fallback` | off | Disable additional diagnostic actions; known children retain their selected initial sets, with one attempt per enabled pass |
 | `--no-basic-fallback` | off | Suppress only the final basic tier for routers and unknown-mode children; does not suppress MTD fast or its same-set retry |
@@ -476,9 +478,67 @@ with those options. `--no-basic-fallback` applies only to the final tier of
 router and unknown-mode legacy progression; `--no-fallback` disables retries
 but does not broaden known-child initial TLVs or disable the fast pass.
 
+##### Child expansion by RLOC (`--children-expand-by-rloc`)
+
+Off by default. When enabled, the normal extended-address sweep runs first
+and requests `childTable` from every selected non-child device, adding it to
+both the primary and fallback TLV lists only when missing (TLV 16 counts as
+present). Global presets are not changed. After the sweep, each child entry
+from this run's parent results is turned into a six-character RLOC
+destination: `(parentRloc16 & 0xFC00) | childId`, formatted as `00` plus the
+four hex digits. For example, parent `0x9400` with child IDs 53 and 14 gives
+`009435` and `00940e`, and parent `0x3800` with child 42 gives `00382a`.
+
+- **Scope:** expansion is one level deep and uses only the selected parents'
+  current-run tables. It does not read cached data, does not run another
+  discovery pass, and never expands a child's own `childTable`. Parents must
+  report a router RLOC16 (low ten bits zero, router ID 0–62). Child IDs must
+  be integers 1–511. Booleans, floats, and malformed strings are rejected.
+- **Coverage:** targets are deduplicated by child RLOC16. A target is skipped
+  as `covered` when the base sweep already returned a valid extended address
+  with that RLOC16. Duplicate entries with different parent identity or child
+  mode are recorded as `conflict` and are not queried.
+- **Policies:** the child's `childTable` mode selects the existing mode-aware
+  passes (MTD fast and optional detail, FTD medium) with child timing, retry,
+  and disabled-pass rules. Missing or conflicting mode uses the legacy child
+  progression (`legacy-unknown-mode`). `--types`, `--preset`, and
+  `--fallback-preset` use the same legacy/custom request lists as
+  extended-address children.
+- **Identity checks:** a response is published or checkpointed only if it has
+  a usable `extAddress`, its `rloc16` matches the target, and its extended
+  address is not already in the results. A later pass must return the same
+  extended address as the accepted pass. If a check fails, no further attempt
+  is made for that target, and earlier validated evidence is kept.
+- **Safety:** an unresolved or indeterminate action (timeout, transport or
+  HTTP error, ambiguous enqueue) in the base sweep or during expansion stops
+  all later expansion actions; the remaining targets are recorded as
+  `not_attempted`. Known terminal action failures and invalid responses are
+  recorded for that target and expansion continues with the next one.
+- **Outcome:** the structured outcome gains a `childrenExpansion` object with
+  `enabled`, `partial`, `parentCount`, `targetCount`, `attemptedCount`,
+  `completedCount`, `coveredCount`, per-target `results` (destination,
+  `rloc16`, parent identity, `childId`, mode, policy, status, and the validated
+  `extAddress` when known), and parent/entry `issues`. Base `deviceResults`
+  and counters keep their meaning. An incomplete expansion makes the overall
+  outcome `partial`. Validated child items are appended to `items`. Progress
+  and checkpoint labels use `rloc:<destination>`. If expansion is incomplete
+  and no diagnostic items are usable, the previous dataset, network
+  companion, and checkpoint are retained while the outcome is still written.
+- **Compatibility and load:** RLOC addressing depends on an OTBR REST build
+  that resolves non-extended destinations correctly. It has been verified
+  only against a user-built Docker image; older servers may return no result
+  or a wrong device, which is reported as `invalid_response`. RLOC16 values
+  can become stale if a child reattaches between the parent read and the
+  child request. Each target adds up to one action per enabled pass plus
+  retries, so mesh load and runtime grow with the number of children.
+
 Examples:
 
 ```bash
+# Opt-in child expansion by RLOC after the normal extended-address sweep
+PYTHONPATH=src python3 -m td_cli otbr-restapi diagnostics fetch-all \
+    --children-expand-by-rloc
+
 # Detail-only MTD collection; FTD medium collection remains enabled
 PYTHONPATH=src python3 -m td_cli otbr-restapi diagnostics fetch-all \
     --children-fetch-fast-no --children-fetch-detail
