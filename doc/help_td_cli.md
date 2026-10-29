@@ -94,8 +94,8 @@ and status 2. For example:
 Branch on the exit status rather than grepping output. The scripts log the
 JSON directly for diagnostics; consumers can extract a failed probe's reason
 with `jq -er '.probe.reason'`. Stable failure reasons include `unreachable`,
-`docker-unavailable`, `executable-unavailable`, `command-failed`, and
-`invalid-response`; errors use `invalid-configuration` or
+`docker-unavailable`, `executable-unavailable`, `command-failed`,
+`invalid-response`, `detached`, and `disabled`; errors use `invalid-configuration` or
 `probe-execution-error`. Preflights reject invalid configured ports instead
 of silently falling back to defaults. `TD_OTBR_CONTAINER_USE` must be `0` or
 `1`, and a configured container name must not be blank when container use
@@ -103,11 +103,20 @@ is enabled. Configuration/probe error logs omit endpoint and exception values
 that might contain credentials.
 
 These are readiness checks, not mesh-health checks or guarantees that every
-collection command will succeed. CLI checks `ot-ctl state` (including
-`disabled`/`detached`); REST reads node state; HA Matter opens a WebSocket and
-validates its server-info handshake. They do not run diagnostics or mDNS
-discovery. mDNS and system have no equivalent endpoint preflight and are not
-accepted sources.
+collection command will succeed. CLI checks `ot-ctl state`, accepting a single
+role with an optional trailing `Done` line. Only `child`, `router`, and `leader`
+pass. `detached` and `disabled` fail with exit status 1 and retain the detected
+role in `probe.reason` for operator diagnostics, for example:
+
+```json
+{"source":"otbr-cli","state":"probe-failed","probe":{"state":"failed","reason":"detached"}}
+```
+
+The shared dashboard probe uses the same role checks and failure reasons;
+cached evidence still bypasses live probing. REST reads node state; HA Matter
+opens a WebSocket and validates its server-info handshake. They do not run
+diagnostics or mDNS discovery. mDNS and system have no equivalent endpoint
+preflight and are not accepted sources.
 
 The local full and quick collection scripts probe each supported source once,
 immediately before its collection block. Unavailable sources are skipped;

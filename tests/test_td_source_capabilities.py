@@ -225,16 +225,45 @@ def test_source_probe_rejects_output_and_secret_overrides(monkeypatch, capsys, o
     probe.assert_not_called()
 
 
-@pytest.mark.parametrize("state", ("child", "router", "leader", "detached", "disabled"))
-def test_otbr_cli_probe_accepts_documented_states(monkeypatch: pytest.MonkeyPatch, state: str) -> None:
+@pytest.mark.parametrize("state", ("child", "router", "leader"))
+@pytest.mark.parametrize("suffix", ("\n", "\nDone\n", "\r\nDone\r\n"))
+@pytest.mark.parametrize("container_use", ("0", "1"))
+def test_otbr_cli_probe_accepts_active_states(
+    monkeypatch: pytest.MonkeyPatch, state: str, suffix: str, container_use: str
+) -> None:
+    monkeypatch.setenv("TD_OTBR_CONTAINER_USE", container_use)
+    monkeypatch.setattr(td_source_capabilities.shutil, "which", lambda name: "/usr/sbin/ot-ctl")
+    monkeypatch.setattr(
+        td_source_capabilities.subprocess,
+        "run",
+        lambda *args, **kwargs: MagicMock(returncode=0, stdout=f"{state}{suffix}".encode()),
+    )
+
+    assert asyncio.run(td_source_capabilities._probe_otbr_cli()) is None
+
+
+@pytest.mark.parametrize("state", ("detached", "disabled"))
+@pytest.mark.parametrize("suffix", ("\n", "\nDone\n", "\r\nDone\r\n"))
+def test_otbr_cli_inactive_state_is_reported_in_json_and_capabilities(
+    monkeypatch, capsys, caplog, tmp_path, state, suffix
+):
     monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "1")
     monkeypatch.setattr(
         td_source_capabilities.subprocess,
         "run",
-        lambda *args, **kwargs: MagicMock(returncode=0, stdout=f"{state}\n".encode()),
+        lambda *args, **kwargs: MagicMock(returncode=0, stdout=f"{state}{suffix}".encode()),
     )
 
-    assert asyncio.run(td_source_capabilities._probe_otbr_cli()) is None
+    assert td_cli.main(["source-probe", "--source", "otbr-cli", "--json"]) == 1
+    expected_probe = {"state": "failed", "reason": state}
+    assert json.loads(capsys.readouterr().out) == {
+        "source": "otbr-cli", "state": "probe-failed", "probe": expected_probe,
+    }
+    assert f"Source unavailable: otbr-cli ({state})." in caplog.text
+    service = SourceCapabilityService(probes={"otbr-cli": td_source_capabilities._probe_otbr_cli})
+    result = asyncio.run(service.capabilities(tmp_path))
+    assert result["sources"]["otbr-cli"]["state"] == "probe-failed"
+    assert result["sources"]["otbr-cli"]["probe"] == expected_probe
 
 
 @pytest.mark.parametrize(
@@ -244,6 +273,14 @@ def test_otbr_cli_probe_accepts_documented_states(monkeypatch: pytest.MonkeyPatc
         (1, b"", b"failed to connect to the docker API at unix:///var/run/docker.sock", "docker-unavailable"),
         (0, b"", b"", "invalid-response"),
         (0, b"Error\n", b"", "invalid-response"),
+        (0, b"Done\n", b"", "invalid-response"),
+        (0, b"unknown\nDone\n", b"", "invalid-response"),
+        (0, b"router\nError 1: Failed\nDone\n", b"", "invalid-response"),
+        (0, b"router\nleader\nDone\n", b"", "invalid-response"),
+        (0, b"router\nDone\nDone\n", b"", "invalid-response"),
+        (0, b"Error 1: Failed\nrouter\nDone\n", b"", "invalid-response"),
+        (0, b"detached\ndisabled\nDone\n", b"", "invalid-response"),
+        (0, b"router\nDone\nunexpected\n", b"", "invalid-response"),
     ),
 )
 def test_otbr_cli_probe_rejects_failed_or_invalid_responses(

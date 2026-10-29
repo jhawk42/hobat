@@ -77,7 +77,8 @@ from td_unified_dataset import UnifiedDatasetError, inspect_unified_cache
 PROBE_TIMEOUT_SECONDS = 2.0
 PROBE_TTL_SECONDS = 60.0
 ALWAYS_AVAILABLE_SOURCES = frozenset({"mdns", "system"})
-OTBR_CLI_STATES = frozenset({"child", "router", "leader", "detached", "disabled"})
+OTBR_CLI_STATES = frozenset({"child", "router", "leader"})
+OTBR_CLI_INACTIVE_STATES = frozenset({"detached", "disabled"})
 
 SOURCE_FILES = {
     "otbr-cli": (
@@ -182,8 +183,15 @@ async def _probe_otbr_cli() -> str | None:
         if use_container and ("docker api" in stderr or "docker.sock" in stderr):
             return "docker-unavailable"
         return "command-failed"
-    state = completed.stdout.decode(errors="replace").strip().lower()
-    return None if state in OTBR_CLI_STATES else "invalid-response"
+    lines = completed.stdout.decode(errors="replace").strip().lower().splitlines()
+    if lines and lines[-1].strip() == "done":
+        lines.pop()
+    if len(lines) != 1:
+        return "invalid-response"
+    state = lines[0].strip()
+    if state in OTBR_CLI_STATES:
+        return None
+    return state if state in OTBR_CLI_INACTIVE_STATES else "invalid-response"
 
 
 async def _probe_otbr_restapi() -> str | None:
