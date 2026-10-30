@@ -41,6 +41,7 @@ def process(directory, dataset_id, store=None, **kwargs):
 @pytest.mark.parametrize("builder_contract", [
     "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
     "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
+    "unified-assembly-v9",
 ])
 def test_original_samples_are_scoped_stable_and_reopenable(
     tmp_path, dataset_id, builder_contract, monkeypatch,
@@ -413,6 +414,111 @@ def test_failed_original_table_attempt_truthfully_reduces_runtime_health_coverag
     assert all(value["state"] != "sufficient" for value in result.assessment.coverage["observedPillars"].values())
 
 
+def test_ping_reachable_router_without_tables_is_expected_not_a_timeout(tmp_path):
+    _seed(tmp_path, "otbr_cli_unified")
+    silent = {"rloc16": "0x4400", "extAddress": "8899aabbccddeeff", "childTable": [],
+              "childTableCount": 0, "error": {"type": "ResponseTimeout"},
+              "tableAttempt": {"status": "timeout"}, "ping": {"status": "reply"},
+              "targetIdentity": {"rloc16": "0x4400", "extAddress": "8899aabbccddeeff"},
+              "sourceObservedAt": SOURCE_TIME}
+    _save(tmp_path, "td-otbr-cli-meshdiag-router-childtables.json", [
+        {"rloc16": "0x1000", "extAddress": "0011223344556677", "childTable": [],
+         "tableAttempt": {"status": "success"}, "sourceObservedAt": SOURCE_TIME},
+        silent,
+    ])
+    _save(tmp_path, "td-otbr-cli-networkdiag-fetch-all.json", [
+        {"extAddress": "0011223344556677", "rloc16": "0x1000", "deviceLabel": "router",
+         "sourceObservedAt": SOURCE_TIME},
+        {"extAddress": "8899aabbccddeeff", "rloc16": "0x4400", "children": [],
+         "networkDiagnosticStatus": "responded", "sourceObservedAt": SOURCE_TIME},
+    ])
+    report = build_unified_dataset(tmp_path, "otbr_cli_unified")
+    assert report["healthState"] == "complete"
+    result = process(tmp_path, "otbr_cli_unified")
+    assert result.observation.completeness.value == "complete"
+    assert result.assessment.reproduction_context["unifiedHealth"]["absenceWitness"] is not None
+    assert result.assessment.coverage["meshdiagTablesNotProvided"] == 1
+    assert result.assessment.coverage["diagnosticTimeoutDeviceCount"] == 0
+    flags = {(metric.device_id, metric.metric) for metric in result.observation.metrics}
+    assert ("extaddr:8899aabbccddeeff", "meshdiagTableNotProvided") in flags
+    assert not any(metric == "diagnosticTimeout" for _, metric in flags)
+
+    # Without a ping reply the same table gap stays a degraded timeout.
+    _save(tmp_path, "td-otbr-cli-meshdiag-router-childtables.json", [
+        {**silent, "ping": {"status": "no-reply"}},
+    ])
+    build_unified_dataset(tmp_path, "otbr_cli_unified")
+    degraded = process(tmp_path, "otbr_cli_unified")
+    assert degraded.observation.completeness.value == "degraded"
+    assert degraded.assessment.coverage["meshdiagTablesNotProvided"] == 0
+    assert degraded.assessment.coverage["diagnosticTimeoutDeviceCount"] == 1
+
+    # Uncovered children reject the exemption, so the timeout finding remains.
+    _save(tmp_path, "td-otbr-cli-meshdiag-router-childtables.json", [
+        {"rloc16": "0x1000", "extAddress": "0011223344556677", "childTable": [],
+         "tableAttempt": {"status": "success"}, "sourceObservedAt": SOURCE_TIME},
+        silent,
+    ])
+    _save(tmp_path, "td-otbr-cli-networkdiag-fetch-all.json", [
+        {"extAddress": "0011223344556677", "rloc16": "0x1000", "deviceLabel": "router",
+         "sourceObservedAt": SOURCE_TIME},
+        {"extAddress": "8899aabbccddeeff", "rloc16": "0x4400", "children": [],
+         "networkDiagnosticStatus": "no-response", "sourceObservedAt": SOURCE_TIME},
+    ])
+    assert "uncovered-children:0x4400" in build_unified_dataset(
+        tmp_path, "otbr_cli_unified")["coverage"]["healthReasons"]
+    uncovered = process(tmp_path, "otbr_cli_unified")
+    assert uncovered.assessment.coverage["meshdiagTablesNotProvided"] == 0
+    assert uncovered.assessment.coverage["diagnosticTimeoutDeviceCount"] == 1
+
+
+def test_non_unified_datasets_keep_meshdiag_timeouts():
+    from td_health_processor import _normalize_samples
+    dataset = load_health_manifest().dataset("otbr_cli_topology")
+    filename = "td-otbr-cli-meshdiag-router-childtables.json"
+    assert filename in dataset.files
+    record = {"rloc16": "0x4400", "extAddress": "8899aabbccddeeff", "childTable": [],
+              "error": {"type": "ResponseTimeout"}, "tableAttempt": {"status": "timeout"},
+              "ping": {"status": "reply"},
+              "targetIdentity": {"rloc16": "0x4400", "extAddress": "8899aabbccddeeff"}}
+    _, _, metrics, _, _ = _normalize_samples(replace(dataset, files=(filename,)), {filename: [record]})
+    assert {metric.metric for metric in metrics} == {"diagnosticTimeout"}
+
+
+def test_assembly_contract_upgrade_creates_a_distinct_observation(tmp_path, monkeypatch):
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    _seed(tmp_path, "otbr_cli_unified")
+    monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", "unified-assembly-v8")
+    build_unified_dataset(tmp_path, "otbr_cli_unified")
+    before = process(tmp_path, "otbr_cli_unified", store)
+    monkeypatch.undo()
+    build_unified_dataset(tmp_path, "otbr_cli_unified")
+    after = process(tmp_path, "otbr_cli_unified", store)
+    assert after.observation.observation_id != before.observation.observation_id
+    assert after.observation.source_set_digest == before.observation.source_set_digest
+    with closing(store._connect()) as connection:
+        for result in (before, after):
+            observation, _ = store._endpoint(connection, result.assessment.assessment_id)
+            assert observation.observation_id == result.observation.observation_id
+
+
+def test_unified_comparison_requires_matching_current_evaluator(tmp_path):
+    from td_health_comparison import derive_comparison, source_roles_for_dataset
+    collection(tmp_path, "otbr_cli_unified", 1, positive=True)
+    before = process(tmp_path, "otbr_cli_unified")
+    collection(tmp_path, "otbr_cli_unified", 2)
+    after = process(tmp_path, "otbr_cli_unified")
+    roles = source_roles_for_dataset(load_health_manifest().dataset("otbr_cli_unified"))
+    assert after.assessment.evaluator_version == "snapshot-v16"
+    for version in ("snapshot-v15", "snapshot-v16"):
+        legacy = replace(before.assessment, evaluator_version="snapshot-v15")
+        after_assessment = replace(after.assessment, evaluator_version=version)
+        interval, _ = derive_comparison(
+            (before.observation, legacy), (after.observation, after_assessment), source_roles=roles,
+        )
+        assert not interval.compatibility.comparable
+
+
 @pytest.mark.parametrize("dataset_id", ["otbr_cli_unified", "otbr_restapi_unified"])
 def test_missing_required_original_needs_explicit_partial_build_and_processing(tmp_path, dataset_id):
     _seed(tmp_path, dataset_id)
@@ -481,7 +587,7 @@ def test_cli_and_health_api_expose_the_same_explicit_qualified_profiles(tmp_path
     assert result.returncode == 0, result.stderr
     document = json.loads(result.stdout)
     assert document["datasetId"] == dataset_id
-    assert document["evaluatorVersion"] == "snapshot-v15"
+    assert document["evaluatorVersion"] == "snapshot-v16"
     assert not (tmp_path / "hobat_v1.db").exists()
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     persisted = process(tmp_path, dataset_id, store)

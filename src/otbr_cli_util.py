@@ -337,6 +337,70 @@ def build_meshdiag_ambiguous_result(
     return record
 
 
+# Collector (snake_case) and persisted (camelCase) per-router table fields.
+_MESHDIAG_TABLE_FIELDS = (
+    ("router_neighbor_table", "router_neighbor_table_count"),
+    ("router_child_table", "router_child_table_count"),
+    ("router_child_ip6_table", "router_child_ip6_table_count"),
+    ("routerNeighbors", "routerNeighborsCount"),
+    ("childTable", "childTableCount"),
+    ("childIp6Table", "childIp6TableCount"),
+)
+
+
+def classify_meshdiag_router_table(record: Any) -> str:
+    """Classify one per-router meshdiag table result.
+
+    Returns ``answered``, ``not-provided`` (table timeout/error from a router that
+    replied to the fallback ping; contributes zero entries), ``unanswered``, or
+    ``legacy`` when no table-attempt evidence exists.
+    """
+    if not isinstance(record, dict):
+        return "unanswered"
+    attempt = record.get("tableAttempt", record.get("table_attempt"))
+    if attempt is None:
+        return "legacy"
+    if not isinstance(attempt, dict):
+        return "unanswered"
+    status = attempt.get("status")
+    if status == "success":
+        return "answered"
+    if status not in {"timeout", "error"}:
+        return "unanswered"
+    ping = record.get("ping")
+    identity = record.get("targetIdentity", record.get("target_identity"))
+    if not isinstance(ping, dict) or ping.get("status") != "reply" or not isinstance(identity, dict):
+        return "unanswered"
+    if canonical_router_rloc16(identity.get("rloc16")) is None:
+        return "unanswered"
+    for table_key, count_key in _MESHDIAG_TABLE_FIELDS:
+        table = record.get(table_key)
+        if table is not None and (not isinstance(table, list) or table):
+            return "unanswered"
+        count = record.get(count_key)
+        if count not in (None, 0) or isinstance(count, bool):
+            return "unanswered"
+    return "not-provided"
+
+
+def meshdiag_router_table_summary(records: list[Any]) -> dict[str, Any]:
+    """Summarize per-router classifications and the at-least-one-answered guard."""
+    classes = [classify_meshdiag_router_table(record) for record in records]
+    not_provided = [
+        canonical_router_rloc16(
+            (record.get("targetIdentity") or record.get("target_identity") or {}).get("rloc16")
+        )
+        for record, kind in zip(records, classes) if kind == "not-provided"
+    ]
+    return {
+        "classes": classes,
+        "answered": classes.count("answered"),
+        "notProvided": not_provided,
+        "unanswered": classes.count("unanswered"),
+        "guardPassed": "answered" in classes,
+    }
+
+
 def meshdiag_collection_outcome(results: list[dict[str, Any]]) -> CollectionWriteOutcome:
     if any("table_attempt" not in record for record in results):
         has_failures = any("_error" in record for record in results)
@@ -347,13 +411,18 @@ def meshdiag_collection_outcome(results: list[dict[str, Any]]) -> CollectionWrit
             if has_failures
             else CollectionWriteOutcome.complete()
         )
-    successful = [
-        record for record in results
-        if record.get("table_attempt", {}).get("status") == "success"
-    ]
-    if len(successful) == len(results):
+    if not results:
         return CollectionWriteOutcome.complete()
-    return CollectionWriteOutcome.partial(has_usable_data=bool(successful))
+    summary = meshdiag_router_table_summary(results)
+    if summary["unanswered"] == 0 and summary["guardPassed"]:
+        if summary["notProvided"]:
+            logging.info(
+                "meshdiag routers did not provide tables (ping reply; expected) count=%d routers=%s",
+                len(summary["notProvided"]),
+                ",".join(str(rloc16) for rloc16 in summary["notProvided"]),
+            )
+        return CollectionWriteOutcome.complete()
+    return CollectionWriteOutcome.partial(has_usable_data=summary["answered"] > 0)
 
 
 def build_timeout_error_record(

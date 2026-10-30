@@ -133,6 +133,12 @@ address is not independently promoted to a Thread identity. No collector or
 undeclared prefix lookup is needed. Explicit builds upgrade unchanged older
 generations; coherent v2-v7 products remain readable.
 
+Assembly contract `unified-assembly-v9` changes only coverage: OTBR CLI
+meshdiag routers that reply to ping but do not provide tables are expected and
+listed under `coverage.tablesNotProvided` (see
+[Thread network health](thread_network_health.md)). Derived rows are unchanged;
+coherent v2-v8 products remain readable.
+
 Each array item is the complete deduplicated service record, with its own
 `_unifiedRecordId`, original scope, capture metadata, service properties and
 fabric/node advertisement identity. Device fields and identities are unchanged.

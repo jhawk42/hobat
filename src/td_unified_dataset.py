@@ -27,7 +27,8 @@ from merge_policy_mdns import is_matter_operational_mdns_record, merge_mdns_reco
 from td_const import (
     HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME, HA_MATTER_WS_SERVER_INFO_FILENAME,
     HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME,
-    OTBR_CLI_BBR_FILENAME, OTBR_RESTAPI_ACTIONS_LIST_FILENAME,
+    OTBR_CLI_BBR_FILENAME, OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME, OTBR_RESTAPI_ACTIONS_LIST_FILENAME,
     TD_DATA_DIR_ARG_HELP, UNIFIED_FILENAMES,
 )
 from td_dataset_catalog import (
@@ -39,11 +40,12 @@ from td_device_fields import (
 )
 from td_network_identity import canonical_ext_pan_id
 from td_record_merge import values_equivalent
+from otbr_cli_util import canonical_router_rloc16, meshdiag_router_table_summary
 from util_data import network_scope_path, resolve_data_dir
 
 
 CONTRACT_VERSION = "unified-v1"
-BUILDER_CONTRACT = "unified-assembly-v8"
+BUILDER_CONTRACT = "unified-assembly-v9"
 _NETWORK = re.compile(r"extpan:[0-9a-f]{16}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -202,6 +204,31 @@ def _record_scope(record: dict, file_scope: str | None) -> str | None:
             raise UnifiedDatasetError("Record identity contradicts its observed scope")
         return observed
     return file_scope
+
+
+_FETCH_ALL_FILE = OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+_TOPOLOGY_FILE = OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME
+_CHILD_COVERAGE_FILES = frozenset({_FETCH_ALL_FILE, _TOPOLOGY_FILE})
+
+
+def _single_router_row(rows: Any, rloc16: str) -> dict | None:
+    if not isinstance(rows, list):
+        return None
+    matches = [row for row in rows if isinstance(row, dict)
+               and canonical_router_rloc16(row.get("rloc16")) == rloc16]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _children_covered(rloc16: str, payloads: dict[str, list]) -> bool:
+    """A not-provided router's children must be witnessed by fetch-all or topology."""
+    row = _single_router_row(payloads.get(_FETCH_ALL_FILE), rloc16)
+    if (row is not None and "error" not in row and "_error" not in row
+            and isinstance(row.get("children"), list)):
+        status = row.get("networkDiagnosticStatus")
+        if status == "responded" or (status is None and row.get("tlvResponseValues")):
+            return True
+    row = _single_router_row(payloads.get(_TOPOLOGY_FILE), rloc16)
+    return row is not None and isinstance(row.get("children"), list)
 
 
 def _extract(item: dict, payload: Any) -> list[dict]:
@@ -728,7 +755,8 @@ def read_generation(data_dir: Path, entry: dict, *, verify_inputs: bool = False,
     if "builderContract" in report:
         if report["builderContract"] not in {
             "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
-            "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", BUILDER_CONTRACT,
+            "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
+            BUILDER_CONTRACT,
         }:
             raise UnifiedDatasetError("Unsupported Unified assembly contract")
         generation_contract["builderContract"] = report["builderContract"]
@@ -1045,6 +1073,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
     if ha_source:
         from ha_matter_ws_unified import is_thread_record, validate_canonical_rows
     unresolved_native = []
+    tables_not_provided: list[dict[str, str]] = []
+    child_coverage_payloads: dict[str, list] = {}
     usable = len(composition["dependency_reports"]) if composition else 0
     for item in ([] if composition else recipe["inputs"]):
         filename = item["file"]
@@ -1094,9 +1124,18 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
         rows = _extract(item, payload)
         if ha_source:
             validate_canonical_rows(rows)
-        if any(isinstance(row.get("tableAttempt"), dict)
-               and row["tableAttempt"].get("status") != "success" for row in rows):
-            health_reasons.append(f"incomplete-table-evidence:{filename}")
+        if any(isinstance(row, dict) and "tableAttempt" in row for row in rows):
+            table_summary = meshdiag_router_table_summary(rows)
+            if table_summary["unanswered"]:
+                health_reasons.append(f"incomplete-table-evidence:{filename}")
+            if table_summary["notProvided"] and not table_summary["guardPassed"]:
+                health_reasons.append(f"no-answered-router-table:{filename}")
+            elif table_summary["notProvided"]:
+                tables_not_provided.extend(
+                    {"file": filename, "rloc16": rloc16} for rloc16 in table_summary["notProvided"]
+                )
+        if filename in _CHILD_COVERAGE_FILES:
+            child_coverage_payloads[filename] = rows
         by_scope: dict[str | None, list[dict]] = {}
         for record in rows:
             if ha_source:
@@ -1141,6 +1180,13 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
     if ha_source:
         from ha_matter_ws_unified import assess_cached_outcomes
         health_reasons.extend(assess_cached_outcomes(ha_payloads, inputs))
+    uncovered = sorted({item["rloc16"] for item in tables_not_provided
+                        if not _children_covered(item["rloc16"], child_coverage_payloads)})
+    health_reasons.extend(f"uncovered-children:{rloc16}" for rloc16 in uncovered)
+    tables_not_provided = sorted(
+        (item for item in tables_not_provided if item["rloc16"] not in uncovered),
+        key=lambda item: (item["file"], item["rloc16"]),
+    )
     observed_networks = {scope for scope, _, _ in sources if scope is not None}
     observed_networks.update(identity for identity, _, _ in identities)
     if network is not None and network[7:] not in observed_networks:
@@ -1243,7 +1289,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
         "sourceSetDigest": source_set_digest, "observedAt": observed_at,
         "fieldSources": field_sources, "recordSources": record_sources,
         "coverage": {"missingRequired": missing, "missingOptional": missing_optional,
-                     "healthReasons": health_reasons},
+                     "healthReasons": health_reasons,
+                     **({"tablesNotProvided": tables_not_provided} if tables_not_provided else {})},
         "excluded": ([OTBR_RESTAPI_ACTIONS_LIST_FILENAME] if entry["source"] == "otbr-restapi" else
                      [HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME, HA_MATTER_WS_SERVER_INFO_FILENAME]
                      if ha_source else []),

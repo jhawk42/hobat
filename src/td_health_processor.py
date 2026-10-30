@@ -31,6 +31,7 @@ from td_health_observation_model import (
     network_id_from_ext_pan_id,
     relationship_id,
 )
+from otbr_cli_util import canonical_router_rloc16, classify_meshdiag_router_table
 from td_health_policy import HealthPolicy
 from td_health_roster import (
     RosterFact,
@@ -81,6 +82,7 @@ class _ProcessingInputSnapshot:
     completeness: Completeness
     unified_context: Mapping[str, Any] | None = None
     evidence_files: frozenset[str] | None = None
+    tables_not_provided: frozenset[tuple[str, str]] = frozenset()
 
 
 def _stable_read(path: Path) -> tuple[Any, str, int]:
@@ -174,7 +176,8 @@ def _omr_prefix_from_identity(
 
 
 def _normalize_samples(
-    dataset: HealthDataset, payloads: Mapping[str, Any]
+    dataset: HealthDataset, payloads: Mapping[str, Any],
+    tables_not_provided: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[
     tuple[DeviceSample, ...],
     tuple[RelationshipSample, ...],
@@ -186,7 +189,7 @@ def _normalize_samples(
         dataset.files, key=lambda filename: (-source_rank(filename), filename)
     )
     registration = _register_sample_devices(dataset, payloads, ordered_files)
-    projection = _project_sample_evidence(dataset, registration)
+    projection = _project_sample_evidence(dataset, registration, tables_not_provided)
     device_samples = tuple(
         DeviceSample(
             device_id=device_id,
@@ -396,6 +399,7 @@ def _register_sample_devices(
 def _project_sample_evidence(
     dataset: HealthDataset,
     registration: _SampleRegistration,
+    tables_not_provided: frozenset[tuple[str, str]] = frozenset(),
 ) -> _SampleProjection:
     devices = registration.devices
     rloc_devices = registration.rloc_devices
@@ -489,7 +493,13 @@ def _project_sample_evidence(
                             reporter_id, metric_name, value, "percent", None, filename
                         )
             error = record.get("error")
-            if isinstance(error, dict) and error.get("type") == "ResponseTimeout":
+            # Only routers the Unified builder accepted as not-provided are exempt.
+            if ((filename, canonical_router_rloc16(record.get("rloc16"))) in tables_not_provided
+                    and classify_meshdiag_router_table(record) == "not-provided"):
+                metrics[(reporter_id, "meshdiagTableNotProvided", filename)] = MetricSample(
+                    reporter_id, "meshdiagTableNotProvided", 1.0, "flag", None, filename
+                )
+            elif isinstance(error, dict) and error.get("type") == "ResponseTimeout":
                 metrics[(reporter_id, "diagnosticTimeout", filename)] = MetricSample(
                     reporter_id, "diagnosticTimeout", 1.0, "flag", None, filename
                 )
@@ -835,6 +845,8 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         identity_source.digest if identity_source else None,
         identity_source.source_observed_at if identity_source else None,
         completeness, context, evidence_files,
+        frozenset((item["file"], item["rloc16"])
+                  for item in report["coverage"].get("tablesNotProvided", ())),
     )
 
 
@@ -877,7 +889,7 @@ def build_processing_result(
         if filename in payloads
     }
     devices, relationships, metrics, duplicate_relationship_ids, device_ipv6_addresses = _normalize_samples(
-        sample_dataset, available_finals
+        sample_dataset, available_finals, inputs.tables_not_provided
     )
     roster_facts = tuple(
         fact
@@ -954,7 +966,9 @@ def build_processing_result(
     if dataset.dataset_id == "otbr_cli_diagnostics_fetch":
         observation_parts += (ROUTE64_SAMPLE_CONTRACT_VERSION,)
     if inputs.unified_context:
-        observation_parts += ("comparison-v1-unified", inputs.unified_context["recipeContractDigest"])
+        # The assembly contract changes completeness and samples for identical evidence.
+        observation_parts += ("comparison-v1-unified", inputs.unified_context["recipeContractDigest"],
+                              inputs.unified_context["reportContractDigest"])
     observation_key = "\0".join(observation_parts)
     observation_id = "observation:" + hashlib.sha256(observation_key.encode("utf-8")).hexdigest()[:24]
     observation = Observation(

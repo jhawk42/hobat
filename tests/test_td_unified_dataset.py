@@ -827,6 +827,91 @@ def test_summary_counts_all_canonical_relationship_containers(tmp_path):
     assert unified.read_generation(tmp_path, entry)["linkCount"] == 4
 
 
+_ANSWERED_EXT = "0011223344556677"
+_SILENT_EXT = "8899aabbccddeeff"
+
+
+def _router_table_row(rloc16, ext, table_key, *, answered, ping="reply", rows=()):
+    attempt = {"command": "meshdiag", "status": "success" if answered else "timeout"}
+    row = {"rloc16": rloc16, "extAddress": ext, table_key: list(rows),
+           f"{table_key}Count": len(rows), "tableAttempt": attempt,
+           "targetIdentity": {"rloc16": rloc16, "extAddress": ext},
+           "ping": {"status": ping}}
+    if not answered:
+        row["error"] = {"type": "ResponseTimeout"}
+    return row
+
+
+def _seed_meshdiag_tables(directory, *, answered=True, ping="reply", silent_rows=(),
+                          fetch_all=None, topology=None):
+    entry = _seed(directory, "otbr_cli_unified")
+    for filename, key in (("td-otbr-cli-meshdiag-router-neighbortables.json", "routerNeighbors"),
+                          ("td-otbr-cli-meshdiag-router-childtables.json", "childTable")):
+        rows = [_router_table_row("0x4400", _SILENT_EXT, key, answered=False, ping=ping,
+                                  rows=silent_rows)]
+        if answered:
+            rows.insert(0, _router_table_row("0x1000", _ANSWERED_EXT, key, answered=True))
+        _save(directory, filename, rows)
+    _save(directory, "td-otbr-cli-networkdiag-fetch-all.json", fetch_all if fetch_all is not None else [
+        {"rloc16": "0x1000", "extAddress": _ANSWERED_EXT, "children": [], "tlvResponseValues": "0 1 16"},
+        {"rloc16": "0x4400", "extAddress": _SILENT_EXT, "children": [], "tlvResponseValues": "0 1 2 8"},
+    ])
+    _save(directory, "td-otbr-cli-meshdiag-topology.json", topology if topology is not None else [
+        {"rloc16": "0x1000", "extAddress": _ANSWERED_EXT},
+    ])
+    return entry
+
+
+def test_ping_reachable_router_without_tables_is_expected_and_complete(tmp_path):
+    entry = _seed_meshdiag_tables(tmp_path)
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert result["healthState"] == "complete"
+    assert result["coverage"]["healthReasons"] == []
+    assert result["coverage"]["tablesNotProvided"] == [
+        {"file": "td-otbr-cli-meshdiag-router-childtables.json", "rloc16": "0x4400"},
+        {"file": "td-otbr-cli-meshdiag-router-neighbortables.json", "rloc16": "0x4400"},
+    ]
+    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v9"
+
+
+@pytest.mark.parametrize(("kwargs", "reason"), [
+    ({"ping": "no-reply"}, "incomplete-table-evidence:td-otbr-cli-meshdiag-router-childtables.json"),
+    ({"silent_rows": [{"rloc16": "0x4401"}]},
+     "incomplete-table-evidence:td-otbr-cli-meshdiag-router-childtables.json"),
+    ({"answered": False}, "no-answered-router-table:td-otbr-cli-meshdiag-router-childtables.json"),
+])
+def test_unwitnessed_router_table_gaps_remain_degraded(tmp_path, kwargs, reason):
+    entry = _seed_meshdiag_tables(tmp_path, **kwargs)
+    result = unified.build_unified_dataset(tmp_path, entry["value"], allow_partial=True)
+    assert result["healthState"] == "degraded"
+    assert reason in result["coverage"]["healthReasons"]
+    assert "tablesNotProvided" not in result["coverage"]
+
+
+_SILENT_FETCH = {"rloc16": "0x4400", "extAddress": _SILENT_EXT, "children": []}
+
+
+@pytest.mark.parametrize(("fetch_all", "topology", "covered"), [
+    ([{**_SILENT_FETCH, "networkDiagnosticStatus": "responded"}], [], True),
+    ([{**_SILENT_FETCH, "networkDiagnosticStatus": "no-response"}], [], False),
+    ([{**_SILENT_FETCH, "tlvResponseValues": "0 1", "error": {"type": "ResponseTimeout"}}], [], False),
+    ([_SILENT_FETCH], [], False),
+    ([{**_SILENT_FETCH, "tlvResponseValues": "0 1"}, {**_SILENT_FETCH, "tlvResponseValues": "0 1"}],
+     [], False),
+    ([{**_SILENT_FETCH, "rloc16": "bogus", "tlvResponseValues": "0 1"}], [], False),
+    ([{**_SILENT_FETCH, "children": None, "tlvResponseValues": "0 1"}], [], False),
+    ([{**_SILENT_FETCH, "networkDiagnosticStatus": "no-response"}],
+     [{"rloc16": "0x4400", "extAddress": _SILENT_EXT, "children": []}], True),
+])
+def test_not_provided_router_children_require_one_witness(tmp_path, fetch_all, topology, covered):
+    entry = _seed_meshdiag_tables(tmp_path, fetch_all=fetch_all, topology=topology)
+    result = unified.build_unified_dataset(tmp_path, entry["value"], allow_partial=True)
+    reasons = result["coverage"]["healthReasons"]
+    assert ("uncovered-children:0x4400" not in reasons) is covered
+    assert result["healthState"] == ("complete" if covered else "degraded")
+    assert len(result["coverage"].get("tablesNotProvided", [])) == (2 if covered else 0)
+
+
 def test_capability_inspection_is_local_read_only_and_reports_invalid_generation(tmp_path):
     entry = _seed(tmp_path, "otbr_cli_unified")
     before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}

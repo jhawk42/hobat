@@ -30,7 +30,7 @@ from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
 EVALUATOR_VERSION = "snapshot-v14"
-UNIFIED_EVALUATOR_VERSION = "snapshot-v15"
+UNIFIED_EVALUATOR_VERSION = "snapshot-v16"
 
 _DIRECT_THRESHOLD_COUNT_METRICS = frozenset(
     {"parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"}
@@ -104,6 +104,7 @@ class MetricFacts:
     metric_sources: Mapping[str, frozenset[str]]
     lq_counts: Mapping[int, float]
     diagnostic_timeout_device_ids: frozenset[str]
+    meshdiag_not_provided_device_ids: frozenset[str]
     device_roles: Mapping[str, str]
 
 
@@ -987,6 +988,7 @@ def _evaluate_metrics(
     }
     lq_counts = {1: 0.0, 2: 0.0, 3: 0.0}
     diagnostic_timeout_device_ids: set[str] = set()
+    meshdiag_not_provided_device_ids: set[str] = set()
     for metric in observation.metrics:
         metric_sources.setdefault(metric.metric, set()).add(metric.source_file)
         if metric.metric.startswith("observedLinkQuality"):
@@ -995,6 +997,9 @@ def _evaluate_metrics(
             continue
         if metric.metric == "diagnosticTimeout":
             diagnostic_timeout_device_ids.add(metric.device_id)
+            continue
+        if metric.metric == "meshdiagTableNotProvided":
+            meshdiag_not_provided_device_ids.add(metric.device_id)
             continue
         metric_rule_id = f"device.{metric.metric}"
         if metric_rule_id not in HEALTH_RULE_CATALOG.rule_ids:
@@ -1127,6 +1132,7 @@ def _evaluate_metrics(
         metric_sources={key: frozenset(value) for key, value in metric_sources.items()},
         lq_counts=lq_counts,
         diagnostic_timeout_device_ids=frozenset(diagnostic_timeout_device_ids),
+        meshdiag_not_provided_device_ids=frozenset(meshdiag_not_provided_device_ids),
         device_roles=device_roles,
     )
 
@@ -1919,6 +1925,8 @@ def evaluate_observation(
             if observation.devices
             else 0.0
         ),
+        **({"meshdiagTablesNotProvided": len(metric_facts.meshdiag_not_provided_device_ids)}
+           if evaluator_version == UNIFIED_EVALUATOR_VERSION else {}),
         "evaluationInputs": {
             name: {
                 "state": domain.state.value,

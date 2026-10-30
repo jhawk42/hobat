@@ -14,6 +14,12 @@ import otbr_cli_meshdiag_topology as meshdiag_topology
 import otbr_cli_networkdiag_topology as networkdiag
 import otbr_cli_router_table as router_table
 import otbr_cli_thread_network_info as thread_info
+from otbr_cli_util import (
+    classify_meshdiag_router_table,
+    meshdiag_collection_outcome,
+    meshdiag_router_table_summary,
+)
+from util_data import CollectionStatus
 from td_const import (
     OTBR_CLI_MESHDIAG_ROUTER_CHILDIP6_FILENAME,
     OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
@@ -159,6 +165,93 @@ def test_per_router_timeout_only_result_retains_final_and_checkpoint(monkeypatch
     monkeypatch.setattr(
         childtable, "collect_per_router", lambda **_kwargs: [timeout_result]
     )
+
+    childtable.fetch_all_meshdiag_child_tables({}, output_path=output_path)
+
+    assert output_path.read_text(encoding="utf-8") == '[{"id":"old-final"}]'
+    assert checkpoint_path.read_text(encoding="utf-8") == '[{"id":"old-checkpoint"}]'
+
+
+def _attempted(rloc16, status, ping_status, *, table=None, camel=False):
+    if camel:
+        return {
+            "rloc16": rloc16, "childTable": table or [], "childTableCount": len(table or []),
+            "tableAttempt": {"status": status}, "ping": {"status": ping_status},
+            "targetIdentity": {"rloc16": rloc16},
+        }
+    return {
+        "rloc16": rloc16, "router_child_table": table or [],
+        "table_attempt": {"status": status}, "ping": {"status": ping_status},
+        "target_identity": {"rloc16": rloc16},
+        **({} if status == "success" else {"_error": {"type": "ResponseTimeout"}}),
+    }
+
+
+@pytest.mark.parametrize("camel", [False, True])
+@pytest.mark.parametrize(("status", "ping_status", "table", "expected"), [
+    ("success", "not-attempted", None, "answered"),
+    ("success", "not-attempted", [{"rloc16": "0x0401"}], "answered"),
+    ("timeout", "reply", None, "not-provided"),
+    ("error", "reply", None, "not-provided"),
+    ("timeout", "no-reply", None, "unanswered"),
+    ("timeout", "unavailable", None, "unanswered"),
+    ("timeout", "unsupported", None, "unanswered"),
+    ("error", "error", None, "unanswered"),
+    ("timeout", "not-attempted", None, "unanswered"),
+    ("protocol-error", "reply", None, "unanswered"),
+    ("timeout", "reply", [{"rloc16": "0x0401"}], "unanswered"),
+])
+def test_classify_meshdiag_router_table(camel, status, ping_status, table, expected):
+    record = _attempted("0x0400", status, ping_status, table=table, camel=camel)
+    assert classify_meshdiag_router_table(record) == expected
+
+
+def test_classify_meshdiag_router_table_requires_identity_and_handles_legacy():
+    record = _attempted("0x0400", "timeout", "reply", camel=True)
+    record.pop("targetIdentity")
+    assert classify_meshdiag_router_table(record) == "unanswered"
+    record = _attempted("0x0401", "timeout", "reply", camel=True)
+    assert classify_meshdiag_router_table(record) == "unanswered"
+    record = _attempted("0x0400", "timeout", "reply", camel=True)
+    record["childTableCount"] = 2
+    assert classify_meshdiag_router_table(record) == "unanswered"
+    assert classify_meshdiag_router_table({"rloc16": "0x0400", "childTable": []}) == "legacy"
+    assert classify_meshdiag_router_table(None) == "unanswered"
+
+
+def test_meshdiag_router_table_summary_guard():
+    answered = _attempted("0x0400", "success", "not-attempted")
+    missing = _attempted("0x0800", "timeout", "reply")
+    summary = meshdiag_router_table_summary([answered, missing])
+    assert summary["guardPassed"] is True
+    assert summary["notProvided"] == ["0x0800"]
+    assert meshdiag_router_table_summary([missing])["guardPassed"] is False
+
+
+def test_answered_plus_not_provided_outcome_is_complete_and_logged(caplog):
+    caplog.set_level("INFO")
+    outcome = meshdiag_collection_outcome([
+        _attempted("0x0400", "success", "not-attempted"),
+        _attempted("0x0800", "timeout", "reply"),
+    ])
+    assert outcome.status is CollectionStatus.COMPLETE
+    assert "count=1 routers=0x0800" in caplog.text
+    assert meshdiag_collection_outcome([
+        _attempted("0x0400", "success", "not-attempted"),
+        _attempted("0x0800", "timeout", "no-reply"),
+    ]).status is CollectionStatus.PARTIAL
+    assert meshdiag_collection_outcome([]).status is CollectionStatus.COMPLETE
+
+
+def test_all_not_provided_run_retains_final_and_checkpoint(monkeypatch, tmp_path):
+    output_path = tmp_path / OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME
+    checkpoint_path = tmp_path / output_path.name.replace(".json", ".partial.json")
+    output_path.write_text('[{"id":"old-final"}]', encoding="utf-8")
+    checkpoint_path.write_text('[{"id":"old-checkpoint"}]', encoding="utf-8")
+    monkeypatch.setattr(childtable, "fetch_and_parse_router_table", lambda _map: [])
+    monkeypatch.setattr(childtable, "collect_per_router", lambda **_kwargs: [
+        _attempted("0x0400", "timeout", "reply"), _attempted("0x0800", "error", "reply"),
+    ])
 
     childtable.fetch_all_meshdiag_child_tables({}, output_path=output_path)
 

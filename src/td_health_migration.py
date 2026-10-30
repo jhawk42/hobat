@@ -55,7 +55,8 @@ from td_health_sqlite import (
 )
 
 
-_SUPPORTED_EVALUATORS = frozenset({"snapshot-v10", "snapshot-v11", "snapshot-v15", EVALUATOR_VERSION})
+_SUPPORTED_EVALUATORS = frozenset({"snapshot-v10", "snapshot-v11", "snapshot-v15", "snapshot-v16",
+                                   EVALUATOR_VERSION})
 _DEVICE_ID_PREFIX = "extaddr:"
 
 

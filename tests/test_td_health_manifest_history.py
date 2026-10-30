@@ -149,19 +149,19 @@ def test_all_fourteen_exact_snapshots_and_original_policy_metadata(resolver):
 
 @pytest.mark.parametrize(("dataset_id", "replay_digest", "target_digest"), [
     ("otbr_cli_unified", "3026fda74c8081a19cc22719a354661e9c529caea816c7a85f129b21ee7587d1",
-     "811394db7e9feebd4a918cc213de0fe659eaa4649423ae3a6364f537e2a02038"),
+     "90cdc4cd7c83574b4f2509956e56c63531c8a16202a3a054ca9e094b0b0ad537"),
     ("otbr_restapi_unified", "e7691352bc45a63fb7c050b40cbf4df714e37eb1c7ddac8dd7d661809313947d",
-     "b4b2cf49be55ec5a98a887565b589d4398d925843bf1c2897c690676667a865b"),
+     "b1413232f2f179fd1aac40d1ad67b253f5e5668ad544b9fc7fec5d9eebd488c7"),
     ("ha_matter_ws_unified", "a985537b14f1b1616ab8d0f73bba0fdf1a9345281ff7b4e14297b386c4d9d869",
-     "b78c74da5ff3ba851a8ad490034e61b474443ac60a6b6d036375285044e86d9c"),
+     "2c22105a4515039579f471f493d91c1a49660658c3d693982923cc2e2c9ec66a"),
     ("multi_source_unified", "d09b7cd76af43b27fd1b8c301d0d8ebdefb0cac44fb0d76ad43ef6b78491420c",
-     "dca01c09f6bf85dc487f614b6c76458fb3e957596eb309c8a43a3dd6ad25ac7d"),
+     "c4c8c9a109db6e18764a03165c682b46679f3b3684bf80cc720540d0ea39da96"),
 ])
 def test_unified_exact_current_support_and_independent_vectors(resolver, dataset_id, replay_digest, target_digest):
     dataset = resolver.current_target(dataset_id)
     assert retained_replay_digest(dataset, "comparison-v1-unified") == replay_digest
     assert target_contract_digest(
-        dataset, "comparison-v1-unified", **{**POLICY_ARGS, "evaluator_version": "snapshot-v15"},
+        dataset, "comparison-v1-unified", **{**POLICY_ARGS, "evaluator_version": "snapshot-v16"},
     ) == target_digest
     resolution = resolver.resolve_source(
         dataset_id, dataset.datasource_id, dataset.health_profile.profile_id, "comparison-v1-unified",

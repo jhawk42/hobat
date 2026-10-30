@@ -2544,6 +2544,7 @@ class SQLiteHealthStore:
             "routerRolePercent": "percent",
             "detachedDisabledPercent": "percent",
             "diagnosticTimeout": "flag",
+            "meshdiagTableNotProvided": "flag",
             "observedLinkQuality1Count": "count",
             "observedLinkQuality2Count": "count",
             "observedLinkQuality3Count": "count",

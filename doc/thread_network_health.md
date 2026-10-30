@@ -285,6 +285,25 @@ Existing assembly-v2/v3/v4
 assessments remain readable and reopenable; unknown assembly contracts are still
 rejected.
 
+Assembly-v9 treats a ping-reachable router that does not return its meshdiag
+per-router tables as expected. The ping reply does not repair the table: the
+router contributes zero table entries and is listed in the report's
+`coverage.tablesNotProvided`. For Unified assessments only, the health
+processor records a `meshdiagTableNotProvided` flag instead of a
+`diagnosticTimeout` for routers on that list; non-Unified datasets keep the
+timeout. Assembly-v9 observations bind the report contract digest, so
+reprocessing unchanged evidence creates a new observation rather than reusing an
+older assembly's samples. The router's
+children must still be witnessed by exactly one usable
+`td-otbr-cli-networkdiag-fetch-all.json` row (responded, or a legacy row with
+TLV responses) or `td-otbr-cli-meshdiag-topology.json` row; otherwise the
+report adds `uncovered-children:<rloc16>` and omits the router from
+`tablesNotProvided`. A legacy fetch-all row counts even
+when its TLVs omit the Child Table. A file in which no router answered adds
+`no-answered-router-table:<file>`, and a failed table without a ping reply still
+adds `incomplete-table-evidence:<file>`. Each of these reasons degrades the
+Unified dataset.
+
 Samples and roster facts retain original filenames, field authority and
 original observation times. Identity/outcome companions, mDNS services,
 non-Thread Matter devices, relationship-only placeholders and derived dashboard
@@ -298,8 +317,11 @@ for all five and have no whole-network topology/BR absence authority.
 Original completeness, outcomes and unavailable inputs can only reduce these
 maxima.
 
-Unified assessments use `snapshot-v15` and the distinct
-`comparison-v1-unified` sample contract. Legacy `snapshot-v14`,
+Unified assessments use `snapshot-v16` and the distinct
+`comparison-v1-unified` sample contract. Assessment coverage reports
+`meshdiagTablesNotProvided`, the number of routers that did not provide meshdiag
+tables; it adds no rule or finding. Unified comparisons require `snapshot-v16`
+on both sides, so `snapshot-v15` endpoints are reported as unsupported. Legacy `snapshot-v14`,
 `comparison-v1` and Route64 contracts and golden vectors are unchanged.
 Original profiles default to `inputMode: files`. An immutable `unifiedRecipe`
 uses the builder's `unified-v1` contract and retains the validated transitive raw closure;

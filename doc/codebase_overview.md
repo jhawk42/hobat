@@ -92,7 +92,13 @@ collectors record an explicit table attempt for every queried router. On a
 timeout or explicit OTBR error, they may issue one bounded, two-attempt ping to
 that router's validated mesh-local RLOC IPv6 address. Ping evidence is distinct
 from table evidence: a reply does not turn a failed table collection into a
-success, and an all-failed run retains its prior final snapshot.
+success, and an all-failed run retains its prior final snapshot. Some router
+implementations (for example Apple HomePods) never return these tables. A
+router whose attempt failed, whose tables are empty, and which replied to the
+ping is classified `not-provided` by `classify_meshdiag_router_table` in
+`otbr_cli_util.py`: it is expected and contributes zero table entries. A run
+is complete when every router either answered or is `not-provided` and at least
+one router answered.
 
 ### OTBR REST API
 
