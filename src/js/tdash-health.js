@@ -252,7 +252,7 @@ export function isHealthComparisonEndpointPageForQuery(page, query) {
     && typeof endpoint.assessmentId === "string" && endpoint.assessmentId.length > 0
     && typeof endpoint.observedAt === "string" && Number.isFinite(Date.parse(endpoint.observedAt))
     && typeof endpoint.assessedAt === "string" && Number.isFinite(Date.parse(endpoint.assessedAt))
-    && ["complete", "partial"].includes(endpoint.completeness)
+    && ["complete", "partial", "degraded"].includes(endpoint.completeness)
   );
   const validNavigation = !Object.hasOwn(page || {}, "navigation") || (
     query.side === "after"
@@ -725,8 +725,13 @@ export function renderHealthAssessmentHistory(container, state, actions = {}) {
   const appendOption = (endpoint, selectedRevision = false) => {
     const option = document.createElement("option");
     option.value = endpoint.assessmentId;
+    const completeness = {
+      complete: "Complete",
+      partial: "Partial",
+      degraded: "Degraded",
+    }[endpoint.completeness];
     option.textContent = `${formatHealthHistoryTimestamp(endpoint.observedAt)} · `
-      + `${endpoint.completeness === "partial" ? "Partial" : "Complete"}`
+      + `${completeness}`
       + ` · ${endpoint.assessmentId.slice(-12)}`
       + `${selectedRevision ? " · Selected revision" : ""}`;
     option.title = `Observed ${endpoint.observedAt}; assessed ${endpoint.assessedAt}; `
@@ -900,8 +905,11 @@ function appendEndpointPicker(controls, side, page, selectedId, selected, loadin
   const appendOption = (endpoint, isSelected = false) => {
     const option = document.createElement("option");
     option.value = endpoint.assessmentId;
+    const completeness = endpoint.completeness === "complete"
+      ? ""
+      : ` · ${endpoint.completeness === "partial" ? "Partial" : "Degraded"}`;
     option.textContent = `${formatComparisonTime(endpoint.observedAt, now)} · ${formatUtcComparisonTimestamp(endpoint.observedAt)}`
-      + `${endpoint.completeness === "partial" ? " · Partial" : ""}`
+      + completeness
       + `${isSelected ? " (selected)" : ""}`;
     option.title = `${endpoint.assessmentId} · observed ${endpoint.observedAt}`
       + ` · assessed ${endpoint.assessedAt} · ${endpoint.completeness}`;

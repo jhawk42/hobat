@@ -1150,7 +1150,7 @@ def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
         observedAt, assessedAt: observedAt, completeness,
       });
       const before = endpoint("assessment-before", "2026-09-01T00:00:00.123Z", "partial");
-      const after = endpoint("assessment-after", "2026-09-02T02:00:00.123+02:00");
+      const after = endpoint("assessment-after", "2026-09-02T02:00:00.123+02:00", "degraded");
       const beforePageItem = endpoint("assessment-page", "2026-08-30T00:00:00Z");
       const query = {
         networkId: "extpan:net", datasetId: "dataset", side: "before",
@@ -1268,6 +1268,7 @@ def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
     result = json.loads(completed.stdout)
     assert result["endpointValid"] is True
     assert result["endpointRejectsWrongAfter"] is False
+    assert "Degraded" in result["afterOptions"][0][1]
     assert result["pairValid"] is True
     assert result["presetLabels"] == ["1D", "3D", "1W", "Custom"]
     assert result["selectedPreset"] == "true"
@@ -2554,7 +2555,9 @@ def test_health_assessment_context_and_navigation_metadata_are_validated() -> No
         assessedAt: "2026-09-01T00:00:00Z", completeness: "complete",
       });
       const latest = endpoint("assessment-latest");
+      latest.completeness = "degraded";
       const older = endpoint("assessment-older");
+      older.completeness = "degraded";
       const query = {
         networkId: "extpan:network", datasetId: "dataset", side: "after",
         afterAssessmentId: null, selectedAssessmentId: null,
@@ -2578,11 +2581,16 @@ def test_health_assessment_context_and_navigation_metadata_are_validated() -> No
         ...page,
         navigation: {...page.navigation, older: {...older, networkId: "extpan:other"}},
       };
+      const invalidCompletenessPage = {
+        ...page,
+        navigation: {...page.navigation, older: {...older, completeness: "unknown"}},
+      };
       const emptyPrunedPage = {...page, total: 2, offset: 50};
       console.log(JSON.stringify({
         requests,
         validNavigation: isHealthComparisonEndpointPageForQuery(page, query),
         invalidNavigation: isHealthComparisonEndpointPageForQuery(invalidPage, query),
+        invalidCompleteness: isHealthComparisonEndpointPageForQuery(invalidCompletenessPage, query),
         legacyPage: isHealthComparisonEndpointPageForQuery(legacyPage, query),
         emptyPrunedPage: isHealthComparisonEndpointPageForQuery(emptyPrunedPage,
           {...query, offset: 50}),
@@ -2600,6 +2608,7 @@ def test_health_assessment_context_and_navigation_metadata_are_validated() -> No
         ],
         "validNavigation": True,
         "invalidNavigation": False,
+        "invalidCompleteness": False,
         "legacyPage": True,
         "emptyPrunedPage": True,
     }
@@ -2652,7 +2661,8 @@ def test_health_assessment_history_renders_bounded_accessible_navigation() -> No
       });
       const current = endpoint("assessment-current-revision", "2026-10-22T12:00:00.123Z");
       const page = {
-        items: [endpoint("assessment-newest", "2026-10-23T12:00:00Z")],
+        items: [Object.assign(endpoint("assessment-newest", "2026-10-23T12:00:00Z"),
+          {completeness: "degraded"})],
         selected: current, selectedAfterIsPreferred: false, defaultAfter: null,
         total: 60, offset: 25, limit: 25,
       };
@@ -2768,6 +2778,7 @@ def test_health_assessment_history_renders_bounded_accessible_navigation() -> No
     )
     result = json.loads(completed.stdout)
     assert result["options"][0][0] == "assessment-newest"
+    assert "Degraded" in result["options"][0][1]
     assert result["options"][1][0] == "assessment-current-revision"
     assert "Selected revision" in result["options"][1][1]
     assert result["actions"] == {
