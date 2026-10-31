@@ -86,6 +86,10 @@ PRODUCER_SAMPLE_SUPPORT = MappingProxyType({
 })
 
 
+def supports_current_sample_contract(dataset_id: str, sample_contract: str) -> bool:
+    return _CURRENT_SAMPLE_SUPPORT.get(dataset_id) == sample_contract
+
+
 class ManifestHistoryError(HealthManifestError):
     """An invalid archive, stale snapshot, or explicitly unsupported identity."""
 

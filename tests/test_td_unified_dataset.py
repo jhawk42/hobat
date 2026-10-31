@@ -871,7 +871,7 @@ def test_ping_reachable_router_without_tables_is_expected_and_complete(tmp_path)
         {"file": "td-otbr-cli-meshdiag-router-childtables.json", "rloc16": "0x4400"},
         {"file": "td-otbr-cli-meshdiag-router-neighbortables.json", "rloc16": "0x4400"},
     ]
-    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v9"
+    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v10"
 
 
 @pytest.mark.parametrize(("kwargs", "reason"), [

@@ -429,6 +429,7 @@ def _has_unresolved_iid_skip(outcome: dict[str, Any]) -> bool:
     return any(
         isinstance(result, dict)
         and result.get("skipReasonCode") == "unresolved_mesh_local_iid"
+        and result.get("status") != "completed"
         for result in outcome.get("deviceResults", [])
     )
 

@@ -2394,7 +2394,115 @@ function renderFindingGroup(group, actions) {
   return item;
 }
 
-function renderHealthAssessmentSummary(container, model) {
+function coverageCount(value) {
+  return Number.isInteger(value) && value >= 0 ? String(value) : "unknown";
+}
+
+function coverageNoun(value, singular, plural) {
+  return value === 1 ? singular : plural;
+}
+
+function renderRestDiagnosticCoverage(container, coverage, viewState, actions) {
+  const recovery = coverage?.restDiagnostics;
+  const crossSource = coverage?.restChildTableCoverage;
+  if ((!recovery || typeof recovery !== "object") && (!crossSource || typeof crossSource !== "object")) return;
+  const summary = recovery?.summary;
+  const details = document.createElement("details");
+  details.className = "health-rest-coverage";
+  details.open = viewState.restCoverageOpen === true;
+  details.addEventListener("toggle", () => actions.restCoverageOpen?.(details.open));
+  const counts = summary && typeof summary === "object"
+    ? `${coverageCount(summary.recoveredChildren)} recovered ${
+      coverageNoun(summary.recoveredChildren, "child", "children")}, ${
+      coverageCount(summary.recoveredRouters)} recovered ${
+      coverageNoun(summary.recoveredRouters, "router", "routers")} · ${
+      coverageCount(summary.notProvidedDevices)} ${
+      coverageNoun(summary.notProvidedDevices, "device", "devices")} with fields not provided · ${
+      coverageCount(summary.unavailableDevices)} ${
+      coverageNoun(summary.unavailableDevices, "device", "devices")} with unavailable fields`
+    : "Counts unavailable";
+  appendText(details, "summary", `REST diagnostic coverage: ${counts}`);
+  appendText(details, "p",
+    "Coverage describes returned evidence, not health findings. Not requested does not mean unsupported.");
+  const devices = Array.isArray(recovery?.devices) ? recovery.devices : [];
+  if (devices.length) {
+    const list = document.createElement("ul");
+    list.className = "health-rest-coverage-devices";
+    devices.forEach((device) => {
+      if (!device || typeof device !== "object") return;
+      const item = document.createElement("li");
+      const identity = typeof device.extAddress === "string" ? device.extAddress : "Unknown device";
+      const context = [device.rloc16, device.role, device.recoveryKind]
+        .filter((value) => typeof value === "string" && value);
+      appendText(item, "strong", [identity, ...context].join(" · "));
+      const fields = device.fields && typeof device.fields === "object" && !Array.isArray(device.fields)
+        ? Object.entries(device.fields).sort(([left], [right]) => left.localeCompare(right))
+        : [];
+      const availability = [
+        ["present", "Present"], ["not-provided", "Not provided"],
+        ["unavailable", "Unavailable"], ["not-requested", "Not requested"],
+      ];
+      availability.forEach(([state, label]) => {
+        const names = fields.filter(([, field]) => field?.availability === state).map(([name, field]) => (
+          state === "unavailable" && typeof field.reason === "string" && field.reason
+            ? `${name} (${field.reason})` : name
+        ));
+        if (names.length) appendText(item, "p", `${label}: ${names.join(", ")}`);
+      });
+      list.appendChild(item);
+    });
+    details.appendChild(list);
+  } else if (recovery) {
+    appendText(details, "p", "No per-device recovery details retained.");
+  }
+  const unresolved = Array.isArray(recovery?.unresolved) ? recovery.unresolved : [];
+  if (unresolved.length) {
+    appendText(details, "h4", "Unresolved diagnostic targets");
+    const list = document.createElement("ul");
+    unresolved.forEach((target) => {
+      if (!target || typeof target !== "object") return;
+      const device = typeof target.deviceId === "string" && target.deviceId ? `${target.deviceId}: ` : "";
+      const reason = typeof target.reasonCode === "string" ? target.reasonCode : "unknown reason";
+      appendText(list, "li", `${device}${reason}`);
+    });
+    details.appendChild(list);
+  }
+  const routers = Array.isArray(crossSource?.routers) ? crossSource.routers : [];
+  if (routers.length) {
+    appendText(details, "h4", "Multi-source REST child-table coverage");
+    if (typeof crossSource.networkInstance === "string") {
+      appendText(details, "p", `Network: ${crossSource.networkInstance}`);
+    }
+    const list = document.createElement("ul");
+    list.className = "health-rest-coverage-routers";
+    routers.forEach((router) => {
+      if (!router || typeof router !== "object") return;
+      const item = document.createElement("li");
+      const identity = [router.extAddress, router.rloc16]
+        .filter((value) => typeof value === "string" && value).join(" · ") || "Unknown router";
+      appendText(item, "strong", `${identity} · ${coverageCount(router.childCount)} ${
+        coverageNoun(router.childCount, "child", "children")} · ${
+        coverageCount(router.resolvedChildCount)} identities matched`);
+      const cliFiles = Array.isArray(router.cliFiles)
+        ? router.cliFiles.filter((value) => typeof value === "string").join(", ") : "";
+      appendText(item, "p", `CLI: ${cliFiles || "unknown file"} · ${
+        router.cliSourceObservedAt || "unknown time"} · ${router.cliTimeProvenance || "unknown time provenance"}`);
+      appendText(item, "p", `REST: ${router.restFile || "unknown file"} · ${
+        router.restDiagnosticId || "unknown diagnostic"} · ${router.restSourceObservedAt || "unknown time"}`);
+      for (const [label, digests] of [["Input SHA-256", router.inputDigests], ["Scope SHA-256", router.scopeDigests]]) {
+        if (!digests || typeof digests !== "object" || Array.isArray(digests)) continue;
+        Object.entries(digests).sort(([left], [right]) => left.localeCompare(right)).forEach(([name, value]) => {
+          if (typeof value === "string") appendText(item, "p", `${label} ${name}: ${value}`, "health-rest-coverage-digest");
+        });
+      }
+      list.appendChild(item);
+    });
+    details.appendChild(list);
+  }
+  container.appendChild(details);
+}
+
+function renderHealthAssessmentSummary(container, model, viewState, actions) {
   container.replaceChildren();
   const assessment = model.assessment;
   const visibleGroups = projectVisibleHealthFindingGroups(assessment.findingGroups);
@@ -2449,6 +2557,7 @@ function renderHealthAssessmentSummary(container, model) {
     pillars.appendChild(item);
   });
   container.appendChild(pillars);
+  renderRestDiagnosticCoverage(container, assessment.coverage, viewState, actions);
 
   if (model.capabilities && model.observations) {
     appendText(container, "p",
@@ -2536,7 +2645,7 @@ export function renderHealthInsights(container, model, viewState = {}, actions =
     return;
   }
 
-  renderHealthAssessmentSummary(summary, model);
+  renderHealthAssessmentSummary(summary, model, viewState, actions);
   if (model.error) {
     appendText(empty, "p", `Latest refresh failed: ${model.error}`, "network-insights-empty error");
   }

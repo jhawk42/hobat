@@ -28,7 +28,11 @@ from td_const import (
     HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME, HA_MATTER_WS_SERVER_INFO_FILENAME,
     HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME,
     OTBR_CLI_BBR_FILENAME, OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
     OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME, OTBR_RESTAPI_ACTIONS_LIST_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
     TD_DATA_DIR_ARG_HELP, UNIFIED_FILENAMES,
 )
 from td_dataset_catalog import (
@@ -40,12 +44,15 @@ from td_device_fields import (
 )
 from td_network_identity import canonical_ext_pan_id
 from td_record_merge import values_equivalent
-from otbr_cli_util import canonical_router_rloc16, meshdiag_router_table_summary
+from otbr_cli_util import (
+    canonical_extaddr, canonical_router_rloc16, classify_meshdiag_router_table,
+    meshdiag_router_table_summary,
+)
 from util_data import network_scope_path, resolve_data_dir
 
 
 CONTRACT_VERSION = "unified-v1"
-BUILDER_CONTRACT = "unified-assembly-v9"
+BUILDER_CONTRACT = "unified-assembly-v10"
 _NETWORK = re.compile(r"extpan:[0-9a-f]{16}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -196,6 +203,58 @@ def _scope(sidecar: CachedInput, snapshot: CachedInput) -> tuple[str | None, str
     return ext_pan_id, "observed"
 
 
+def read_rest_diagnostic_recovery(
+    data_dir: Path,
+    *,
+    expected_network: str | None = None,
+    expected_outcome_digest: str | None = None,
+    expected_diagnostics_digest: str | None = None,
+) -> tuple[dict | None, list[CachedInput]]:
+    from td_restapi_diagnostic_recovery import diagnostic_items, reconcile_bound_rest_diagnostics
+
+    outcome = _read_stable(data_dir, OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME)
+    diagnostics = _read_stable(data_dir, OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME)
+    outcome_scope = _read_stable(data_dir, network_scope_path(outcome.filename).name)
+    diagnostics_scope = _read_stable(data_dir, network_scope_path(diagnostics.filename).name)
+    captured = [outcome, diagnostics, outcome_scope, diagnostics_scope]
+    if (
+        expected_outcome_digest is not None and outcome.digest != expected_outcome_digest
+        or expected_diagnostics_digest is not None and diagnostics.digest != expected_diagnostics_digest
+    ):
+        raise UnifiedDatasetError("REST diagnostic evidence changed during processing")
+    if outcome.content is None or diagnostics.content is None:
+        _recheck(data_dir, captured)
+        return None, captured
+    payload = _parse(outcome.content, outcome.filename)
+    if not isinstance(payload, dict):
+        _recheck(data_dir, captured)
+        return None, captured
+    final = _parse(diagnostics.content, diagnostics.filename)
+
+    def scope_payload(item: CachedInput) -> Any:
+        if item.content is None:
+            return None
+        try:
+            return _parse(item.content, item.filename)
+        except UnifiedDatasetError as exc:
+            logging.warning("REST diagnostic recovery scope is invalid: %s", exc)
+            return None
+
+    effective = reconcile_bound_rest_diagnostics(
+        payload,
+        diagnostic_items(final),
+        outcome_digest=outcome.digest,
+        diagnostics_digest=diagnostics.digest,
+        outcome_scope=scope_payload(outcome_scope),
+        diagnostics_scope=scope_payload(diagnostics_scope),
+        outcome_scope_digest=outcome_scope.digest,
+        diagnostics_scope_digest=diagnostics_scope.digest,
+        expected_network=expected_network,
+    )
+    _recheck(data_dir, captured)
+    return effective, captured
+
+
 def _record_scope(record: dict, file_scope: str | None) -> str | None:
     value = record.get("extPanId")
     if value is not None:
@@ -209,6 +268,9 @@ def _record_scope(record: dict, file_scope: str | None) -> str | None:
 _FETCH_ALL_FILE = OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
 _TOPOLOGY_FILE = OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME
 _CHILD_COVERAGE_FILES = frozenset({_FETCH_ALL_FILE, _TOPOLOGY_FILE})
+_CLI_CHILD_TABLE = OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME
+_CLI_ROUTER_TABLES = (_CLI_CHILD_TABLE, OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME)
+REST_CHILD_TABLE_COVERAGE_VERSION = "rest-child-table-coverage-v1"
 
 
 def _single_router_row(rows: Any, rloc16: str) -> dict | None:
@@ -229,6 +291,206 @@ def _children_covered(rloc16: str, payloads: dict[str, list]) -> bool:
             return True
     row = _single_router_row(payloads.get(_TOPOLOGY_FILE), rloc16)
     return row is not None and isinstance(row.get("children"), list)
+
+
+def _router_table_evidence(filename: str, rows: list[dict]) -> tuple[list[str], list[dict]]:
+    if not any("tableAttempt" in row for row in rows):
+        return [], []
+    summary = meshdiag_router_table_summary(rows)
+    reasons = []
+    if summary["unanswered"]:
+        reasons.append(f"incomplete-table-evidence:{filename}")
+    if summary["notProvided"] and not summary["guardPassed"]:
+        reasons.append(f"no-answered-router-table:{filename}")
+        return reasons, []
+    return reasons, [
+        {"file": filename, "rloc16": rloc16} for rloc16 in summary["notProvided"]
+    ]
+
+
+def _finalize_router_table_evidence(tables: list[dict], child_payloads: dict[str, list]) -> tuple[list[str], list[dict]]:
+    uncovered = sorted({item["rloc16"] for item in tables
+                        if not _children_covered(item["rloc16"], child_payloads)})
+    return (
+        [f"uncovered-children:{rloc16}" for rloc16 in uncovered],
+        sorted((item for item in tables if item["rloc16"] not in uncovered),
+               key=lambda item: (item["file"], item["rloc16"])),
+    )
+
+
+def derive_cli_router_table_evidence(declarations: dict[str, dict], payloads: dict[str, Any]) -> tuple[list[str], list[dict]]:
+    """Recompute CLI table exemptions from the verified original records."""
+    tables, reasons, child_payloads = [], [], {}
+    for filename, declaration in declarations.items():
+        if (declaration["source"] != "otbr-cli" or declaration["role"] != "records"
+                or filename not in payloads):
+            continue
+        rows = _extract(declaration, payloads[filename])
+        if filename in _CHILD_COVERAGE_FILES:
+            child_payloads[filename] = rows
+        table_reasons, candidates = _router_table_evidence(filename, rows)
+        reasons.extend(table_reasons)
+        tables.extend(candidates)
+    uncovered, accepted = _finalize_router_table_evidence(tables, child_payloads)
+    return reasons + uncovered, accepted
+
+
+def _cli_router_identity(record: dict) -> tuple[str, str] | None:
+    target = record.get("targetIdentity", record.get("target_identity"))
+    if not isinstance(target, dict):
+        return None
+    rloc = canonical_router_rloc16(target.get("rloc16"))
+    record_rloc = canonical_router_rloc16(record.get("rloc16"))
+    target_ext = canonical_extaddr(target.get("extAddress", target.get("extaddr")))
+    record_ext = canonical_extaddr(get_canonical_ext_address(record))
+    ext = target_ext or record_ext
+    if (
+        rloc is None or ext is None or ext == "0" * 16
+        or (record.get("rloc16") is not None and record_rloc != rloc)
+        or (target_ext and record_ext and target_ext != record_ext)
+    ):
+        return None
+    return rloc, ext
+
+
+def derive_rest_child_table_coverage(
+    *,
+    network: str | None,
+    metadata: Sequence[dict],
+    scopes: dict[str, str | None],
+    payloads: dict[str, Any],
+    rows: dict[str, list[dict]],
+    cli_coverage: dict,
+    rest_effective: dict | None,
+) -> dict | None:
+    """Qualify Multi-source substitutions using only bound original evidence."""
+    from td_health_unified import timestamp
+    from td_restapi_diagnostic_recovery import diagnostic_items, qualified_router_tables
+
+    if network is None or rest_effective is None:
+        return None
+    by_name = {item["filename"]: item for item in metadata}
+    required = {
+        _CLI_CHILD_TABLE, _FETCH_ALL_FILE, _TOPOLOGY_FILE,
+        OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+        OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+    }
+
+    def scoped(filename: str) -> bool:
+        item = by_name.get(filename, {})
+        return (
+            item.get("status") == "selected"
+            and item.get("scopeState") == "observed"
+            and scopes.get(filename) == network[7:]
+            and isinstance(item.get("sha256"), str)
+            and isinstance(item.get("scopeSha256"), str)
+        )
+
+    if not all(scoped(filename) for filename in required):
+        return None
+    cli_source_time = by_name[_CLI_CHILD_TABLE].get("sourceObservedAt")
+    if not isinstance(cli_source_time, str):
+        return None
+    try:
+        cli_time = timestamp(cli_source_time)
+    except ValueError:
+        return None
+    diagnostics = payloads.get(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME)
+    tables = qualified_router_tables(rest_effective, diagnostic_items(diagnostics))
+    by_rloc = {table["rloc16"]: table for table in tables}
+    routers = []
+    reasons = cli_coverage.get("healthReasons", [])
+    for reason in reasons:
+        if not isinstance(reason, str) or not reason.startswith("uncovered-children:"):
+            continue
+        rloc = reason.removeprefix("uncovered-children:")
+        table = by_rloc.get(rloc)
+        if table is None:
+            continue
+        rest_source_time = table.get("created")
+        if not isinstance(rest_source_time, str):
+            continue
+        try:
+            rest_time = timestamp(rest_source_time)
+        except ValueError:
+            continue
+        if abs((rest_time - cli_time).total_seconds()) > 7200:
+            continue
+        contributing = []
+        identities = set()
+        valid = True
+        for filename in _CLI_ROUTER_TABLES:
+            table_rows = rows.get(filename, [])
+            matches = []
+            for row in table_rows:
+                target = row.get("targetIdentity", row.get("target_identity")) if isinstance(row, dict) else None
+                if isinstance(target, dict) and canonical_router_rloc16(target.get("rloc16")) == rloc:
+                    matches.append(row)
+            if not matches:
+                continue
+            summary = meshdiag_router_table_summary(table_rows)
+            if (
+                len(matches) != 1 or not scoped(filename)
+                or not summary["guardPassed"] or summary["unanswered"]
+                or classify_meshdiag_router_table(matches[0]) != "not-provided"
+            ):
+                valid = False
+                break
+            identity = _cli_router_identity(matches[0])
+            if identity is None or identity[0] != rloc:
+                valid = False
+                break
+            if any(
+                other is not matches[0]
+                and _cli_router_identity(other) is not None
+                and _cli_router_identity(other)[1] == identity[1]
+                for other in table_rows if isinstance(other, dict)
+            ):
+                valid = False
+                break
+            identities.add(identity[1])
+            contributing.append(filename)
+        if not valid or _CLI_CHILD_TABLE not in contributing or identities != {table["extAddress"]}:
+            continue
+        for filename in _CHILD_COVERAGE_FILES:
+            candidates = rows.get(filename, [])
+            matches = [
+                row for row in candidates
+                if canonical_router_rloc16(row.get("rloc16")) == rloc
+                or canonical_extaddr(get_canonical_ext_address(row)) == table["extAddress"]
+            ]
+            if len(matches) > 1 or any(
+                (canonical_router_rloc16(row.get("rloc16")) not in {None, rloc})
+                or (canonical_extaddr(get_canonical_ext_address(row)) not in {None, table["extAddress"]})
+                for row in matches
+            ):
+                valid = False
+                break
+        if not valid:
+            continue
+        files = sorted(required | set(contributing))
+        routers.append({
+            "extAddress": table["extAddress"],
+            "rloc16": rloc,
+            "cliFiles": sorted(contributing),
+            "cliChildTableFile": _CLI_CHILD_TABLE,
+            "cliSourceObservedAt": by_name[_CLI_CHILD_TABLE]["sourceObservedAt"],
+            "cliTimeProvenance": by_name[_CLI_CHILD_TABLE]["timeProvenance"],
+            "restFile": OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+            "restDiagnosticId": table["diagnosticId"],
+            "restSourceObservedAt": table["created"],
+            "childCount": len({entry["childId"] for entry in table["childTable"]}),
+            "resolvedChildCount": len(table["resolvedChildren"]),
+            "inputDigests": {name: by_name[name]["sha256"] for name in files},
+            "scopeDigests": {name: by_name[name]["scopeSha256"] for name in files},
+        })
+    if not routers:
+        return None
+    return {
+        "contractVersion": REST_CHILD_TABLE_COVERAGE_VERSION,
+        "networkInstance": network,
+        "routers": sorted(routers, key=lambda item: (item["rloc16"], item["extAddress"])),
+    }
 
 
 def _extract(item: dict, payload: Any) -> list[dict]:
@@ -589,6 +851,7 @@ def _composition_inputs(data_dir: Path, entry: dict, catalog: dict, *,
                         allow_partial: bool, network: str | None, now: datetime) -> dict:
     captured, inputs, sources, identities, missing, health_reasons = [], [], [], [], [], []
     raw_inputs, dependency_states, dependency_reports = [], {}, {}
+    raw_payloads, raw_rows, raw_scopes = {}, {}, {}
     for dependency in _dependencies(catalog, entry):
         filename = dependency["files"][0]
         requested_network = None if dependency["source"] == "mdns" else network
@@ -672,11 +935,16 @@ def _composition_inputs(data_dir: Path, entry: dict, catalog: dict, *,
                     or (original.get("timeProvenance") == "raw-file-mtime"
                         and raw.mtime_ns != original.get("rawMtimeNs"))):
                 raise UnifiedDatasetError(f"Changing dependency evidence: {raw.filename}")
-            if original["status"] != "selected" or original["role"] not in {"records", "projection"}:
+            if original["status"] != "selected" or raw.content is None:
                 continue
             payload = _parse(raw.content, raw.filename)
-            records = _extract(declared[raw.filename], payload)
             file_scope, _ = _scope(scope, raw)
+            raw_payloads[raw.filename] = payload
+            raw_scopes[raw.filename] = file_scope
+            if original["role"] not in {"records", "projection"}:
+                continue
+            records = _extract(declared[raw.filename], payload)
+            raw_rows[raw.filename] = records
             from ha_matter_ws_unified import is_thread_record
             grouped: dict[str | None, list[dict]] = {}
             for record in records:
@@ -706,7 +974,8 @@ def _composition_inputs(data_dir: Path, entry: dict, catalog: dict, *,
         "captured": captured, "inputs": inputs, "sources": sources, "identities": identities,
         "missing": missing, "health_reasons": list(dict.fromkeys(health_reasons)),
         "raw_inputs": raw_inputs, "dependency_states": dependency_states,
-        "dependency_reports": dependency_reports,
+        "dependency_reports": dependency_reports, "raw_payloads": raw_payloads,
+        "raw_rows": raw_rows, "raw_scopes": raw_scopes,
     }
 
 
@@ -756,6 +1025,7 @@ def read_generation(data_dir: Path, entry: dict, *, verify_inputs: bool = False,
         if report["builderContract"] not in {
             "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
             "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
+            "unified-assembly-v9",
             BUILDER_CONTRACT,
         }:
             raise UnifiedDatasetError("Unsupported Unified assembly contract")
@@ -888,10 +1158,17 @@ def read_original_evidence(data_dir: Path, entry: dict, *, catalog: dict | None 
     captures = [_read_stable(data_dir, entry["unified"]["reportFile"])]
     if _parse(captures[0].content, captures[0].filename) != report:
         raise UnifiedDatasetError("Unified report changed before evidence extraction")
-    payloads, rows = {}, {}
+    payloads, all_payloads, rows, scopes = {}, {}, {}, {}
     selected = report["networkInstance"]
     if selected is None or report["healthState"] == "unavailable":
         raise UnifiedDatasetError("One valid observed network is required for health")
+    cli_files = {
+        dependency["files"][0] for dependency in dependencies if dependency["source"] == "otbr-cli"
+    }
+    cli_selected = any(
+        item["filename"] in cli_files and item["status"] == "selected"
+        for item in report["inputs"]
+    )
     from ha_matter_ws_unified import is_thread_record
     for item in metadata:
         declaration = declarations[item["filename"]]
@@ -902,13 +1179,22 @@ def read_original_evidence(data_dir: Path, entry: dict, *, catalog: dict | None 
                 or (item.get("timeProvenance") == "raw-file-mtime"
                     and raw.mtime_ns != item.get("rawMtimeNs"))):
             raise UnifiedDatasetError(f"Stale original evidence: {raw.filename}")
-        if item["status"] != "selected" or raw.content is None:
+        if raw.content is None:
+            continue
+        if (
+            item["status"] != "selected"
+            and not (cli_selected and declaration["source"] == "otbr-cli" and item["role"] == "records")
+        ):
             continue
         payload = _parse(raw.content, raw.filename)
+        all_payloads[raw.filename] = payload
+        if item["status"] != "selected":
+            continue
         payloads[raw.filename] = payload
+        file_scope, _ = _scope(scope, raw)
+        scopes[raw.filename] = file_scope
         if declaration["source"] == "mdns" or item["role"] != "records":
             continue
-        file_scope, _ = _scope(scope, raw)
         records = []
         for record in _extract(declaration, payload):
             if declaration["source"] == "ha-matter-ws" and not is_thread_record(record):
@@ -920,7 +1206,7 @@ def read_original_evidence(data_dir: Path, entry: dict, *, catalog: dict | None 
     _recheck(data_dir, captures)
     read_generation(data_dir, entry, verify_inputs=True, catalog=catalog)
     return {"report": report, "metadata": metadata, "declarations": declarations,
-            "payloads": payloads, "rows": rows}
+            "payloads": payloads, "allPayloads": all_payloads, "rows": rows, "scopes": scopes}
 
 
 def read_generation_artifact(data_dir: Path, entry: dict, filename: str) -> tuple[CachedInput, dict]:
@@ -1075,6 +1361,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
     unresolved_native = []
     tables_not_provided: list[dict[str, str]] = []
     child_coverage_payloads: dict[str, list] = {}
+    rest_outcome_complete: bool | None = None
+    rest_recovery: dict | None = None
     usable = len(composition["dependency_reports"]) if composition else 0
     for item in ([] if composition else recipe["inputs"]):
         filename = item["file"]
@@ -1118,22 +1406,18 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
                 health_reasons.append(f"unknown-identity:{filename}")
             continue
         if item["role"] == "outcome":
-            if not _validate_outcome(payload, filename, source=entry["source"]):
+            outcome_complete = _validate_outcome(payload, filename, source=entry["source"])
+            if filename == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME:
+                rest_outcome_complete = outcome_complete
+            elif not outcome_complete:
                 health_reasons.append(f"incomplete-outcome:{filename}")
             continue
         rows = _extract(item, payload)
         if ha_source:
             validate_canonical_rows(rows)
-        if any(isinstance(row, dict) and "tableAttempt" in row for row in rows):
-            table_summary = meshdiag_router_table_summary(rows)
-            if table_summary["unanswered"]:
-                health_reasons.append(f"incomplete-table-evidence:{filename}")
-            if table_summary["notProvided"] and not table_summary["guardPassed"]:
-                health_reasons.append(f"no-answered-router-table:{filename}")
-            elif table_summary["notProvided"]:
-                tables_not_provided.extend(
-                    {"file": filename, "rloc16": rloc16} for rloc16 in table_summary["notProvided"]
-                )
+        table_reasons, candidates = _router_table_evidence(filename, rows)
+        health_reasons.extend(table_reasons)
+        tables_not_provided.extend(candidates)
         if filename in _CHILD_COVERAGE_FILES:
             child_coverage_payloads[filename] = rows
         by_scope: dict[str | None, list[dict]] = {}
@@ -1180,13 +1464,10 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
     if ha_source:
         from ha_matter_ws_unified import assess_cached_outcomes
         health_reasons.extend(assess_cached_outcomes(ha_payloads, inputs))
-    uncovered = sorted({item["rloc16"] for item in tables_not_provided
-                        if not _children_covered(item["rloc16"], child_coverage_payloads)})
-    health_reasons.extend(f"uncovered-children:{rloc16}" for rloc16 in uncovered)
-    tables_not_provided = sorted(
-        (item for item in tables_not_provided if item["rloc16"] not in uncovered),
-        key=lambda item: (item["file"], item["rloc16"]),
+    uncovered_reasons, tables_not_provided = _finalize_router_table_evidence(
+        tables_not_provided, child_coverage_payloads,
     )
+    health_reasons.extend(uncovered_reasons)
     observed_networks = {scope for scope, _, _ in sources if scope is not None}
     observed_networks.update(identity for identity, _, _ in identities)
     if network is not None and network[7:] not in observed_networks:
@@ -1195,10 +1476,68 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
         raise UnifiedDatasetError(f"Missing required cached inputs: {', '.join(missing)}")
     if not usable:
         raise UnifiedDatasetError("No usable cached record inputs")
-    health_reasons = list(dict.fromkeys(health_reasons))
     selected = network[7:] if network is not None else (
         next(iter(observed_networks)) if len(observed_networks) == 1 else None
     )
+    if rest_outcome_complete is not None:
+        metadata_by_name = {item["filename"]: item for item in inputs}
+        diagnostic_metadata = metadata_by_name.get(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME, {})
+        outcome_metadata = metadata_by_name[OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME]
+        effective, recovery_captures = read_rest_diagnostic_recovery(
+            data_dir,
+            expected_network=selected,
+            expected_outcome_digest=outcome_metadata.get("sha256"),
+            expected_diagnostics_digest=diagnostic_metadata.get("sha256"),
+        )
+        captured.extend(recovery_captures)
+        if effective is not None:
+            rest_recovery = effective.get("diagnosticRecovery")
+            from td_health_processor import _outcome_state
+            rest_outcome_complete = _outcome_state(effective).value == "complete"
+        if not rest_outcome_complete:
+            health_reasons.append(
+                f"incomplete-outcome:{OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME}"
+            )
+    elif composition:
+        rest_recovery = (
+            composition["dependency_states"].get("otbr-restapi", {})
+            .get("coverage", {}).get("restDiagnostics")
+        )
+    rest_child_tables = None
+    if composition and selected is not None:
+        cli_coverage = composition["dependency_states"].get("otbr-cli", {}).get("coverage", {})
+        tables_not_provided = list(cli_coverage.get("tablesNotProvided", []))
+        metadata_by_name = {item["filename"]: item for item in composition["raw_inputs"]}
+        diagnostic_metadata = metadata_by_name.get(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME, {})
+        outcome_metadata = metadata_by_name.get(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME, {})
+        effective = None
+        if diagnostic_metadata.get("status") == outcome_metadata.get("status") == "selected":
+            effective, recovery_captures = read_rest_diagnostic_recovery(
+                data_dir, expected_network=selected,
+                expected_outcome_digest=outcome_metadata["sha256"],
+                expected_diagnostics_digest=diagnostic_metadata["sha256"],
+            )
+            captured.extend(recovery_captures)
+        rest_child_tables = derive_rest_child_table_coverage(
+            network=f"extpan:{selected}", metadata=composition["raw_inputs"],
+            scopes=composition["raw_scopes"], payloads=composition["raw_payloads"],
+            rows=composition["raw_rows"], cli_coverage=cli_coverage, rest_effective=effective,
+        )
+        if rest_child_tables:
+            for router in rest_child_tables["routers"]:
+                reason = f"otbr-cli:uncovered-children:{router['rloc16']}"
+                health_reasons = [item for item in health_reasons if item != reason]
+                tables_not_provided.extend(
+                    {"file": filename, "rloc16": router["rloc16"]}
+                    for filename in router["cliFiles"]
+                )
+        tables_not_provided = [
+            {"file": filename, "rloc16": rloc}
+            for filename, rloc in sorted(
+                {(item["file"], item["rloc16"]) for item in tables_not_provided}
+            )
+        ]
+    health_reasons = list(dict.fromkeys(health_reasons))
     if selected is None:
         health_reasons.append("missing-or-ambiguous-observed-identity")
     identity_usable = selected is not None and any(
@@ -1290,7 +1629,9 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
         "fieldSources": field_sources, "recordSources": record_sources,
         "coverage": {"missingRequired": missing, "missingOptional": missing_optional,
                      "healthReasons": health_reasons,
-                     **({"tablesNotProvided": tables_not_provided} if tables_not_provided else {})},
+                     **({"tablesNotProvided": tables_not_provided} if tables_not_provided else {}),
+                     **({"restChildTableCoverage": rest_child_tables} if rest_child_tables else {}),
+                     **({"restDiagnostics": rest_recovery} if rest_recovery is not None else {})},
         "excluded": ([OTBR_RESTAPI_ACTIONS_LIST_FILENAME] if entry["source"] == "otbr-restapi" else
                      [HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME, HA_MATTER_WS_SERVER_INFO_FILENAME]
                      if ha_source else []),

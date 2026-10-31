@@ -273,15 +273,15 @@ explicit cache-only rebuild. `--allow-partial` admits provisional evidence,
 not unknown/mismatched network identity or a stale generation. Health never
 rewrites a Unified generation or runs a collector.
 
-Retained Unified lineage accepts the exact assembly-v2/v3/v4/v5 report
-contracts. Assembly-v3 corrects repeated REST diagnostic observations in derived
+Retained Unified lineage accepts the exact assembly-v2 through assembly-v10
+report contracts. Assembly-v3 corrects repeated REST diagnostic observations in derived
 rows; it does not change original-evidence samples, capability maxima, absence
 witness rules, manifest snapshots, or replay eligibility. Assembly-v4 embeds
 unambiguously matched Matter service advertisements under `mdnsRecords` in
 derived Thread rows. Assembly-v5 corrects merged relationship-only markers and
 adds HAP UDP advertisements to the same guarded association; health still
 consumes only verified original evidence, not the derived marker or service array.
-Existing assembly-v2/v3/v4
+Existing assembly-v2 through assembly-v9
 assessments remain readable and reopenable; unknown assembly contracts are still
 rejected.
 
@@ -304,6 +304,32 @@ when its TLVs omit the Child Table. A file in which no router answered adds
 adds `incomplete-table-evidence:<file>`. Each of these reasons degrades the
 Unified dataset.
 
+Assembly-v10 can use a REST child table to cover an otherwise uncovered CLI
+router only in Multi-source composition. The original CLI and REST inputs must
+have matching observed network scopes and unique matching router extended
+addresses and RLOC16s. The REST table must come from a completed or
+evidence-recovered diagnostic, and its original creation time must be within
+7,200 seconds, inclusive, of the CLI child-table input's original observation
+time. A digest-bound original file mtime is accepted when it is the recorded
+CLI source time; report build times and the current clock are not substitutes.
+The report retains router identities, original times, file and scope digests,
+and CLI `tablesNotProvided` provenance. Other uncovered routers, table guards,
+and REST or HA degradation reasons remain unchanged; CLI-only output is not
+reclassified.
+
+The standard REST diagnostic outcome uses the `rest-diagnostic-recovery-v1`
+projection. Matching same-run child responses and router fallback child tables
+can establish an effective completion while preserving original skips,
+attempts, failures, and counters. Legacy cached outcomes are classified in
+memory only after their diagnostic, outcome, and observed scope bindings are
+verified; raw files are not rewritten. The separate mesh-diagnostics outcome
+and other required inputs retain their independent completeness gates.
+Assessment `coverage.restDiagnostics` distinguishes returned fields as
+`present`, `not-provided`, `unavailable`, or `not-requested`. Failed-pass
+reasons remain available, and missing values do not become zeroes or health
+findings. The Findings assessment's expandable **REST diagnostic coverage**
+shows these details and, where applicable, the cross-source provenance.
+
 Samples and roster facts retain original filenames, field authority and
 original observation times. Identity/outcome companions, mDNS services,
 non-Thread Matter devices, relationship-only placeholders and derived dashboard
@@ -317,12 +343,16 @@ for all five and have no whole-network topology/BR absence authority.
 Original completeness, outcomes and unavailable inputs can only reduce these
 maxima.
 
-Unified assessments use `snapshot-v16` and the distinct
+New Unified assessments use `snapshot-v17` and the distinct
 `comparison-v1-unified` sample contract. Assessment coverage reports
 `meshdiagTablesNotProvided`, the number of routers that did not provide meshdiag
-tables; it adds no rule or finding. Unified comparisons require `snapshot-v16`
-on both sides, so `snapshot-v15` endpoints are reported as unsupported. Legacy `snapshot-v14`,
-`comparison-v1` and Route64 contracts and golden vectors are unchanged.
+tables; it adds no rule or finding. The REST diagnostics, REST topology,
+REST topology with mDNS, and merged OTBR topology with mDNS file-mode profiles
+also use `snapshot-v17`; unrelated file-mode profiles remain on `snapshot-v14`.
+Comparison requires matching evaluator versions and compatible sample/manifest
+contracts: retained v14-to-v14 and v16-to-v16 comparisons remain supported,
+but v14/v17 and v16/v17 pairs are unsupported. Legacy `snapshot-v15` Unified
+comparisons remain unsupported.
 Original profiles default to `inputMode: files`. An immutable `unifiedRecipe`
 uses the builder's `unified-v1` contract and retains the validated transitive raw closure;
 versioned assessment `unifiedHealth` retains recipe/authority contract digests,
@@ -333,6 +363,12 @@ evidence cannot create a fresh collection or advance Offline.
 For new Unified absence assessments, a qualified complete CLI domain wins;
 otherwise a complete qualified REST domain may supply the witness. The key is
 the observed network, original diagnostic digest and original diagnostic time.
+When REST substitutes for a missing CLI child table, the CLI collection is not
+an independent negative witness; only a separately qualified REST witness can
+authorize absence. A child-ID-only entry does not establish a named child's
+presence or absence without a unique, same-run identity. An unresolved child
+identity limits REST absence authority, and an empty table is not by itself
+proof that an expected device is absent.
 Required original topology/identity/outcome coverage must qualify that key.
 Original and Unified projections count once, same-key positive device presence
 overrides negatives, and the current key is excluded from prior counts.
@@ -905,7 +941,11 @@ One **Time** toolbar is shared by Findings, Device Roster, and health
 coloring. Its label and date-button tooltips explain that the time is the
 observation time (UTC), not when the health assessment was processed; the date
 button also exposes this explanation to assistive technology.
-**Latest** follows the latest stored assessment; choosing a retained
+**Latest** follows the latest stored assessment; when several observations
+have the same observation time, it uses the preferred roster revision and then
+the latest assessment time, consistently with the retained-assessment list.
+This does not change observation times or make equal-time comparisons valid.
+Choosing a retained
 run or using **Older**/**Newer** pins its exact assessment ID until Latest is
 selected again. The selected observation date opens the inline chooser below
 the navigation row. The dropdown fits its option text, capped at the available

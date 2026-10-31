@@ -39,6 +39,13 @@ not an arbitrary comparison pair or necessarily its After endpoint. Its
 observation time uses the comparison tab's UTC date-time format and includes
 the elapsed age of the observation.
 
+In Findings, **REST diagnostic coverage** expands the recovered child/router
+counts, field availability, failed-pass reasons, and any qualified Multi-source
+child-table provenance. These are coverage details, not findings. An absent
+field can be not provided, unavailable, or not requested; not requested is not
+evidence of unsupported firmware. Older assessments without this coverage keep
+their existing display.
+
 The Insights heading, selected-assessment summary, and tabs share a compact
 sticky header. The Findings badge counts currently matching filtered groups;
 the Device Roster badge counts currently matching filtered devices. These are
@@ -104,6 +111,9 @@ Comparison is available only when the server exposes comparison reads; unavailab
 history, insufficient retained history, empty filter results, and failed reads
 are reported separately. Processing stores adjacent and complete-only interval
 pairs in `hobat_v1.db`; reads can also derive an unstored pair without writing.
+Comparison requires the same evaluator version and compatible sample contracts:
+retained v14/v14 and v16/v16 pairs remain usable, while v14/v17 and v16/v17
+pairs are not comparable.
 See [Thread Network Health](thread_network_health.md) for API, retention,
 and comparison details.
 
@@ -180,14 +190,17 @@ one medium request (0, 1, 2, 8, 9), independent of the MTD pass controls.
 Each enabled known-child pass may repeat its identical TLV set once after a
 terminal/no-result response. A same-set retry is not a smaller-TLV fallback;
 the first usable result completes that pass. If detail fails after fast
-succeeds, the fast record is retained and the device is reported partial.
+succeeds, the fast record is retained; a verified same-run identity can make
+the effective device status complete while retaining the original partial
+status and failed-pass evidence.
 Successful fast results are checkpointed before detail is enqueued.
 
 The reduced child profile intentionally differs from the old 7-TLV detailed
 request: MTD fast does not request MAC counters, while neither new child profile
-requests `threadStackVersion` or `mleCounters`. Missing fields remain unavailable
-to health evaluation, not zero or fresh inherited evidence. Enabling both MTD
-passes can issue up to four actions per MTD child; detail therefore remains
+requests `threadStackVersion` or `mleCounters`. Missing fields are distinguished
+as not provided, unavailable, or not requested, not zero or fresh inherited
+evidence. Enabling both MTD passes can issue up to four actions per MTD child;
+detail therefore remains
 opt-in. Unknown or contradictory child mode is warned and uses the legacy
 detailed-to-medium progression.
 
@@ -241,6 +254,17 @@ Guard-affected `diagnostics fetch-all` writes its outcome beside the resolved
 output as `.outcome.json` (the default file is
 `td-otbr-restapi-diagnostics-fetch-all.outcome.json`); `topology` updates that
 standard outcome file while retaining the prior diagnostic items. Refreshing
-the roster with a nonzero IID makes the device eligible for a later sweep. See
+the roster with a nonzero IID makes the device eligible for a later sweep. The
+standalone `diagnostics fetch-all --children-expand-by-rloc` option is off by
+default; a uniquely matched same-run RLOC response can recover a skipped
+child's effective status while retaining the original skip and counters.
+Topology does not enable this option.
+
+Multi-source Unified health can use a verified REST child table for an
+otherwise uncovered CLI router only when observed networks and router
+identities match and the original CLI/REST times differ by at most two hours.
+Unmatched child IDs do not prove a named child's absence, and unrelated CLI,
+REST, or HA coverage failures remain in force. See
+the [health guide](thread_network_health.md#unified-health-qualification) and
 the [zero-IID investigation](../plan/hobat-plan/datasource-otbr-restapi/2026_10_otbr_restapi_child_tlv_response_experiment.md)
 for the discovery evidence and repair context.

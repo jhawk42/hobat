@@ -30,7 +30,22 @@ from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
 EVALUATOR_VERSION = "snapshot-v14"
-UNIFIED_EVALUATOR_VERSION = "snapshot-v16"
+UNIFIED_EVALUATOR_VERSION = "snapshot-v17"
+REST_RECOVERY_EVALUATOR_VERSION = "snapshot-v17"
+REST_RECOVERY_DATASETS = frozenset({
+    "otbr_restapi_devices_diagnostics_fetch",
+    "otbr_restapi_topology",
+    "otbr_restapi_topology_mdns",
+    "multi_source_otbr_topology_mdns",
+})
+
+
+def evaluator_version_for_dataset(dataset_id: str, sample_contract_version: str) -> str:
+    if sample_contract_version == "comparison-v1-unified":
+        return UNIFIED_EVALUATOR_VERSION
+    if dataset_id in REST_RECOVERY_DATASETS:
+        return REST_RECOVERY_EVALUATOR_VERSION
+    return EVALUATOR_VERSION
 
 _DIRECT_THRESHOLD_COUNT_METRICS = frozenset(
     {"parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"}
@@ -1564,10 +1579,10 @@ def evaluate_observation(
     evaluation_inputs: EvaluationInputs | None = None,
     sample_contract_version: str = "comparison-v1",
     unified_health: Mapping[str, Any] | None = None,
+    rest_diagnostics: Mapping[str, Any] | None = None,
 ) -> Assessment:
-    evaluator_version = (
-        UNIFIED_EVALUATOR_VERSION if sample_contract_version == "comparison-v1-unified"
-        else EVALUATOR_VERSION
+    evaluator_version = evaluator_version_for_dataset(
+        observation.dataset_id, sample_contract_version
     )
     declared_profile = profile
     if sample_contract_version == "comparison-v1-unified":
@@ -1926,7 +1941,10 @@ def evaluate_observation(
             else 0.0
         ),
         **({"meshdiagTablesNotProvided": len(metric_facts.meshdiag_not_provided_device_ids)}
-           if evaluator_version == UNIFIED_EVALUATOR_VERSION else {}),
+           if sample_contract_version == "comparison-v1-unified" else {}),
+        **({"restChildTableCoverage": unified_health["restChildTableCoverage"]}
+           if unified_health and "restChildTableCoverage" in unified_health else {}),
+        **({"restDiagnostics": dict(rest_diagnostics)} if rest_diagnostics is not None else {}),
         "evaluationInputs": {
             name: {
                 "state": domain.state.value,
@@ -1953,6 +1971,9 @@ def evaluate_observation(
     if unified_health is not None:
         from td_health_unified import digest
         assessment_input_digest = digest([assessment_input_digest, unified_health])
+    if rest_diagnostics is not None:
+        from td_health_unified import digest
+        assessment_input_digest = digest([assessment_input_digest, rest_diagnostics])
     normalized_roster_context = dict(inputs.roster_context or {})
     presence_inputs = {
         "complete": complete,
@@ -2033,6 +2054,8 @@ def evaluate_observation(
         reproduction_context["healthProfile"].update(
             inputMode=declared_profile.input_mode, evidenceReport=declared_profile.evidence_report,
         )
+    if rest_diagnostics is not None:
+        reproduction_context["restDiagnostics"] = dict(rest_diagnostics)
     return Assessment(
         assessment_id=assessment_id,
         observation_id=observation.observation_id,

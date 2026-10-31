@@ -9,7 +9,14 @@ from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Mapping
 
-from td_const import OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME, OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME
+from td_const import (
+    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+)
 
 SAMPLE_CONTRACT = "comparison-v1-unified"
 CONTEXT_VERSION = "unified-health-v1"
@@ -120,7 +127,7 @@ def validate_context(context, dataset, observation=None):
             ]) for builder_contract in (
                 "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
                 "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
-                "unified-assembly-v9",
+                "unified-assembly-v9", "unified-assembly-v10",
             )}
             or not isinstance(value.get("originalEvidenceFingerprint"), str)
             or not _DIGEST.fullmatch(value["originalEvidenceFingerprint"])
@@ -140,6 +147,8 @@ def validate_context(context, dataset, observation=None):
         raise HealthManifestError("Invalid Unified witness presence context")
     if "absenceOrderingAvailable" in value and type(value["absenceOrderingAvailable"]) is not bool:
         raise HealthManifestError("Invalid Unified absence ordering context")
+    if "unresolvedRestChildIdentities" in value and value["unresolvedRestChildIdentities"] is not True:
+        raise HealthManifestError("Invalid Unified REST child identity context")
     witness = value.get("absenceWitness")
     if witness is not None:
         if (not isinstance(witness, Mapping) or set(witness) != {"domain", "key", "sourceObservedAt"}
@@ -147,6 +156,102 @@ def validate_context(context, dataset, observation=None):
                 or not isinstance(witness["key"], str) or not _DIGEST.fullmatch(witness["key"])):
             raise HealthManifestError("Invalid retained Unified absence witness")
         timestamp(witness["sourceObservedAt"])
+        if witness["domain"] == "otbr-restapi" and value.get("unresolvedRestChildIdentities"):
+            raise HealthManifestError("Unresolved REST children cannot authorize absence")
+    child_coverage = value.get("restChildTableCoverage")
+    if child_coverage is not None:
+        from otbr_cli_util import canonical_router_rloc16
+        from td_unified_dataset import REST_CHILD_TABLE_COVERAGE_VERSION
+
+        builder_digest = digest([
+            "unified-v1", "unified-assembly-v10", dataset.unified_recipe["recipeDigest"],
+            dataset.unified_recipe["authorityDigest"],
+        ])
+        if (
+            dataset.datasource_id != "multi-source"
+            or value["reportContractDigest"] != builder_digest
+            or not isinstance(child_coverage, Mapping)
+            or set(child_coverage) != {"contractVersion", "networkInstance", "routers"}
+            or child_coverage.get("contractVersion") != REST_CHILD_TABLE_COVERAGE_VERSION
+            or not isinstance(child_coverage.get("networkInstance"), str)
+            or not re.fullmatch(r"extpan:[0-9a-f]{16}", child_coverage["networkInstance"])
+            or not isinstance(child_coverage.get("routers"), list)
+            or not child_coverage["routers"]
+            or witness is not None and witness["domain"] != "otbr-restapi"
+        ):
+            raise HealthManifestError("Invalid retained REST child-table coverage")
+        previous = None
+        for router in child_coverage["routers"]:
+            keys = {
+                "extAddress", "rloc16", "cliFiles", "cliChildTableFile",
+                "cliSourceObservedAt", "cliTimeProvenance", "restFile",
+                "restDiagnosticId", "restSourceObservedAt", "childCount", "resolvedChildCount",
+                "inputDigests", "scopeDigests",
+            }
+            if (
+                not isinstance(router, Mapping) or set(router) != keys
+                or not isinstance(router["extAddress"], str)
+                or not re.fullmatch(r"[0-9a-f]{16}", router["extAddress"])
+                or router["extAddress"] == "0" * 16
+                or not isinstance(router["rloc16"], str)
+                or canonical_router_rloc16(router["rloc16"]) != router["rloc16"]
+                or not isinstance(router["cliFiles"], list)
+                or any(not isinstance(item, str) for item in router["cliFiles"])
+                or router["cliFiles"] != sorted(set(router["cliFiles"]))
+                or OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME not in router["cliFiles"]
+                or not set(router["cliFiles"]) <= {
+                    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
+                    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
+                }
+                or router["cliChildTableFile"] != OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME
+                or router["restFile"] != OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME
+                or router["cliTimeProvenance"] not in {"embedded", "raw-file-mtime"}
+                or not isinstance(router["restDiagnosticId"], str)
+                or not router["restDiagnosticId"]
+                or type(router["childCount"]) is not int or not 0 <= router["childCount"] <= 511
+                or type(router["resolvedChildCount"]) is not int
+                or not 0 <= router["resolvedChildCount"] <= router["childCount"]
+                or not isinstance(router["inputDigests"], Mapping)
+                or not isinstance(router["scopeDigests"], Mapping)
+            ):
+                raise HealthManifestError("Invalid retained REST child-table router")
+            order = (router["rloc16"], router["extAddress"])
+            if previous is not None and order <= previous:
+                raise HealthManifestError("Duplicate or unordered REST child-table routers")
+            previous = order
+            files = {
+                *router["cliFiles"], OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+                OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+                OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+                OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+            }
+            if (
+                set(router["inputDigests"]) != files or set(router["scopeDigests"]) != files
+                or any(not isinstance(item, str) or not _DIGEST.fullmatch(item)
+                       for item in [*router["inputDigests"].values(), *router["scopeDigests"].values()])
+            ):
+                raise HealthManifestError("Invalid retained REST child-table provenance")
+            try:
+                cli_time = timestamp(router["cliSourceObservedAt"])
+                rest_time = timestamp(router["restSourceObservedAt"])
+            except (TypeError, AttributeError, ValueError) as exc:
+                raise HealthManifestError("Invalid retained REST child-table time") from exc
+            if abs((rest_time - cli_time).total_seconds()) > 7200:
+                raise HealthManifestError("REST child-table observations are too far apart")
+            if witness is not None and router["resolvedChildCount"] != router["childCount"]:
+                raise HealthManifestError("Unresolved REST children cannot authorize absence")
+            if observation is not None:
+                by_name = {source.filename: source for source in observation.sources}
+                allowed_states = {"valid", "provisional"} if observation.completeness.value == "partial" else {"valid"}
+                if (
+                    child_coverage["networkInstance"] != observation.network_id
+                    or any(name not in by_name or by_name[name].state not in allowed_states
+                           or by_name[name].digest != source_digest
+                           for name, source_digest in router["inputDigests"].items())
+                    or by_name[router["cliChildTableFile"]].source_observed_at
+                    != router["cliSourceObservedAt"]
+                ):
+                    raise HealthManifestError("REST child-table coverage does not bind original evidence")
     if observation is not None:
         originals = [dict(filename=s.filename, digest=s.digest, kind=s.kind, state=s.state,
                           sourceObservedAt=s.source_observed_at) for s in observation.sources

@@ -428,17 +428,26 @@ def test_health_finding_sort_buttons_restore_focus_and_count_both_levels() -> No
       };
       const model = {assessment: {
         status: "poor", completeness: "complete", confidence: "high",
-        evaluationContextComplete: true, coverage: {deviceCount: 1, pillars: {}, observedPillars: {}},
+        evaluationContextComplete: true, coverage: {
+          deviceCount: 1, pillars: {}, observedPillars: {},
+          restDiagnostics: {summary: {
+            recoveredChildren: 1, recoveredRouters: 0, notProvidedDevices: 0, unavailableDevices: 1,
+          }, devices: [], unresolved: []},
+        },
         findingGroups: [findingGroup],
       }};
       const viewState = {
         view: "all", filters: {status: "all", scope: "all", evidenceKind: "all"},
-        sort: {column: "priority", direction: "ascending"},
+        sort: {column: "priority", direction: "ascending"}, restCoverageOpen: false,
       };
       const render = () => renderHealthInsights(container, model, viewState, {
         changeSort: (sort) => { viewState.sort = sort; render(); },
+        restCoverageOpen: (open) => { viewState.restCoverageOpen = open; },
       });
       render();
+      const coverage = summary.children.find((child) => child.className === "health-rest-coverage");
+      coverage.open = true;
+      coverage.listeners.toggle();
       const statusButton = tableHead.querySelectorAll("button[data-health-sort-column]")
         .find((button) => button.dataset.healthSortColumn === "status");
       statusButton.click();
@@ -448,6 +457,7 @@ def test_health_finding_sort_buttons_restore_focus_and_count_both_levels() -> No
           (heading) => heading.children[0].dataset.healthSortColumn === "status",
         ).getAttribute("aria-sort"),
         footer: empty.children.find((child) => child.className === "health-table-footer")?.textContent,
+        coverageOpen: summary.children.find((child) => child.className === "health-rest-coverage").open,
       }));
     """
     completed = subprocess.run(
@@ -462,6 +472,7 @@ def test_health_finding_sort_buttons_restore_focus_and_count_both_levels() -> No
 
     assert result["focusColumn"] == "status"
     assert result["sortDirection"] == "ascending"
+    assert result["coverageOpen"] is True
     assert "1 finding group shown" in result["footer"]
     assert "2 attributed findings" in result["footer"]
 

@@ -1015,6 +1015,10 @@ def test_partial_observation_cannot_make_expected_device_offline(tmp_path) -> No
 
 def test_second_complete_absence_establishes_offline(tmp_path) -> None:
     _write_seed(tmp_path, [])
+    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
+    first_time = datetime(2026, 8, 31, 23, 59, tzinfo=timezone.utc).timestamp()
+    os.utime(snapshot, (first_time, first_time))
+    os.utime(tmp_path / "td-otbr-cli-thread-network-info.json", (first_time, first_time))
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     device_id = "extaddr:8672766ae0578187"
     store.upsert_expected_device("extpan:78b9775b001c1cbe", device_id, "expected")
@@ -1033,8 +1037,9 @@ def test_second_complete_absence_establishes_offline(tmp_path) -> None:
     )
     assert not any(f.rule_id == "device.offline" for f in first.assessment.findings)
 
-    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
     snapshot.write_text("[]\n", encoding="utf-8")
+    second_time = datetime(2026, 9, 1, 0, 0, 30, tzinfo=timezone.utc).timestamp()
+    os.utime(snapshot, (second_time, second_time))
     second = process_health(
         data_dir=tmp_path,
         dataset_id="otbr_cli_diagnostics_fetch",
@@ -1047,6 +1052,10 @@ def test_second_complete_absence_establishes_offline(tmp_path) -> None:
 
 def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tmp_path) -> None:
     _write_seed(tmp_path, [])
+    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
+    first_time = datetime(2026, 8, 31, 23, 59, tzinfo=timezone.utc).timestamp()
+    os.utime(snapshot, (first_time, first_time))
+    os.utime(tmp_path / "td-otbr-cli-thread-network-info.json", (first_time, first_time))
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     network_id = "extpan:78b9775b001c1cbe"
     device_id = "extaddr:8672766ae0578187"
@@ -1064,8 +1073,9 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
         store=store,
         processing_time=datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc),
     )
-    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
     snapshot.write_text("[]\n", encoding="utf-8")
+    second_time = datetime(2026, 9, 1, 0, 0, 30, tzinfo=timezone.utc).timestamp()
+    os.utime(snapshot, (second_time, second_time))
     offline = process_health(
         data_dir=tmp_path,
         dataset_id="otbr_cli_diagnostics_fetch",
@@ -1237,6 +1247,10 @@ def test_complete_absences_below_roster_ratio_are_offline_without_network_impact
         for device_id in device_ids[1:]
     ]
     _write_seed(tmp_path, observed_devices)
+    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
+    first_time = datetime(2026, 8, 31, 23, 59, tzinfo=timezone.utc).timestamp()
+    os.utime(snapshot, (first_time, first_time))
+    os.utime(tmp_path / "td-otbr-cli-thread-network-info.json", (first_time, first_time))
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     network_id = "extpan:78b9775b001c1cbe"
     for device_id in device_ids:
@@ -1257,8 +1271,9 @@ def test_complete_absences_below_roster_ratio_are_offline_without_network_impact
     )
     assert not any(f.rule_id == "device.offline" for f in first.assessment.findings)
 
-    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
     snapshot.write_text(json.dumps(observed_devices), encoding="utf-8")
+    second_time = datetime(2026, 9, 1, 0, 0, 30, tzinfo=timezone.utc).timestamp()
+    os.utime(snapshot, (second_time, second_time))
     second = process_health(
         data_dir=tmp_path,
         dataset_id="otbr_cli_diagnostics_fetch",
@@ -1305,6 +1320,119 @@ def _write_rest_seed(data_dir, outcome):
     (data_dir / "td-otbr-restapi-diagnostics-fetch-all.outcome.json").write_text(
         json.dumps(outcome), encoding="utf-8"
     )
+
+
+def _write_bound_rest_recovery_seed(data_dir, dataset_id, *, bind=True, mesh_partial=False):
+    from test_td_restapi_diagnostic_recovery import _fixture
+    from util_data import network_scope_path
+
+    outcome, diagnostics = _fixture()
+    dataset = load_health_manifest().dataset(dataset_id)
+    for filename in dataset.files:
+        (data_dir / filename).write_text("[]", encoding="utf-8")
+    (data_dir / dataset.health_profile.identity_file).write_text(
+        json.dumps({"extPanId": "1234567890abcdef"}), encoding="utf-8"
+    )
+    diagnostic_path = data_dir / "td-otbr-restapi-diagnostics-fetch-all.json"
+    outcome_path = data_dir / "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+    diagnostic_path.write_text(json.dumps(diagnostics), encoding="utf-8")
+    outcome_path.write_text(json.dumps(outcome), encoding="utf-8")
+    mesh_outcome = data_dir / "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json"
+    if mesh_outcome.name in dataset.health_profile.required_outcomes:
+        mesh_outcome.write_text(json.dumps({
+            "deviceResults": [{"deviceId": "1111111111111111", "status": "completed"}],
+            "partial": mesh_partial,
+            "completedAt": "2026-10-30T11:01:00+00:00",
+        }), encoding="utf-8")
+    if bind:
+        for path in (diagnostic_path, outcome_path):
+            network_scope_path(path).write_text(json.dumps({
+                "extPanId": "1234567890abcdef",
+                "provenance": "observed",
+                "snapshotSha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }), encoding="utf-8")
+    timestamp = datetime(2026, 10, 30, 11, 1, tzinfo=timezone.utc).timestamp()
+    for path in data_dir.iterdir():
+        os.utime(path, (timestamp, timestamp))
+
+
+@pytest.mark.parametrize("dataset_id", [
+    "otbr_restapi_devices_diagnostics_fetch",
+    "otbr_restapi_topology",
+    "otbr_restapi_topology_mdns",
+    "multi_source_otbr_topology_mdns",
+])
+def test_file_mode_uses_bound_rest_recovery_and_exposes_coverage(tmp_path, dataset_id):
+    _write_bound_rest_recovery_seed(tmp_path, dataset_id)
+    result = build_processing_result(
+        data_dir=tmp_path, dataset_id=dataset_id, policy=load_health_policy(),
+        processing_time=datetime(2026, 11, 1, tzinfo=timezone.utc),
+    )
+
+    assert result.observation.completeness is Completeness.COMPLETE
+    assert result.assessment.evaluator_version == "snapshot-v17"
+    coverage = result.assessment.coverage["restDiagnostics"]
+    assert coverage["summary"]["recoveredChildren"] == 1
+    assert coverage["summary"]["recoveredRouters"] == 1
+    assert coverage["provenance"]["bindingStatus"] == "verified"
+
+
+@pytest.mark.parametrize("case", ["missing-binding", "mesh-partial"])
+def test_file_mode_keeps_independent_incomplete_evidence(tmp_path, case):
+    dataset_id = "otbr_restapi_topology"
+    _write_bound_rest_recovery_seed(
+        tmp_path, dataset_id,
+        bind=case != "missing-binding", mesh_partial=case == "mesh-partial",
+    )
+    result = build_processing_result(
+        data_dir=tmp_path, dataset_id=dataset_id, policy=load_health_policy(),
+        allow_partial=True, processing_time=datetime(2026, 11, 1, tzinfo=timezone.utc),
+    )
+    assert result.observation.completeness is Completeness.PARTIAL
+    coverage = result.assessment.coverage["restDiagnostics"]
+    assert coverage["summary"]["recoveredChildren"] == (case == "mesh-partial")
+
+
+def test_retained_rest_recovery_is_bound_and_history_remains_immutable(tmp_path):
+    dataset_id = "otbr_restapi_devices_diagnostics_fetch"
+    _write_bound_rest_recovery_seed(tmp_path, dataset_id, bind=False)
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    kwargs = {
+        "data_dir": tmp_path, "dataset_id": dataset_id, "policy": load_health_policy(),
+        "store": store, "allow_partial": True,
+        "processing_time": datetime(2026, 11, 1, tzinfo=timezone.utc),
+    }
+    partial = process_health(**kwargs)
+    assert partial.observation.completeness is Completeness.PARTIAL
+    _write_bound_rest_recovery_seed(tmp_path, dataset_id, bind=True)
+    recovered = process_health(**kwargs)
+    assert recovered.observation.completeness is Completeness.COMPLETE
+    assert recovered.observation.observation_id != partial.observation.observation_id
+    with closing(store._connect()) as connection:
+        retained = connection.execute(
+            "SELECT completeness FROM observations WHERE observation_id=?",
+            (partial.observation.observation_id,),
+        ).fetchone()
+    assert retained["completeness"] == "partial"
+    read_only = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME, read_only=True)
+    inventory = inventory_health_history(read_only, target_policy=kwargs["policy"], dataset_ids=(dataset_id,))
+    assert all(item.eligibility.value == "already-current" for item in inventory.items)
+
+    with closing(store._connect()) as connection, connection:
+        row = connection.execute(
+            "SELECT reproduction_context_json FROM assessments WHERE assessment_id=?",
+            (recovered.assessment.assessment_id,),
+        ).fetchone()
+        context = json.loads(row["reproduction_context_json"])
+        context["restDiagnostics"]["provenance"]["diagnosticsSha256"] = "0" * 64
+        connection.execute(
+            "UPDATE assessments SET reproduction_context_json=? WHERE assessment_id=?",
+            (json.dumps(context), recovered.assessment.assessment_id),
+        )
+    inventory = inventory_health_history(read_only, target_policy=kwargs["policy"], dataset_ids=(dataset_id,))
+    changed = next(item for item in inventory.items
+                   if item.source_assessment_id == recovered.assessment.assessment_id)
+    assert changed.eligibility.value == "invalid"
 
 
 def test_newer_outcome_does_not_refresh_unchanged_device_source(tmp_path) -> None:

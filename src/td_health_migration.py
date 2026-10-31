@@ -23,6 +23,7 @@ from td_health_comparison import (
 from td_health_evaluator import (
     EVALUATOR_VERSION,
     UNIFIED_EVALUATOR_VERSION,
+    evaluator_version_for_dataset,
     evaluate_observation,
     evaluation_inputs_from_payload,
 )
@@ -55,8 +56,10 @@ from td_health_sqlite import (
 )
 
 
-_SUPPORTED_EVALUATORS = frozenset({"snapshot-v10", "snapshot-v11", "snapshot-v15", "snapshot-v16",
-                                   EVALUATOR_VERSION})
+_SUPPORTED_EVALUATORS = frozenset({
+    "snapshot-v10", "snapshot-v11", "snapshot-v15", "snapshot-v16",
+    EVALUATOR_VERSION, UNIFIED_EVALUATOR_VERSION,
+})
 _DEVICE_ID_PREFIX = "extaddr:"
 
 
@@ -308,6 +311,17 @@ def _saved_context_inputs(
                 borderRouterAuthority=bool(unified_health["absenceWitness"]),
             )
             expected_digest = digest([_digest(assessment_identity), unified_health])
+        if "restDiagnostics" in raw:
+            from td_health_unified import digest
+            from td_restapi_diagnostic_recovery import validate_retained_recovery
+
+            recovery = raw["restDiagnostics"]
+            validate_retained_recovery(
+                recovery, sources=observation.sources, network_id=observation.network_id,
+            )
+            if json.loads(row["coverage_json"]).get("restDiagnostics") != recovery:
+                raise ValueError("retained-rest-coverage-mismatch")
+            expected_digest = digest([expected_digest, recovery])
         if (
             expected_digest != row["policy_digest"]
             or _digest(presence) != row["presence_input_digest"]
@@ -812,9 +826,8 @@ def inventory_health_history(
                 adapter_id = target.adapter_id
                 item_target_digest = target_contract_digest(
                     dataset, source["sample_contract_version"],
-                    evaluator_version=(
-                        UNIFIED_EVALUATOR_VERSION if source["sample_contract_version"] == "comparison-v1-unified"
-                        else EVALUATOR_VERSION
+                    evaluator_version=evaluator_version_for_dataset(
+                        dataset.dataset_id, source["sample_contract_version"]
                     ),
                     policy_version=target_policy.version,
                     policy_digest=target_policy.digest,
@@ -828,6 +841,7 @@ def inventory_health_history(
                     network_roster_revision=source["network_roster_revision"],
                     assessed_at=source["assessed_at"],
                     unified_health=json.loads(source["reproduction_context_json"]).get("unifiedHealth"),
+                    rest_diagnostics=json.loads(source["reproduction_context_json"]).get("restDiagnostics"),
                 )
                 if inputs.evaluation_context_complete and inputs.verdict_context_complete:
                     classification = HistoryMigrationEligibility.REPLAYABLE
@@ -1020,6 +1034,7 @@ def _replay_item(
         network_roster_revision=row["network_roster_revision"],
         assessed_at=row["assessed_at"],
         unified_health=json.loads(row["reproduction_context_json"]).get("unifiedHealth"),
+        rest_diagnostics=json.loads(row["reproduction_context_json"]).get("restDiagnostics"),
     )
     if (
         item.target_assessment_id is not None

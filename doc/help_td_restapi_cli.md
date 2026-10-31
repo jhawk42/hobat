@@ -469,8 +469,23 @@ child request: fast does not request `macCounters`, and neither pass requests
 evaluation. With both MTD passes enabled, fast runs first and detail is still
 requested after a fast success; up to four actions per MTD child are possible.
 Successful fast data is atomically checkpointed before detail begins. If
-detail fails, the fast data remains selected and the outcome is partial.
+detail fails, the fast data remains selected. When the same-run response and
+identity qualify, the device's effective status is `completed`, while
+`originalStatus`, the failed pass, and its attempts remain visible. A
+contradictory identity or another unresolved failure remains partial.
 Same-set retry recovery is reported separately from smaller-TLV fallback.
+
+The structured outcome includes `diagnosticRecovery` with recovered child and
+router counts and per-device field availability. `present` means a valid value
+was returned; `not-provided` means a successful matching pass requested but did
+not return it; `unavailable` records an invalid value or a failed/timeout pass
+and its reason; and `not-requested` means no pass requested or returned it.
+For example, fast-only MTD collection leaves `macCounters` not requested; it
+does not establish that the device lacks support. These states do not create
+zero counters or health findings. Cached legacy outcomes use the same
+classification only when their original diagnostic, outcome, run times, and
+observed network-scope digests bind; cache-only processing does not rewrite
+the raw files.
 
 `--types`, a non-recommended `--preset`, or `--fallback-preset` selects the
 legacy/custom request policy. Explicit child pass controls cannot be combined
@@ -518,9 +533,14 @@ four hex digits. For example, parent `0x9400` with child IDs 53 and 14 gives
   `enabled`, `partial`, `parentCount`, `targetCount`, `attemptedCount`,
   `completedCount`, `coveredCount`, per-target `results` (destination,
   `rloc16`, parent identity, `childId`, mode, policy, status, and the validated
-  `extAddress` when known), and parent/entry `issues`. Base `deviceResults`
-  and counters keep their meaning. An incomplete expansion makes the overall
-  outcome `partial`. Validated child items are appended to `items`. Progress
+  `extAddress` when known), and parent/entry `issues`. Each expansion result's
+  `status` remains its original attempt status; accepted detail recovery also
+  records `effectiveStatus`. Original attempt counters keep their meaning,
+  while `recoveredCount` is separate. A qualifying RLOC response can change a
+  zero-IID-skipped child's effective base `status` to `completed`, retaining
+  `originalStatus: "skipped"` and the skip reason. Unresolved targets or
+  issues still make the overall outcome `partial`. Validated child items are
+  appended to `items`. Progress
   and checkpoint labels use `rloc:<destination>`. If expansion is incomplete
   and no diagnostic items are usable, the previous dataset, network
   companion, and checkpoint are retained while the outcome is still written.
@@ -1057,7 +1077,8 @@ topology [--preset {recommended,full,minimal,basic}]
 Progress for each step and each device is printed to stderr. Pass `--no-progress` (global flag) to suppress. Compatibility arrays remain in the three primary files. The diagnostic and mesh steps also write `.outcome.json` sidecars with partial/per-device metadata.
 Topology's diagnostics step uses the same mode-aware child policy and pass
 controls documented under [`diagnostics fetch-all`](#diagnostics-fetch-all);
-the mesh step remains independent.
+the mesh step remains independent. Topology does not enable the standalone
+`--children-expand-by-rloc` option.
 
 **Examples:**
 

@@ -822,7 +822,15 @@ def compare_interval(
             if (old_context.get("version") == new_context.get("version") == "unified-health-v1"
                     and old_context.get("recipeContractDigest")
                     and old_context["recipeContractDigest"] == new_context.get("recipeContractDigest")
-                    and before_assessment.evaluator_version == after_assessment.evaluator_version == "snapshot-v16"):
+                    and before_assessment.evaluator_version == after_assessment.evaluator_version
+                    and (
+                        before_assessment.evaluator_version == "snapshot-v16"
+                        or (
+                            before_assessment.evaluator_version == "snapshot-v17"
+                            and old_context.get("reportContractDigest")
+                            and old_context["reportContractDigest"] == new_context.get("reportContractDigest")
+                        )
+                    )):
                 supported_contracts.add("comparison-v1-unified")
         if (before_assessment.sample_contract_version != after_assessment.sample_contract_version or
             before_assessment.sample_contract_version not in supported_contracts):

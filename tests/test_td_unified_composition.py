@@ -5,6 +5,7 @@ import copy
 import ipaddress
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,7 +18,8 @@ from td_dataset_catalog import load_dataset_catalog, resolve_dataset, validate_d
 from td_health_manifest import HealthManifestError
 from td_source_capabilities import SourceCapabilityService
 from test_td_unified_dataset import (
-    DATASET_IDS, NETWORK, OTHER_NETWORK, _artifacts, _entry, _save, _seed,
+    DATASET_IDS, NETWORK, OTHER_NETWORK, _artifacts, _entry, _router_table_row,
+    _save, _seed, _seed_meshdiag_tables,
 )
 
 
@@ -32,6 +34,171 @@ def _seed_all(directory):
 
 def _rows(directory, entry):
     return json.loads((directory / entry["files"][0]).read_text())
+
+
+def _seed_rest_child_coverage(directory, *, child_table=(), offset=0, completed=False):
+    from test_td_restapi_diagnostic_recovery import _fixture
+
+    entry = _seed_all(directory)
+    silent_ext = "8899aabbccddeeff"
+    _seed_meshdiag_tables(
+        directory,
+        fetch_all=[
+            {"rloc16": "0x1000", "extAddress": "0011223344556677",
+             "children": [], "tlvResponseValues": "0 1 16"},
+            {"rloc16": "0x4400", "extAddress": silent_ext, "tlvResponseValues": "0 1"},
+        ],
+        topology=[{"rloc16": "0x1000", "extAddress": "0011223344556677"}],
+    )
+    cli_file = "td-otbr-cli-meshdiag-router-childtables.json"
+    cli_rows = json.loads((directory / cli_file).read_text())
+    cli_time = datetime(2026, 10, 30, 11, tzinfo=timezone.utc) + timedelta(seconds=offset)
+    for row in cli_rows:
+        row["sourceObservedAt"] = cli_time.isoformat()
+    _save(directory, cli_file, cli_rows)
+
+    outcome, _ = _fixture()
+    parent = outcome["items"][0]
+    parent["extAddress"] = silent_ext
+    parent["rloc16"] = "0x4400"
+    parent["childTable"] = list(child_table)
+    result = outcome["deviceResults"][0]
+    result["deviceId"] = silent_ext
+    outcome["items"] = [parent]
+    outcome["deviceResults"] = [result]
+    outcome.pop("childrenExpansion")
+    if completed:
+        result["status"] = "completed"
+        result.pop("fallbackRecovered")
+        outcome["partial"] = False
+    _save(directory, "td-otbr-restapi-diagnostics-fetch-all.json", [parent])
+    _save(directory, "td-otbr-restapi-diagnostics-fetch-all.outcome.json", outcome)
+    diagnostic_time = datetime(2026, 10, 30, 11, 0, 1, tzinfo=timezone.utc).timestamp()
+    os.utime(directory / "td-otbr-restapi-diagnostics-fetch-all.json", (diagnostic_time, diagnostic_time))
+    return entry
+
+
+@pytest.mark.parametrize("completed", [False, True])
+@pytest.mark.parametrize(("child_table", "count"), [
+    ([], 0),
+    ([{"childId": 42}], 1),
+    ([{"childId": 42}, {"childId": 42}], 1),
+])
+def test_rest_child_table_covers_only_multi_source_and_preserves_cli(tmp_path, completed, child_table, count):
+    entry = _seed_rest_child_coverage(tmp_path, child_table=child_table, completed=completed)
+    cli = _entry("otbr_cli_unified")
+    cli_result = unified.build_unified_dataset(tmp_path, cli["value"])
+    assert "uncovered-children:0x4400" in cli_result["coverage"]["healthReasons"]
+    before = _artifacts(tmp_path, cli)
+    result = unified.build_unified_dataset(tmp_path, TARGET)
+    assert _artifacts(tmp_path, cli) == before
+    assert "otbr-cli:uncovered-children:0x4400" not in result["coverage"]["healthReasons"]
+    [router] = result["coverage"]["restChildTableCoverage"]["routers"]
+    assert (router["extAddress"], router["rloc16"], router["childCount"]) == (
+        "8899aabbccddeeff", "0x4400", count,
+    )
+    assert router["cliSourceObservedAt"] == "2026-10-30T11:00:00+00:00"
+    assert router["restSourceObservedAt"] == "2026-10-30T11:00:00+00:00"
+    assert len(result["coverage"]["tablesNotProvided"]) == 2
+    assert unified.read_generation(tmp_path, entry, verify_inputs=True)["coverage"] == result["coverage"]
+
+
+@pytest.mark.parametrize(("offset", "covered"), [
+    (-7201, False), (-7200, True), (7200, True), (7201, False),
+])
+def test_rest_child_coverage_uses_inclusive_two_hour_original_time_window(tmp_path, offset, covered):
+    _seed_rest_child_coverage(tmp_path, offset=offset)
+    result = unified.build_unified_dataset(tmp_path, TARGET)
+    assert ("restChildTableCoverage" in result["coverage"]) is covered
+    assert ("otbr-cli:uncovered-children:0x4400" not in result["coverage"]["healthReasons"]) is covered
+
+
+@pytest.mark.parametrize(("offset", "covered"), [(7200, True), (7201, False)])
+def test_rest_child_coverage_uses_bound_original_cli_file_time(tmp_path, offset, covered):
+    _seed_rest_child_coverage(tmp_path)
+    child_file = "td-otbr-cli-meshdiag-router-childtables.json"
+    records = json.loads((tmp_path / child_file).read_text())
+    for row in records:
+        row.pop("sourceObservedAt")
+    path = _save(tmp_path, child_file, records)
+    observed = datetime(2026, 10, 30, 11, tzinfo=timezone.utc) + timedelta(seconds=offset)
+    os.utime(path, (observed.timestamp(), observed.timestamp()))
+    result = unified.build_unified_dataset(tmp_path, TARGET)
+    assert ("restChildTableCoverage" in result["coverage"]) is covered
+    if covered:
+        [router] = result["coverage"]["restChildTableCoverage"]["routers"]
+        assert router["cliTimeProvenance"] == "raw-file-mtime"
+        os.utime(path, (observed.timestamp() + 1, observed.timestamp() + 1))
+        with pytest.raises(unified.UnifiedDatasetError, match="Stale"):
+            unified.read_generation(tmp_path, _entry(TARGET), verify_inputs=True)
+
+
+@pytest.mark.parametrize("case", [
+    "malformed-table", "conflicting-children", "missing-table", "wrong-identity",
+    "duplicate-router", "conflicting-rloc", "missing-time", "unobserved-scope",
+    "partial-router", "other-network",
+])
+def test_rest_child_coverage_rejects_unqualified_evidence(tmp_path, case):
+    from util_data import network_scope_path
+
+    _seed_rest_child_coverage(tmp_path)
+    diagnostic_file = "td-otbr-restapi-diagnostics-fetch-all.json"
+    outcome_file = "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+    child_file = "td-otbr-cli-meshdiag-router-childtables.json"
+    diagnostics = json.loads((tmp_path / diagnostic_file).read_text())
+    outcome = json.loads((tmp_path / outcome_file).read_text())
+    cli_rows = json.loads((tmp_path / child_file).read_text())
+    if case in {"malformed-table", "conflicting-children", "missing-table"}:
+        if case == "missing-table":
+            diagnostics[0].pop("childTable")
+            outcome["items"][0].pop("childTable")
+        else:
+            value = ([{"childId": True}] if case == "malformed-table"
+                     else [{"childId": 42, "mode": "first"}, {"childId": 42, "mode": "second"}])
+            diagnostics[0]["childTable"] = outcome["items"][0]["childTable"] = value
+        _save(tmp_path, diagnostic_file, diagnostics)
+        _save(tmp_path, outcome_file, outcome)
+    elif case == "wrong-identity":
+        outcome["deviceResults"][0]["deviceId"] = "3333333333333333"
+        _save(tmp_path, outcome_file, outcome)
+    elif case == "partial-router":
+        outcome["deviceResults"][0]["fallbackRecovered"] = False
+        _save(tmp_path, outcome_file, outcome)
+    elif case == "duplicate-router":
+        cli_rows.append(copy.deepcopy(cli_rows[-1]))
+        _save(tmp_path, child_file, cli_rows)
+    elif case == "conflicting-rloc":
+        cli_rows[-1]["rloc16"] = "0x4800"
+        _save(tmp_path, child_file, cli_rows)
+    elif case == "missing-time":
+        cli_rows[-1]["sourceObservedAt"] = "not-a-time"
+        _save(tmp_path, child_file, cli_rows)
+    elif case == "unobserved-scope":
+        network_scope_path(tmp_path / child_file).unlink()
+    else:
+        _save(tmp_path, diagnostic_file, diagnostics, scope=OTHER_NETWORK)
+    result = unified.build_unified_dataset(tmp_path, TARGET, allow_partial=True, network=NETWORK)
+    assert "restChildTableCoverage" not in result["coverage"]
+    assert "otbr-cli:uncovered-children:0x4400" in result["coverage"]["healthReasons"]
+
+
+def test_rest_child_coverage_keeps_uncovered_routers_and_other_table_guards(tmp_path):
+    _seed_rest_child_coverage(tmp_path)
+    for filename, key in (
+        ("td-otbr-cli-meshdiag-router-childtables.json", "childTable"),
+        ("td-otbr-cli-meshdiag-router-neighbortables.json", "routerNeighbors"),
+    ):
+        records = json.loads((tmp_path / filename).read_text())
+        second = _router_table_row("0x4800", "3333333333333333", key, answered=False)
+        if key == "childTable":
+            second["sourceObservedAt"] = "2026-10-30T11:00:00+00:00"
+        records.append(second)
+        _save(tmp_path, filename, records)
+    result = unified.build_unified_dataset(tmp_path, TARGET)
+    assert "otbr-cli:uncovered-children:0x4400" not in result["coverage"]["healthReasons"]
+    assert "otbr-cli:uncovered-children:0x4800" in result["coverage"]["healthReasons"]
+    assert result["healthState"] == "degraded"
+    assert [router["rloc16"] for router in result["coverage"]["restChildTableCoverage"]["routers"]] == ["0x4400"]
 
 
 def test_complete_raw_authority_closure_and_no_op(tmp_path):

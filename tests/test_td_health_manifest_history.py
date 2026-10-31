@@ -179,6 +179,36 @@ def test_unified_exact_current_support_and_independent_vectors(resolver, dataset
         )
 
 
+@pytest.mark.parametrize(("dataset_id", "sample", "version", "expected"), [
+    ("otbr_cli_unified", "comparison-v1-unified", "snapshot-v17",
+     "c745f2fea3ef555d1ea616e94855d4f59875dec874e2284887aec6e8fbad36a5"),
+    ("otbr_restapi_unified", "comparison-v1-unified", "snapshot-v17",
+     "330846da332edfd9fa505bafa8a8488a88e0953582f46760cb15c987978f46b4"),
+    ("ha_matter_ws_unified", "comparison-v1-unified", "snapshot-v17",
+     "7b354ea8ddc8ffa249933cbccfa57cc09f16f6ad57651bdc5023c9a679c01484"),
+    ("multi_source_unified", "comparison-v1-unified", "snapshot-v17",
+     "2f761e9a9a102341998d2aa6d8a80bd406b305dad0868b63b6129203ba070ec8"),
+    ("otbr_restapi_devices_diagnostics_fetch", "comparison-v1", "snapshot-v17",
+     "a7350a480d309631048d3fa07793188a4bd2ed2aa5de9f449ce4d2cea8d89f20"),
+    ("otbr_restapi_topology", "comparison-v1", "snapshot-v17",
+     "4c9cb4ee45a6b0c75a85254773c9d6c568dab6653ba3a3f5bccbea56fedca5eb"),
+    ("otbr_restapi_topology_mdns", "comparison-v1", "snapshot-v17",
+     "9ec9956a763e0054df963caddecb0b0449b837c4f0fbc3e2193fbc2b243ca796"),
+    ("multi_source_otbr_topology_mdns", "comparison-v1", "snapshot-v17",
+     "7d72da27caf85c23725ab8a8e212fb9d1d879cb75b9163f3e1bf348583f92569"),
+    ("otbr_cli_diagnostics_fetch", "comparison-v1-route64", "snapshot-v14",
+     "0293a718d4c504994ccdc6ef9cacce1771f51f307326aac6953dfa6333252e05"),
+])
+def test_dataset_aware_evaluator_target_vectors(resolver, dataset_id, sample, version, expected):
+    from td_health_evaluator import evaluator_version_for_dataset
+
+    assert evaluator_version_for_dataset(dataset_id, sample) == version
+    dataset = resolver.current_target(dataset_id)
+    assert target_contract_digest(
+        dataset, sample, **{**POLICY_ARGS, "evaluator_version": version},
+    ) == expected
+
+
 def test_source_label_change_preserves_displaced_manifest_and_exact_contracts(resolver):
     prior = resolver.revisions[-1]
     presentation = json.loads(canonical_json(prior.manifest))

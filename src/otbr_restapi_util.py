@@ -16,6 +16,20 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from td_restapi_diagnostic_recovery import (
+    _NETWORK_DIAGNOSTIC_TYPE_ALIASES,
+    _NETWORK_DIAGNOSTIC_TYPE_IDS,
+    _RLOC16_CHILD_MASK,
+    _child_rloc_destination,
+    _diagnostic_identity_view,
+    _format_rloc16,
+    _parse_child_id,
+    _parse_rloc16,
+    _parse_router_rloc16,
+    _usable_ext_address,
+    reconcile_rest_diagnostics,
+)
+
 # Reference: https://github.com/openthread/ot-br-posix/blob/main/src/rest/openapi.yaml
 
 OT_REST_LISTEN_ADDR_ENV =  "OT_REST_LISTEN_ADDR" # Environment variable name for OTBR REST API listen address
@@ -448,9 +462,6 @@ def _classify_child_mode(
     return classifications[0], None
 
 
-_MAX_ROUTER_ID = 62
-_MAX_CHILD_ID = 511
-_RLOC16_CHILD_MASK = 0x03FF
 _KNOWN_TERMINAL_DIAGNOSTIC_ERRORS = (OTBRActionFailedError, OTBRInvalidResponseError)
 _KNOWN_TERMINAL_DIAGNOSTIC_ERROR_NAMES = frozenset(
     cls.__name__ for cls in _KNOWN_TERMINAL_DIAGNOSTIC_ERRORS
@@ -477,60 +488,6 @@ class _RlocExpansionTarget:
     status: str | None = None
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     covered_ext_address: str | None = None
-
-
-def _diagnostic_identity_view(item: object) -> Mapping[str, Any]:
-    """Return a flat attribute view without rewriting raw JSON:API envelopes."""
-    if not isinstance(item, Mapping):
-        return {}
-    data = item.get("data")
-    if isinstance(data, Mapping) and isinstance(data.get("attributes"), Mapping):
-        return data["attributes"]
-    return item
-
-
-def _parse_rloc16(value: object) -> int | None:
-    if type(value) is int:
-        return value if 0 <= value <= 0xFFFF else None
-    if isinstance(value, str) and re.fullmatch(r"0x[0-9a-fA-F]{1,4}", value):
-        return int(value, 16)
-    return None
-
-
-def _parse_router_rloc16(value: object) -> tuple[int | None, str | None]:
-    rloc16 = _parse_rloc16(value)
-    if rloc16 is None:
-        return None, "invalid_parent_rloc16"
-    if rloc16 & _RLOC16_CHILD_MASK:
-        return None, "parent_rloc16_not_router"
-    if rloc16 >> 10 > _MAX_ROUTER_ID:
-        return None, "parent_router_id_out_of_range"
-    return rloc16, None
-
-
-def _parse_child_id(value: object) -> int | None:
-    if type(value) is int and 1 <= value <= _MAX_CHILD_ID:
-        return value
-    return None
-
-
-def _usable_ext_address(value: object) -> str | None:
-    if (
-        isinstance(value, str)
-        and re.fullmatch(r"[0-9a-fA-F]{16}", value)
-        and value.strip("0")
-    ):
-        return value.lower()
-    return None
-
-
-def _child_rloc_destination(parent_rloc16: int, child_id: int) -> tuple[int, str]:
-    child_rloc16 = (parent_rloc16 & 0xFC00) | child_id
-    return child_rloc16, f"{child_rloc16:06x}"
-
-
-def _format_rloc16(value: int) -> str:
-    return f"0x{value:04x}"
 
 
 def _with_child_table_tlv(types: Sequence[str | int]) -> list[str | int]:
@@ -867,41 +824,6 @@ RESETTABLE_DIAGNOSTIC_TLVS: frozenset[str] = frozenset({
     DIAG_TLV_MAC_COUNTERS,   # TLV 9
     DIAG_TLV_MLE_COUNTERS,   # TLV 34
 })
-
-_NETWORK_DIAGNOSTIC_TYPE_ALIASES: dict[str, str] = {
-    "eui64": DIAG_TLV_EUI,
-    "version": DIAG_TLV_THREAD_VERSION,
-}
-
-_NETWORK_DIAGNOSTIC_TYPE_IDS: dict[int, str] = {
-    0: DIAG_TLV_EXT_ADDRESS,
-    1: DIAG_TLV_RLOC16,
-    2: DIAG_TLV_MODE,
-    3: DIAG_TLV_TIMEOUT,
-    4: DIAG_TLV_CONNECTIVITY,
-    5: DIAG_TLV_ROUTE,
-    6: DIAG_TLV_LEADER_DATA,
-    7: DIAG_TLV_NETWORK_DATA,
-    8: DIAG_TLV_IPV6_ADDRESSES,
-    9: DIAG_TLV_MAC_COUNTERS,
-    14: DIAG_TLV_BATTERY_LEVEL,
-    15: DIAG_TLV_SUPPLY_VOLTAGE,
-    16: DIAG_TLV_CHILD_TABLE,
-    17: DIAG_TLV_CHANNEL_PAGES,
-    19: DIAG_TLV_MAX_CHILD_TIMEOUT,
-    20: DIAG_TLV_LDEV_ID_SUBJECT,
-    21: DIAG_TLV_IDEV_ID_CERT,
-    23: DIAG_TLV_EUI,
-    24: DIAG_TLV_THREAD_VERSION,
-    25: DIAG_TLV_VENDOR_NAME,
-    26: DIAG_TLV_VENDOR_MODEL,
-    27: DIAG_TLV_VENDOR_SW_VERSION,
-    28: DIAG_TLV_THREAD_STACK_VER,
-    29: DIAG_TLV_CHILDREN,
-    30: DIAG_TLV_CHILD_IPV6_ADDRS,
-    31: DIAG_TLV_ROUTER_NEIGHBORS,
-    34: DIAG_TLV_MLE_COUNTERS,
-}
 
 # 1.3 – Protocol string constants
 
@@ -1981,6 +1903,28 @@ class OTBRRestApiClient:
                                 "Skipping MTD child %s because both diagnostic passes are disabled",
                                 device_id,
                             )
+                        observed_rloc: list[int] = []
+
+                        def validate_child_context(context: Any) -> None:
+                            item = context.get("item") if isinstance(context, Mapping) else None
+                            view = _diagnostic_identity_view(item)
+                            expected = _usable_ext_address(device_id)
+                            if expected is not None and "extAddress" in view:
+                                if _usable_ext_address(view["extAddress"]) != expected:
+                                    raise _RlocIdentityError(
+                                        f"Diagnostic response contradicts child {device_id}",
+                                        "identity_changed",
+                                    )
+                            if "rloc16" in view:
+                                rloc = _parse_rloc16(view["rloc16"])
+                                if observed_rloc and rloc != observed_rloc[0]:
+                                    raise _RlocIdentityError(
+                                        f"Diagnostic response changed RLOC16 for child {device_id}",
+                                        "rloc16_mismatch",
+                                    )
+                                if rloc is not None and not observed_rloc:
+                                    observed_rloc.append(rloc)
+
                         mode_outcome = self._fetch_mode_aware_diagnostic_attempts(
                             device_id,
                             mode_classification,
@@ -1995,6 +1939,7 @@ class OTBRRestApiClient:
                             raw=raw,
                             results=results,
                             on_pass_checkpoint=on_pass_checkpoint,
+                            validate_context=validate_child_context,
                         )
                         attempted_types = mode_outcome.attempted_types
                         attempt_errors = mode_outcome.attempt_errors
@@ -2210,7 +2155,7 @@ class OTBRRestApiClient:
         }
         if expansion is not None:
             outcome["childrenExpansion"] = expansion
-        return outcome
+        return reconcile_rest_diagnostics(outcome)
 
     def _expand_children_by_rloc(
         self,

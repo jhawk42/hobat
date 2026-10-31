@@ -743,6 +743,67 @@ def test_requested_mtd_detail_failure_retains_fast_result_as_partial(monkeypatch
     assert record["passes"][1]["requestedTypes"] == CHILD_MEDIUM_DIAGNOSTIC_TLVS
 
 
+def test_matched_mtd_fast_response_survives_detail_timeout(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fast = {
+        "id": "diag-fast",
+        "extAddress": "1111111111111111",
+        "rloc16": "0x3801",
+        "mode": {"device": "MTD"},
+    }
+    fetch = MagicMock(side_effect=[
+        {
+            "item": fast,
+            "action": completed_action("action-fast", "diag-fast"),
+            "diagnosticId": "diag-fast",
+        },
+        OTBRActionTimeoutError("timed out", action_id="detail", status="active"),
+    ])
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [{"id": fast["extAddress"], "role": "child", "mode": {"device": "MTD"}}],
+        child_collection_policy="mode-aware",
+        children_fetch_detail=True,
+    )
+
+    record = outcome["deviceResults"][0]
+    assert fetch.call_count == 2
+    assert record["status"] == "completed"
+    assert record["originalStatus"] == "partial"
+    assert record["passes"][1]["status"] == "failed"
+    assert outcome["partial"] is False
+    fields = outcome["diagnosticRecovery"]["devices"][0]["fields"]
+    assert fields["mode"]["availability"] == "present"
+    assert fields["macCounters"] == {
+        "availability": "unavailable",
+        "reason": "OTBRActionTimeoutError",
+    }
+
+
+def test_mtd_detail_identity_change_keeps_fast_but_remains_partial(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fast = {"id": "diag-fast", "extAddress": "1111111111111111", "rloc16": "0x3801"}
+    detail = {"id": "diag-detail", "extAddress": "2222222222222222", "rloc16": "0x3801"}
+    fetch = MagicMock(side_effect=[
+        {"item": fast, "action": completed_action("fast", "diag-fast"), "diagnosticId": "diag-fast"},
+        {"item": detail, "action": completed_action("detail", "diag-detail"), "diagnosticId": "diag-detail"},
+    ])
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [{"id": fast["extAddress"], "role": "child", "mode": {"device": "MTD"}}],
+        child_collection_policy="mode-aware",
+        children_fetch_detail=True,
+    )
+
+    assert fetch.call_count == 2
+    assert outcome["items"] == [fast]
+    assert outcome["deviceResults"][0]["status"] == "partial"
+    assert outcome["deviceResults"][0]["passes"][1]["attemptErrors"][0]["type"] == "_RlocIdentityError"
+    assert outcome["partial"] is True
+
+
 def test_unsafe_mtd_fast_outcome_stops_before_detail(monkeypatch) -> None:
     client = OTBRRestApiClient(base_url="http://example.test")
     timeout = OTBRActionTimeoutError(
@@ -1387,7 +1448,11 @@ def _rloc_fetch(responses, calls):
             value = value.pop(0)
         if isinstance(value, BaseException):
             raise value
-        diagnostic_id = f"diag-{destination}-{len(calls)}"
+        diagnostic_id = (
+            value["data"]["id"]
+            if isinstance(value.get("data"), dict)
+            else value["id"]
+        )
         return {
             "item": copy.deepcopy(value),
             "action": completed_action(f"action-{len(calls)}", diagnostic_id),
@@ -1694,7 +1759,14 @@ def test_expansion_queries_uncovered_children_by_rloc_with_mode_policies(
         "completedCount": 3,
         "coveredCount": 1,
     }
-    assert outcome["partial"] is True
+    assert outcome["partial"] is False
+    recovered = outcome["deviceResults"][2]
+    assert recovered["status"] == "completed"
+    assert recovered["originalStatus"] == "skipped"
+    details = outcome["diagnosticRecovery"]["devices"]
+    child_detail = next(item for item in details if item["extAddress"] == zero_iid_child)
+    assert child_detail["fields"]["extAddress"]["availability"] == "present"
+    assert child_detail["fields"]["macCounters"]["availability"] == "not-requested"
     records = {record["destination"]: record for record in expansion["results"]}
     assert records["00382a"]["extAddress"] == zero_iid_child
     assert records["00382a"]["parentExtAddress"] == PARENT_EXT
@@ -2007,6 +2079,7 @@ def test_zero_child_expansion_is_complete_without_actions(monkeypatch) -> None:
         "attemptedCount": 0,
         "completedCount": 0,
         "coveredCount": 0,
+        "recoveredCount": 0,
         "results": [],
         "issues": [],
     }

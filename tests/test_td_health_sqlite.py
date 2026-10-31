@@ -390,6 +390,49 @@ def test_current_assessment_orders_offset_timestamps_by_utc_instant(tmp_path) ->
     assert current["assessment_id"] == first_assessment.assessment_id
 
 
+def test_current_assessment_prefers_new_revision_at_the_same_observation_time(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    original, old = _result("1")
+    original = replace(
+        original, observation_id="observation-z",
+        observed_at="2026-09-01T00:00:02+00:00",
+    )
+    old = replace(
+        old, observation_id=original.observation_id, assessment_id="assessment-old",
+        evaluator_version="snapshot-v16", assessed_at="2026-09-01T01:00:00+00:00",
+    )
+    revised = replace(original, observation_id="observation-a")
+    new = replace(
+        old, observation_id=revised.observation_id, assessment_id="assessment-new",
+        evaluator_version="snapshot-v17", assessed_at="2026-09-01T02:00:00+00:00",
+    )
+    store.save_processing_result(original, old)
+    store.save_processing_result(revised, new)
+
+    older, older_assessment = _result("3")
+    older = replace(older, observed_at="2026-08-31T23:59:59+00:00")
+    older_assessment = replace(older_assessment, assessed_at="2026-09-01T03:00:00+00:00")
+    store.save_processing_result(older, older_assessment)
+    store.save_processing_result(revised, new)
+
+    assert store.latest_assessment(original.network_id, original.dataset_id)["assessment_id"] == new.assessment_id
+    assert store.assessment_record(
+        network_id=original.network_id, dataset_id=original.dataset_id,
+    )["assessment_id"] == new.assessment_id
+    assert store.assessment_record(assessment_id=old.assessment_id)["assessment_id"] == old.assessment_id
+    page = store.assessment_endpoint_page(
+        network_id=original.network_id, dataset_id=original.dataset_id,
+        side="after", limit=10, offset=0,
+    )
+    assert page["navigation"]["selectedAssessmentId"] == new.assessment_id
+    with closing(store._connect()) as connection:
+        current = connection.execute(
+            "SELECT assessment_id FROM current_assessments WHERE network_id=? AND dataset_id=?",
+            (original.network_id, original.dataset_id),
+        ).fetchone()
+    assert current["assessment_id"] == new.assessment_id
+
+
 def test_observation_retention_is_bounded(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db", max_observations=2)
     for suffix in ("1", "2", "3"):

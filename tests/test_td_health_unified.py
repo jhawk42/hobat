@@ -112,6 +112,275 @@ def test_qualification_profiles_and_no_ha_negative_authority(tmp_path, dataset_i
             "otbr-restapi" if dataset_id == "otbr_restapi_unified" else "otbr-cli")
 
 
+@pytest.mark.parametrize("case", ["recovered", "missing-binding", "mesh-partial"])
+def test_rest_unified_revalidates_recovery_and_preserves_other_gates(tmp_path, case):
+    from test_td_restapi_diagnostic_recovery import _fixture
+    from util_data import network_scope_path
+
+    outcome, diagnostics = _fixture()
+    _seed(tmp_path, "otbr_restapi_unified")
+    diagnostic_file = "td-otbr-restapi-diagnostics-fetch-all.json"
+    outcome_file = "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+    _save(tmp_path, diagnostic_file, diagnostics)
+    outcome_path = _save(tmp_path, outcome_file, outcome)
+    if case == "missing-binding":
+        network_scope_path(outcome_path).unlink()
+    if case == "mesh-partial":
+        _save(tmp_path, "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json", {
+            "deviceResults": [{"status": "completed"}],
+            "partial": True,
+            "completedAt": SOURCE_TIME,
+        })
+    originals = {name: (tmp_path / name).read_bytes() for name in (diagnostic_file, outcome_file)}
+
+    built = build_unified_dataset(tmp_path, "otbr_restapi_unified")
+    reasons = built["coverage"]["healthReasons"]
+    assert (f"incomplete-outcome:{outcome_file}" in reasons) == (case == "missing-binding")
+    mesh_reason = "incomplete-outcome:td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json"
+    assert (mesh_reason in reasons) == (case == "mesh-partial")
+    result = process(tmp_path, "otbr_restapi_unified")
+    coverage = result.assessment.coverage["restDiagnostics"]
+    assert coverage["summary"]["recoveredChildren"] == (case != "missing-binding")
+    assert result.assessment.evaluator_version == "snapshot-v17"
+    assert {name: (tmp_path / name).read_bytes() for name in originals} == originals
+
+
+@pytest.mark.parametrize("child_table", [[], [{"childId": 42}]])
+def test_rest_child_table_coverage_uses_only_independent_rest_absence_authority(tmp_path, child_table):
+    from test_td_unified_composition import _seed_rest_child_coverage
+
+    _seed_rest_child_coverage(tmp_path, child_table=child_table, completed=True)
+    report = build_unified_dataset(tmp_path, "multi_source_unified")
+    assert report["healthState"] == "complete"
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    missing_child = "extaddr:2222222222222222"
+    store.upsert_expected_device(NETWORK, missing_child, "child", "expected")
+    with closing(store._connect()) as connection, connection:
+        connection.execute("UPDATE expected_devices SET expected_since='2025-12-01T00:00:00+00:00'")
+    result = process(tmp_path, "multi_source_unified", store)
+    context = result.assessment.reproduction_context["unifiedHealth"]
+    assert result.assessment.coverage["restChildTableCoverage"] == report["coverage"]["restChildTableCoverage"]
+    assert result.assessment.coverage["meshdiagTablesNotProvided"] == 1
+    assert all(relationship.to_device_id != missing_child for relationship in result.observation.relationships)
+    if child_table:
+        assert context["absenceWitness"] is None
+        assert result.observation.completeness.value == "degraded"
+        assert not any(f.rule_id == "device.offline" and missing_child in f.device_ids
+                       for f in result.assessment.findings)
+    else:
+        assert context["absenceWitness"]["domain"] == "otbr-restapi"
+        assert result.observation.completeness.value == "complete"
+    repeated = process(tmp_path, "multi_source_unified", store)
+    assert not repeated.observation_created
+    assert not repeated.assessment_created
+    with closing(store._connect()) as connection:
+        reopened = store._endpoint(connection, result.assessment.assessment_id)
+    assert reopened[0] == result.observation
+
+
+@pytest.mark.parametrize("case", ["matched", "ambiguous", "conflicting-child-rloc"])
+def test_rest_child_table_relationship_requires_same_run_unique_identity(tmp_path, case):
+    from test_td_unified_composition import _seed_rest_child_coverage
+
+    table_child = {"childId": 42, "rloc16": "0x442a"}
+    if case == "conflicting-child-rloc":
+        table_child["rloc16"] = "0x442b"
+    _seed_rest_child_coverage(tmp_path, child_table=[table_child], completed=True)
+    _add_completed_rest_child(tmp_path, ambiguous=case == "ambiguous")
+    report = build_unified_dataset(tmp_path, "multi_source_unified")
+    [router] = report["coverage"]["restChildTableCoverage"]["routers"]
+    assert router["childCount"] == 1
+    assert router["resolvedChildCount"] == (case == "matched")
+    result = process(tmp_path, "multi_source_unified")
+    link = next((item for item in result.observation.relationships
+                 if item.from_device_id == "extaddr:8899aabbccddeeff"
+                 and item.to_device_id == "extaddr:2222222222222222"), None)
+    assert (link is not None) == (case == "matched")
+    witness = result.assessment.reproduction_context["unifiedHealth"]["absenceWitness"]
+    assert (witness is not None and witness["domain"] == "otbr-restapi") == (case == "matched")
+
+
+def _add_completed_rest_child(directory, *, ambiguous=False):
+    from test_td_restapi_diagnostic_recovery import _action
+
+    diagnostic_file = "td-otbr-restapi-diagnostics-fetch-all.json"
+    outcome_file = "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+    outcome = json.loads((directory / outcome_file).read_text())
+    child = {"id": "child-diagnostic", "extAddress": "2222222222222222",
+             "rloc16": "0x442a", "created": "2026-10-30T11:00:01+00:00"}
+    outcome["items"].append(child)
+    outcome["deviceResults"].append({
+        "deviceId": child["extAddress"], "role": "child", "status": "completed",
+        "diagnosticId": child["id"], "action": _action(child["id"]),
+    })
+    if ambiguous:
+        duplicate = {**child, "id": "other-diagnostic", "extAddress": "3333333333333333"}
+        outcome["items"].append(duplicate)
+        outcome["deviceResults"].append({
+            "deviceId": duplicate["extAddress"], "role": "child", "status": "completed",
+            "diagnosticId": duplicate["id"], "action": _action(duplicate["id"]),
+        })
+    _save(directory, diagnostic_file, outcome["items"])
+    _save(directory, outcome_file, outcome)
+    diagnostic_time = datetime(2026, 10, 30, 11, 0, 1, tzinfo=timezone.utc).timestamp()
+    os.utime(directory / diagnostic_file, (diagnostic_time, diagnostic_time))
+
+
+@pytest.mark.parametrize("dataset_id", ["otbr_restapi_unified", "otbr_restapi_devices_diagnostics_fetch"])
+@pytest.mark.parametrize("matched", [False, True])
+def test_rest_health_child_table_needs_bound_identity_for_presence_and_absence(tmp_path, dataset_id, matched):
+    from test_td_unified_composition import _seed_rest_child_coverage
+
+    _seed_rest_child_coverage(tmp_path, child_table=[{"childId": 42, "rloc16": "0x442a"}], completed=True)
+    if matched:
+        _add_completed_rest_child(tmp_path)
+    if dataset_id.endswith("_unified"):
+        build_unified_dataset(tmp_path, dataset_id)
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    child_id = "extaddr:2222222222222222"
+    store.upsert_expected_device(NETWORK, child_id, "child", "expected")
+    with closing(store._connect()) as connection, connection:
+        connection.execute("UPDATE expected_devices SET expected_since='2025-12-01T00:00:00+00:00'")
+    result = process(tmp_path, dataset_id, store)
+    link = next((item for item in result.observation.relationships if item.to_device_id == child_id), None)
+    assert (link is not None) is matched
+    assert result.observation.completeness.value == ("complete" if matched else "degraded")
+    if not matched:
+        assert not any(f.rule_id == "device.offline" and child_id in f.device_ids
+                       for f in result.assessment.findings)
+    if dataset_id.endswith("_unified"):
+        witness = result.assessment.reproduction_context["unifiedHealth"]["absenceWitness"]
+        assert (witness is not None) is matched
+
+
+def test_ambiguous_rloc_aliases_do_not_create_cross_source_relationships():
+    from td_health_processor import _normalize_samples
+
+    filename = "td-otbr-cli-meshdiag-topology.json"
+    dataset = replace(load_health_manifest().dataset("multi_source_unified"), files=(filename,))
+    parent = {"extAddress": "1111111111111111", "children": [{"rloc16": "0x042a"}]}
+    child = {"extAddress": "2222222222222222", "rloc16": "0x42a"}
+    conflicting = {"extAddress": "3333333333333333", "rloc16": "0x042a"}
+    _, links, _, _, _ = _normalize_samples(dataset, {filename: [parent, child]})
+    assert len(links) == 1
+    _, links, _, _, _ = _normalize_samples(dataset, {filename: [parent, child, conflicting]})
+    assert links == ()
+
+
+@pytest.mark.parametrize("case", ["projection", "tables", "reason", "cli-dependency"])
+def test_rest_child_table_coverage_rejects_tampered_composition_report(tmp_path, case):
+    from test_td_unified_composition import _seed_rest_child_coverage
+
+    _seed_rest_child_coverage(tmp_path, completed=True)
+    build_unified_dataset(tmp_path, "multi_source_unified")
+    path = tmp_path / _entry("multi_source_unified")["unified"]["reportFile"]
+    report = json.loads(path.read_text())
+    coverage = report["coverage"]
+    if case == "projection":
+        coverage["restChildTableCoverage"]["routers"][0]["childCount"] += 1
+    elif case == "tables":
+        coverage["tablesNotProvided"].pop()
+    elif case == "reason":
+        coverage["healthReasons"].append("otbr-cli:uncovered-children:0x4400")
+    else:
+        coverage["sources"]["otbr-cli"]["coverage"]["healthReasons"].clear()
+    path.write_text(json.dumps(report))
+    with pytest.raises(HealthProcessingError, match="coverage|exemptions"):
+        process(tmp_path, "multi_source_unified")
+
+
+@pytest.mark.parametrize("domain", ["otbr-restapi", "ha-matter-ws"])
+def test_rest_child_coverage_cannot_hide_other_dependency_reasons(tmp_path, domain):
+    from test_td_unified_composition import _seed_rest_child_coverage
+
+    _seed_rest_child_coverage(tmp_path, completed=True)
+    if domain == "otbr-restapi":
+        filename = "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json"
+        _save(tmp_path, filename, {"deviceResults": [{"status": "completed"}],
+                                   "partial": True, "completedAt": SOURCE_TIME})
+    else:
+        filename = "td-ha-matter-ws-collection.outcome.json"
+        payload = json.loads((tmp_path / filename).read_text())
+        payload["normalizedNodeCount"] += 1
+        _save(tmp_path, filename, payload)
+    report = build_unified_dataset(tmp_path, "multi_source_unified")
+    reason = next(reason for reason in report["coverage"]["healthReasons"]
+                  if reason.startswith(f"{domain}:"))
+    assert report["healthState"] == "degraded"
+    path = tmp_path / _entry("multi_source_unified")["unified"]["reportFile"]
+    report = json.loads(path.read_text())
+    report["coverage"]["healthReasons"].remove(reason)
+    path.write_text(json.dumps(report))
+    with pytest.raises(HealthProcessingError, match="coverage reasons changed"):
+        process(tmp_path, "multi_source_unified")
+
+
+def test_rest_child_table_coverage_remains_partial_with_newer_checkpoint(tmp_path):
+    from test_td_unified_composition import _seed_rest_child_coverage
+
+    _seed_rest_child_coverage(tmp_path, completed=True)
+    build_unified_dataset(tmp_path, "multi_source_unified")
+    partial = tmp_path / "td-otbr-restapi-diagnostics-fetch-all.partial.json"
+    partial.write_text("[]")
+    result = process(tmp_path, "multi_source_unified", allow_partial=True)
+    assert result.observation.completeness.value == "partial"
+    assert result.assessment.reproduction_context["unifiedHealth"]["absenceWitness"] is None
+
+
+def test_rest_child_table_retained_context_rejects_malformed_router_files(tmp_path):
+    import sqlite3
+    from test_td_unified_composition import _seed_rest_child_coverage
+
+    _seed_rest_child_coverage(tmp_path, completed=True)
+    build_unified_dataset(tmp_path, "multi_source_unified")
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    result = process(tmp_path, "multi_source_unified", store)
+    with closing(store._connect()) as connection, connection:
+        row = connection.execute(
+            "SELECT reproduction_context_json FROM assessments WHERE assessment_id=?",
+            (result.assessment.assessment_id,),
+        ).fetchone()
+        context = json.loads(row[0])
+        context["unifiedHealth"]["restChildTableCoverage"]["routers"][0]["cliFiles"] = [{}]
+        connection.execute(
+            "UPDATE assessments SET reproduction_context_json=? WHERE assessment_id=?",
+            (json.dumps(context), result.assessment.assessment_id),
+        )
+        with pytest.raises(sqlite3.DatabaseError):
+            store._endpoint(connection, result.assessment.assessment_id)
+
+
+def test_rest_child_coverage_history_never_joins_cli_absences(tmp_path):
+    from test_td_unified_composition import _seed_rest_child_coverage
+
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    absent = "extaddr:aaaaaaaaaaaaaaaa"
+    store.upsert_expected_device(NETWORK, absent, "expected", "expected")
+    with closing(store._connect()) as connection, connection:
+        connection.execute("UPDATE expected_devices SET expected_since='2025-12-01T00:00:00+00:00'")
+    for day in (1, 2):
+        collection(tmp_path, "otbr_cli_unified", day)
+        process(tmp_path, "otbr_cli_unified", store)
+    _seed_rest_child_coverage(tmp_path, child_table=[], completed=True)
+    build_unified_dataset(tmp_path, "multi_source_unified")
+    result = process(tmp_path, "multi_source_unified", store)
+    finding = next(f for f in result.assessment.findings
+                   if absent in f.device_ids and f.rule_id in {"device.missing", "device.offline"})
+    assert finding.rule_id == "device.missing"
+    assert finding.evidence["consecutiveCompleteAbsences"] == 1
+    assert result.assessment.reproduction_context["unifiedHealth"]["absenceWitness"]["domain"] == "otbr-restapi"
+    for path in tmp_path.glob("*.json"):
+        path.unlink()
+    store.upsert_expected_device(NETWORK, absent, "renamed", "expected")
+    with closing(store._connect()) as connection:
+        row = connection.execute(
+            "SELECT assessment_id FROM current_assessments WHERE dataset_id='multi_source_unified'"
+        ).fetchone()
+        _, reassessed = store._endpoint(connection, row["assessment_id"])
+    assert reassessed.coverage["restChildTableCoverage"] == result.assessment.coverage["restChildTableCoverage"]
+    assert reassessed.reproduction_context["unifiedHealth"]["absenceWitness"]["domain"] == "otbr-restapi"
+
+
 @pytest.mark.parametrize("damage", ["changed", "deleted", "scope", "outcome"])
 def test_unified_health_rejects_stale_evidence_even_allow_partial(tmp_path, damage):
     seed(tmp_path, "otbr_cli_unified")
@@ -285,6 +554,56 @@ def test_never_stitch_cli_and_rest_absence_domains(tmp_path):
     collection(tmp_path, "otbr_restapi_unified", 3)
     result = process(tmp_path, "otbr_restapi_unified", store)
     assert missing_finding(result).evidence["consecutiveCompleteAbsences"] == 1
+
+
+def test_file_mode_deduplicates_reclassified_collection_and_counts_later_one(tmp_path):
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    expected(store)
+    collection(tmp_path, "otbr_cli_unified", 1)
+    first = process(tmp_path, "otbr_cli_diagnostics_fetch", store)
+    assert missing_finding(first).evidence["consecutiveCompleteAbsences"] == 1
+
+    identity = tmp_path / "td-otbr-cli-thread-network-info.json"
+    payload = json.loads(identity.read_text())
+    payload["networkName"] = "renamed"
+    _save(tmp_path, identity.name, payload)
+    reclassified = process(tmp_path, "otbr_cli_diagnostics_fetch", store)
+    assert reclassified.observation.observation_id != first.observation.observation_id
+    assert missing_finding(reclassified).evidence["consecutiveCompleteAbsences"] == 1
+    repeated = process(tmp_path, "otbr_cli_diagnostics_fetch", store)
+    assert not repeated.observation_created
+    assert not repeated.assessment_created
+    assert repeated.assessment.assessment_id == reclassified.assessment.assessment_id
+
+    collection(tmp_path, "otbr_cli_unified", 2)
+    later = process(tmp_path, "otbr_cli_diagnostics_fetch", store)
+    assert missing_finding(later).evidence["consecutiveCompleteAbsences"] == 2
+    assert missing_finding(later).rule_id == "device.offline"
+
+
+def test_file_mode_never_stitches_cli_and_rest_absence_domains(tmp_path):
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    expected(store)
+    for day in (1, 2):
+        collection(tmp_path, "otbr_cli_unified", day)
+        process(tmp_path, "otbr_cli_diagnostics_fetch", store)
+    collection(tmp_path, "otbr_restapi_unified", 3)
+    result = process(tmp_path, "otbr_restapi_devices_diagnostics_fetch", store)
+    assert missing_finding(result).evidence["consecutiveCompleteAbsences"] == 1
+
+
+def test_unified_builder_upgrade_does_not_count_one_collection_twice(tmp_path, monkeypatch):
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    expected(store)
+    collection(tmp_path, "otbr_cli_unified", 1)
+    with monkeypatch.context() as legacy:
+        legacy.setattr("td_unified_dataset.BUILDER_CONTRACT", "unified-assembly-v9")
+        build_unified_dataset(tmp_path, "otbr_cli_unified")
+        first = process(tmp_path, "otbr_cli_unified", store)
+    build_unified_dataset(tmp_path, "otbr_cli_unified")
+    upgraded = process(tmp_path, "otbr_cli_unified", store)
+    assert first.observation.observation_id != upgraded.observation.observation_id
+    assert missing_finding(upgraded).evidence["consecutiveCompleteAbsences"] == 1
 
 
 def test_ha_roster_reassessment_keeps_absence_unknown(tmp_path):
@@ -509,14 +828,20 @@ def test_unified_comparison_requires_matching_current_evaluator(tmp_path):
     collection(tmp_path, "otbr_cli_unified", 2)
     after = process(tmp_path, "otbr_cli_unified")
     roles = source_roles_for_dataset(load_health_manifest().dataset("otbr_cli_unified"))
-    assert after.assessment.evaluator_version == "snapshot-v16"
-    for version in ("snapshot-v15", "snapshot-v16"):
-        legacy = replace(before.assessment, evaluator_version="snapshot-v15")
-        after_assessment = replace(after.assessment, evaluator_version=version)
+    assert after.assessment.evaluator_version == "snapshot-v17"
+    for old_version, new_version, comparable in (
+        ("snapshot-v15", "snapshot-v15", False),
+        ("snapshot-v15", "snapshot-v17", False),
+        ("snapshot-v16", "snapshot-v16", True),
+        ("snapshot-v16", "snapshot-v17", False),
+        ("snapshot-v17", "snapshot-v17", True),
+    ):
+        legacy = replace(before.assessment, evaluator_version=old_version)
+        after_assessment = replace(after.assessment, evaluator_version=new_version)
         interval, _ = derive_comparison(
             (before.observation, legacy), (after.observation, after_assessment), source_roles=roles,
         )
-        assert not interval.compatibility.comparable
+        assert interval.compatibility.comparable is comparable
 
 
 @pytest.mark.parametrize("dataset_id", ["otbr_cli_unified", "otbr_restapi_unified"])
@@ -587,7 +912,7 @@ def test_cli_and_health_api_expose_the_same_explicit_qualified_profiles(tmp_path
     assert result.returncode == 0, result.stderr
     document = json.loads(result.stdout)
     assert document["datasetId"] == dataset_id
-    assert document["evaluatorVersion"] == "snapshot-v16"
+    assert document["evaluatorVersion"] == "snapshot-v17"
     assert not (tmp_path / "hobat_v1.db").exists()
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     persisted = process(tmp_path, dataset_id, store)
@@ -629,6 +954,27 @@ def test_unsupported_retained_original_contract_never_supplies_negative_opportun
     collection(tmp_path, "otbr_cli_unified", 3)
     result = process(tmp_path, "otbr_cli_unified", store)
     assert missing_finding(result).evidence["consecutiveCompleteAbsences"] == 1
+
+
+@pytest.mark.parametrize("history", ["file", "unified", "unsupported"])
+def test_file_mode_history_does_not_require_manifest_archive(tmp_path, monkeypatch, history):
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    expected(store)
+    collection(tmp_path, "otbr_cli_unified", 1)
+    process(tmp_path, "otbr_cli_unified" if history == "unified" else "otbr_cli_topology", store)
+    if history == "unsupported":
+        with closing(store._connect()) as connection, connection:
+            connection.execute("UPDATE assessments SET sample_contract_version='unsupported-retained-contract'")
+
+    def reject_archive():
+        raise AssertionError("Native file-mode health must not load the manifest archive")
+
+    monkeypatch.setattr("td_health_manifest_history.load_manifest_history", reject_archive)
+    collection(tmp_path, "otbr_cli_unified", 2)
+    result = process(tmp_path, "otbr_cli_topology", store)
+    assert missing_finding(result).evidence["consecutiveCompleteAbsences"] == (
+        1 if history == "unsupported" else 2
+    )
 
 
 def test_retained_comparison_rechecks_late_same_witness_positive_projection(tmp_path):

@@ -391,6 +391,7 @@ const healthInsightsViewState = {
   selectedEndpointId: null,
   tableScrollTop: 0,
   detailsOpen: false,
+  restCoverageOpen: false,
   sortWasChanged: false,
   comparisonId: null,
   comparisonScope: "all",
@@ -2667,6 +2668,7 @@ function renderNetworkInsights() {
         document.getElementById("health-findings-sort").value = sort.column;
         renderNetworkInsights();
       },
+      restCoverageOpen: (open) => { healthInsightsViewState.restCoverageOpen = open; },
     });
     document.getElementById("health-findings-sort").value = healthInsightsViewState.sort.column;
     const summary = summaryEl;
@@ -3268,6 +3270,7 @@ function rememberHealthNavigationContext() {
       selectedEndpointId: healthInsightsViewState.selectedEndpointId,
       tableScrollTop: healthInsightsViewState.tableScrollTop,
       detailsOpen: healthInsightsViewState.detailsOpen,
+      restCoverageOpen: healthInsightsViewState.restCoverageOpen,
       comparisonId: healthInsightsViewState.comparisonId,
       comparisonScope: healthInsightsViewState.comparisonScope,
       comparisonResult: healthInsightsViewState.comparisonResult,
@@ -3504,6 +3507,7 @@ function resetHealthFindingState() {
   healthInsightsViewState.selectedEndpointId = null;
   healthInsightsViewState.tableScrollTop = 0;
   healthInsightsViewState.detailsOpen = false;
+  healthInsightsViewState.restCoverageOpen = false;
   const viewFilter = document.getElementById("health-view-filter");
   if (viewFilter) viewFilter.value = "all";
   const sortFilter = document.getElementById("health-findings-sort");
@@ -3676,7 +3680,7 @@ function updateSavedFindingNavigationContext() {
   if (!savedInsights) return;
   for (const key of [
     "view", "filters", "sort", "sortWasChanged", "selectedGroupId",
-    "selectedFindingId", "selectedEndpointId", "tableScrollTop", "detailsOpen",
+    "selectedFindingId", "selectedEndpointId", "tableScrollTop", "detailsOpen", "restCoverageOpen",
   ]) {
     savedInsights[key] = key === "filters"
       ? { ...healthInsightsViewState.filters }

@@ -11,10 +11,14 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from td_source_authority import source_rank
-from td_const import OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+from td_const import (
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+)
 from td_device_fields import get_canonical_ext_address, normalize_input_record, normalize_router_id
 from td_health_comparison import ROUTE64_SAMPLE_CONTRACT_VERSION
-from td_health_evaluator import evaluate_observation
+from td_health_evaluator import REST_RECOVERY_DATASETS, evaluate_observation
 from td_health_manifest import HealthDataset, load_health_manifest
 from td_health_observation_model import (
     Assessment,
@@ -58,7 +62,7 @@ class ProcessingResult:
 class _SampleRegistration:
     normalized_by_file: dict[str, list[dict[str, Any]]]
     devices: dict[str, dict[str, Any]]
-    rloc_devices: dict[str, str]
+    rloc_devices: dict[str, str | None]
     router_devices: dict[int, str | None]
     route_reporter_counts: dict[str, int]
 
@@ -83,6 +87,9 @@ class _ProcessingInputSnapshot:
     unified_context: Mapping[str, Any] | None = None
     evidence_files: frozenset[str] | None = None
     tables_not_provided: frozenset[tuple[str, str]] = frozenset()
+    rest_diagnostics: Mapping[str, Any] | None = None
+    rest_child_identities: Mapping[tuple[str, int], str] | None = None
+    unresolved_rest_children: bool = False
 
 
 def _stable_read(path: Path) -> tuple[Any, str, int]:
@@ -155,6 +162,19 @@ def _integer(value: Any) -> int | None:
     return int(number) if number is not None else None
 
 
+def _rloc_lookup_key(value: Any, *, canonical: bool) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.lower()
+    digits = value[2:]
+    if (
+        canonical and value.startswith("0x") and 1 <= len(digits) <= 4
+        and all(character in "0123456789abcdef" for character in digits)
+    ):
+        return f"0x{int(digits, 16):04x}"
+    return value
+
+
 def _omr_prefix_from_identity(
     identity: Mapping[str, Any],
 ) -> tuple[str | None, str | None]:
@@ -178,6 +198,7 @@ def _omr_prefix_from_identity(
 def _normalize_samples(
     dataset: HealthDataset, payloads: Mapping[str, Any],
     tables_not_provided: frozenset[tuple[str, str]] = frozenset(),
+    rest_child_identities: Mapping[tuple[str, int], str] | None = None,
 ) -> tuple[
     tuple[DeviceSample, ...],
     tuple[RelationshipSample, ...],
@@ -189,7 +210,9 @@ def _normalize_samples(
         dataset.files, key=lambda filename: (-source_rank(filename), filename)
     )
     registration = _register_sample_devices(dataset, payloads, ordered_files)
-    projection = _project_sample_evidence(dataset, registration, tables_not_provided)
+    projection = _project_sample_evidence(
+        dataset, registration, tables_not_provided, rest_child_identities,
+    )
     device_samples = tuple(
         DeviceSample(
             device_id=device_id,
@@ -329,7 +352,8 @@ def _register_sample_devices(
     ordered_files: list[str],
 ) -> _SampleRegistration:
     devices: dict[str, dict[str, Any]] = {}
-    rloc_devices: dict[str, str] = {}
+    rloc_devices: dict[str, str | None] = {}
+    reject_ambiguous_rlocs = dataset.unified_recipe is not None or dataset.dataset_id in REST_RECOVERY_DATASETS
     router_devices: dict[int, str | None] = {}
     route_reporter_counts: dict[str, int] = {}
     normalized_by_file: dict[str, list[dict[str, Any]]] = {}
@@ -377,8 +401,12 @@ def _register_sample_devices(
                 if not current["ipv6AddressInvalid"]:
                     current["ipv6AddressReported"] = True
             rloc = record.get("rloc16")
-            if isinstance(rloc, str):
-                rloc_devices[rloc.lower()] = device_id
+            key = _rloc_lookup_key(rloc, canonical=reject_ambiguous_rlocs)
+            if key is not None:
+                if reject_ambiguous_rlocs and key in rloc_devices and rloc_devices[key] != device_id:
+                    rloc_devices[key] = None
+                else:
+                    rloc_devices[key] = device_id
             if filename == OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME and dataset.dataset_id == "otbr_cli_diagnostics_fetch":
                 route_reporter_counts[device_id] = route_reporter_counts.get(device_id, 0) + 1
                 router_id = normalize_router_id(record.get("routerId"))
@@ -400,11 +428,13 @@ def _project_sample_evidence(
     dataset: HealthDataset,
     registration: _SampleRegistration,
     tables_not_provided: frozenset[tuple[str, str]] = frozenset(),
+    rest_child_identities: Mapping[tuple[str, int], str] | None = None,
 ) -> _SampleProjection:
     devices = registration.devices
     rloc_devices = registration.rloc_devices
     router_devices = registration.router_devices
     route_reporter_counts = registration.route_reporter_counts
+    canonical_rlocs = dataset.unified_recipe is not None or dataset.dataset_id in REST_RECOVERY_DATASETS
     relationships: dict[str, RelationshipSample] = {}
     metrics: dict[tuple[str, str, str], MetricSample] = {}
     duplicate_relationship_ids: set[str] = set()
@@ -415,9 +445,9 @@ def _project_sample_evidence(
             try:
                 reporter_id = device_id_from_ext_address(get_canonical_ext_address(record))
             except ValueError:
-                rloc = record.get("rloc16")
-                if isinstance(rloc, str):
-                    reporter_id = rloc_devices.get(rloc.lower())
+                rloc = _rloc_lookup_key(record.get("rloc16"), canonical=canonical_rlocs)
+                if rloc is not None:
+                    reporter_id = rloc_devices.get(rloc)
             if reporter_id is None:
                 continue
             try:
@@ -521,11 +551,22 @@ def _project_sample_evidence(
                     if not isinstance(raw_child, dict):
                         continue
                     child = normalize_input_record(raw_child, source=filename)
-                    try:
-                        child_id = device_id_from_ext_address(get_canonical_ext_address(child))
-                    except ValueError:
-                        child_rloc = child.get("rloc16")
-                        child_id = rloc_devices.get(str(child_rloc).lower())
+                    if (
+                        filename == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME
+                        and child_field == "childTable" and rest_child_identities is not None
+                    ):
+                        child_number = child.get("childId")
+                        resolved = (
+                            rest_child_identities.get((reporter_id.removeprefix("extaddr:"), child_number))
+                            if type(child_number) is int else None
+                        )
+                        child_id = f"extaddr:{resolved}" if resolved is not None else None
+                    else:
+                        try:
+                            child_id = device_id_from_ext_address(get_canonical_ext_address(child))
+                        except ValueError:
+                            child_rloc = _rloc_lookup_key(child.get("rloc16"), canonical=canonical_rlocs)
+                            child_id = rloc_devices.get(child_rloc) if child_rloc is not None else None
                     if child_id is None or child_id == reporter_id:
                         continue
                     if child_id not in devices:
@@ -611,6 +652,25 @@ def _project_sample_evidence(
     )
 
 
+def _rest_child_identity_evidence(
+    effective: Mapping[str, Any] | None, diagnostics: Any,
+) -> tuple[dict[tuple[str, int], str], bool]:
+    from td_restapi_diagnostic_recovery import (
+        diagnostic_items, qualified_router_tables, unresolved_child_table_identities,
+    )
+
+    items = diagnostic_items(diagnostics)
+    unresolved = unresolved_child_table_identities(effective, items)
+    if effective is None:
+        return {}, unresolved
+    identities = {
+        (table["extAddress"], child["childId"]): child["extAddress"]
+        for table in qualified_router_tables(effective, items)
+        for child in table["resolvedChildren"]
+    }
+    return identities, unresolved
+
+
 def _read_processing_inputs(
     data_dir: Path,
     dataset: HealthDataset,
@@ -625,6 +685,11 @@ def _read_processing_inputs(
     identity_mtime: int | None = None
     identity_digest: str | None = None
     identity_source_time: str | None = None
+    rest_diagnostics: Mapping[str, Any] | None = None
+    rest_child_identities = None
+    unresolved_rest_children = False
+    if OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME in dataset.files:
+        rest_child_identities = {}
     completeness = Completeness.COMPLETE
     required = [*dataset.files, dataset.health_profile.identity_file]
     for filename in required:
@@ -679,7 +744,37 @@ def _read_processing_inputs(
             completeness = Completeness.PARTIAL
             sources.append(SourceEvidence(filename, "", "outcome", "invalid"))
             continue
-        state = _outcome_state(payload)
+        effective = payload
+        if filename == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME:
+            from td_unified_dataset import UnifiedDatasetError, read_rest_diagnostic_recovery
+
+            diagnostic_source = next(
+                (source for source in sources
+                 if source.filename == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME),
+                None,
+            )
+            identity = payloads.get(dataset.health_profile.identity_file)
+            expected_network = (
+                identity.get("extPanId") if isinstance(identity, dict) else None
+            )
+            try:
+                recovered, _ = read_rest_diagnostic_recovery(
+                    data_dir,
+                    expected_network=expected_network if isinstance(expected_network, str) else None,
+                    expected_outcome_digest=digest,
+                    expected_diagnostics_digest=diagnostic_source.digest if diagnostic_source else None,
+                )
+            except UnifiedDatasetError as exc:
+                raise HealthProcessingError(str(exc)) from exc
+            if recovered is not None:
+                effective = recovered
+                rest_diagnostics = recovered.get("diagnosticRecovery")
+                rest_child_identities, unresolved_rest_children = _rest_child_identity_evidence(
+                    recovered, payloads.get(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME),
+                )
+        state = _outcome_state(effective)
+        if _outcome_state(payload) is Completeness.DEGRADED:
+            state = Completeness.DEGRADED
         if state is Completeness.PARTIAL:
             completeness = Completeness.PARTIAL
         elif state is Completeness.DEGRADED and completeness is Completeness.COMPLETE:
@@ -687,6 +782,15 @@ def _read_processing_inputs(
         mtimes.append(mtime)
         sources.append(SourceEvidence(filename, digest, "outcome", state.value))
 
+    if rest_child_identities is not None and rest_diagnostics is None:
+        rest_child_identities, unresolved_rest_children = _rest_child_identity_evidence(
+            None, payloads.get(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME),
+        )
+    if (
+        dataset.datasource_id == "otbr-restapi" and unresolved_rest_children
+        and completeness is Completeness.COMPLETE
+    ):
+        completeness = Completeness.DEGRADED
     missing = [filename for filename in required if filename not in payloads]
     if missing and not allow_partial:
         raise HealthProcessingError(
@@ -704,12 +808,22 @@ def _read_processing_inputs(
         identity_digest,
         identity_source_time,
         completeness,
+        rest_diagnostics=rest_diagnostics,
+        rest_child_identities=rest_child_identities,
+        unresolved_rest_children=unresolved_rest_children,
     )
 
 
 def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
     from td_dataset_catalog import load_dataset_catalog, resolve_dataset
-    from td_unified_dataset import UnifiedDatasetError, read_original_evidence
+    from td_unified_dataset import (
+        UnifiedDatasetError,
+        derive_cli_router_table_evidence,
+        derive_rest_child_table_coverage,
+        read_generation,
+        read_original_evidence,
+        read_rest_diagnostic_recovery,
+    )
     from td_health_unified import CONTEXT_VERSION, digest, plain, timestamp, witness_for_sources
 
     catalog = load_dataset_catalog()
@@ -755,6 +869,130 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         raise HealthProcessingError("Unified evidence is partial; use --allow-partial")
     payloads = dict(view["rows"])
     evidence_files = frozenset(payloads)
+    rest_diagnostics = None
+    rest_effective_outcome = None
+    by_metadata = {item["filename"]: item for item in metadata}
+    rest_outcome_metadata = by_metadata.get(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME)
+    rest_diagnostic_metadata = by_metadata.get(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME)
+    if (
+        rest_outcome_metadata and rest_diagnostic_metadata
+        and rest_outcome_metadata["status"] == rest_diagnostic_metadata["status"] == "selected"
+    ):
+        try:
+            rest_effective_outcome, _ = read_rest_diagnostic_recovery(
+                data_dir,
+                expected_network=report["networkInstance"],
+                expected_outcome_digest=rest_outcome_metadata["sha256"],
+                expected_diagnostics_digest=rest_diagnostic_metadata["sha256"],
+            )
+        except UnifiedDatasetError as exc:
+            raise HealthProcessingError(str(exc)) from exc
+        if rest_effective_outcome is not None:
+            rest_diagnostics = rest_effective_outcome.get("diagnosticRecovery")
+            provenance = rest_diagnostics.get("provenance", {}) if rest_diagnostics else {}
+            if (
+                provenance.get("outcomeScopeSha256") != rest_outcome_metadata.get("scopeSha256")
+                or provenance.get("diagnosticsScopeSha256") != rest_diagnostic_metadata.get("scopeSha256")
+                or (
+                    (report.get("builderContract") == "unified-assembly-v10"
+                     or "restDiagnostics" in report["coverage"])
+                    and report["coverage"].get("restDiagnostics") != rest_diagnostics
+                )
+            ):
+                raise HealthProcessingError("Unified REST recovery evidence changed")
+    rest_child_tables = None
+    if dataset.datasource_id == "multi-source" and report.get("builderContract") == "unified-assembly-v10":
+        coverage = report["coverage"]
+        advertised_sources = coverage.get("sources")
+        report_reasons = coverage.get("healthReasons")
+        if (
+            not isinstance(advertised_sources, dict) or not isinstance(report_reasons, list)
+            or any(not isinstance(reason, str) for reason in report_reasons)
+            or state == "complete" and report_reasons
+        ):
+            raise HealthProcessingError("Invalid Unified composition coverage")
+        reasons = set(report_reasons)
+        cli_coverage = {}
+        dependency_coverage = {}
+        for domain, dependency_id in (
+            ("otbr-cli", "otbr_cli_unified"),
+            ("otbr-restapi", "otbr_restapi_unified"),
+            ("ha-matter-ws", "ha_matter_ws_unified"),
+            ("mdns", "mdns_unified"),
+        ):
+            dependency = resolve_dataset(catalog, dependency_id, source=domain)
+            dependency_input = next(
+                (item for item in report["inputs"] if item["filename"] == dependency["files"][0]),
+                None,
+            )
+            if dependency_input is None:
+                raise HealthProcessingError("Unified dependency coverage is missing")
+            if dependency_input["status"] != "selected":
+                continue
+            try:
+                primary = read_generation(data_dir, dependency, verify_inputs=True, catalog=catalog)
+            except UnifiedDatasetError as exc:
+                raise HealthProcessingError(str(exc)) from exc
+            source_coverage = advertised_sources.get(domain)
+            if not isinstance(source_coverage, dict) or source_coverage.get("coverage") != primary["coverage"]:
+                raise HealthProcessingError(f"Unified {domain} dependency coverage changed")
+            dependency_coverage[domain] = primary["coverage"]
+        cli_coverage = dependency_coverage.get("otbr-cli", {})
+        if cli_coverage:
+            table_reasons, cli_tables = derive_cli_router_table_evidence(
+                view["declarations"], view["allPayloads"],
+            )
+            reason_prefixes = (
+                "incomplete-table-evidence:", "no-answered-router-table:", "uncovered-children:",
+            )
+            if (
+                set(table_reasons) != {
+                    reason for reason in cli_coverage.get("healthReasons", ())
+                    if reason.startswith(reason_prefixes)
+                }
+                or cli_tables != cli_coverage.get("tablesNotProvided", [])
+            ):
+                raise HealthProcessingError("Unified CLI table coverage changed")
+        rest_child_tables = derive_rest_child_table_coverage(
+            network=report["networkInstance"], metadata=metadata,
+            scopes=view["scopes"], payloads=view["payloads"], rows=view["rows"],
+            cli_coverage=cli_coverage, rest_effective=rest_effective_outcome,
+        )
+        if report["coverage"].get("restChildTableCoverage") != rest_child_tables:
+            raise HealthProcessingError("Unified REST child-table coverage changed")
+        covered = {
+            router["rloc16"] for router in (rest_child_tables or {}).get("routers", ())
+        }
+        expected_tables = {
+            (item["file"], item["rloc16"])
+            for item in cli_coverage.get("tablesNotProvided", ())
+        }
+        if rest_child_tables:
+            expected_tables.update(
+                (filename, router["rloc16"])
+                for router in rest_child_tables["routers"] for filename in router["cliFiles"]
+            )
+        reported_tables = {
+            (item["file"], item["rloc16"])
+            for item in report["coverage"].get("tablesNotProvided", ())
+        }
+        if expected_tables != reported_tables:
+            raise HealthProcessingError("Unified CLI table exemptions changed")
+        for domain, primary_coverage in dependency_coverage.items():
+            if domain == "mdns":
+                continue
+            for reason in primary_coverage.get("healthReasons", ()):
+                covered_reason = (
+                    domain == "otbr-cli" and reason.startswith("uncovered-children:")
+                    and reason.removeprefix("uncovered-children:") in covered
+                )
+                if (f"{domain}:{reason}" in reasons) == covered_reason:
+                    raise HealthProcessingError("Unified dependency coverage reasons changed")
+    rest_child_identities, unresolved_rest_children = (
+        _rest_child_identity_evidence(
+            rest_effective_outcome, view["payloads"].get(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME),
+        ) if rest_diagnostic_metadata else (None, False)
+    )
     identity_file = dataset.health_profile.identity_file
     if identity_file in view["payloads"]:
         identity = view["payloads"][identity_file]
@@ -796,9 +1034,24 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
                     and by_name[i["file"]].source_observed_at
                     and (i["role"] != "records" or i["file"] in payloads)
                     for i in required)
+        if domain == "otbr-cli" and rest_child_tables:
+            valid = False
         if domain == "otbr-restapi":
-            valid = valid and all(_outcome_state(view["payloads"].get(i["file"])) is Completeness.COMPLETE
-                                  for i in declarations if i["role"] == "outcome")
+            valid = valid and not unresolved_rest_children
+            valid = valid and all(
+                _outcome_state(
+                    rest_effective_outcome
+                    if i["file"] == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME
+                    and rest_effective_outcome is not None
+                    else view["payloads"].get(i["file"])
+                ) is Completeness.COMPLETE
+                for i in declarations if i["role"] == "outcome"
+            )
+            if rest_child_tables:
+                valid = valid and all(
+                    router["resolvedChildCount"] == router["childCount"]
+                    for router in rest_child_tables["routers"]
+                )
         # A newer provisional checkpoint is not a complete negative observation.
         valid = valid and not any(
             (data_dir / i["file"].replace(".json", ".partial.json")).exists()
@@ -824,6 +1077,10 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         "effectiveCoverage": dict(dataset.health_profile.coverage),
         "absenceWitness": witness,
     }
+    if rest_child_tables:
+        context["restChildTableCoverage"] = rest_child_tables
+    if unresolved_rest_children:
+        context["unresolvedRestChildIdentities"] = True
     if witness is None:
         if completeness is Completeness.COMPLETE:
             completeness = Completeness.DEGRADED
@@ -832,7 +1089,6 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
             for key, value in context["effectiveCoverage"].items()
         }
     # Revalidate after companion reads and normalization to close read races.
-    from td_unified_dataset import read_generation
     try:
         if read_generation(data_dir, entry, verify_inputs=True, catalog=catalog) != report:
             raise HealthProcessingError("Unified generation changed during health processing")
@@ -847,6 +1103,9 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         completeness, context, evidence_files,
         frozenset((item["file"], item["rloc16"])
                   for item in report["coverage"].get("tablesNotProvided", ())),
+        rest_diagnostics,
+        rest_child_identities,
+        unresolved_rest_children,
     )
 
 
@@ -889,7 +1148,7 @@ def build_processing_result(
         if filename in payloads
     }
     devices, relationships, metrics, duplicate_relationship_ids, device_ipv6_addresses = _normalize_samples(
-        sample_dataset, available_finals, inputs.tables_not_provided
+        sample_dataset, available_finals, inputs.tables_not_provided, inputs.rest_child_identities
     )
     roster_facts = tuple(
         fact
@@ -969,6 +1228,29 @@ def build_processing_result(
         # The assembly contract changes completeness and samples for identical evidence.
         observation_parts += ("comparison-v1-unified", inputs.unified_context["recipeContractDigest"],
                               inputs.unified_context["reportContractDigest"])
+        if inputs.rest_diagnostics is not None or inputs.unified_context.get("restChildTableCoverage"):
+            from td_health_unified import digest
+            observation_parts += (digest({
+                "restDiagnostics": inputs.rest_diagnostics,
+                "restChildTableCoverage": inputs.unified_context.get("restChildTableCoverage"),
+            }),)
+    elif inputs.rest_diagnostics and (
+        inputs.unresolved_rest_children or inputs.rest_child_identities or any(
+            inputs.rest_diagnostics.get("summary", {}).get(key, 0)
+            for key in ("recoveredChildren", "recoveredRouters")
+        )
+    ):
+        recovery_digest = hashlib.sha256(json.dumps(
+            {
+                "recovery": inputs.rest_diagnostics,
+                "unresolvedChildIdentities": inputs.unresolved_rest_children,
+                "childIdentities": [
+                    [parent, child_id, ext]
+                    for (parent, child_id), ext in sorted((inputs.rest_child_identities or {}).items())
+                ],
+            }, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")).hexdigest()
+        observation_parts += (inputs.rest_diagnostics["contractVersion"], recovery_digest)
     observation_key = "\0".join(observation_parts)
     observation_id = "observation:" + hashlib.sha256(observation_key.encode("utf-8")).hexdigest()[:24]
     observation = Observation(
@@ -990,10 +1272,10 @@ def build_processing_result(
     roster_inputs = (
         store.roster_evaluation_inputs(
             network_id=network_id,
-            observation_id=observation_id,
             observed_at=observed_at,
-            completeness=completeness,
             observed_device_ids=frozenset(device.device_id for device in devices),
+            datasource_id=observation.datasource_id,
+            sources=observation.sources,
             unified_health=inputs.unified_context,
         )
         if store
@@ -1023,14 +1305,14 @@ def build_processing_result(
         expected_device_ids=roster_inputs["expectedDeviceIds"],
         absence_history=(
             EvaluationInputDomain(EvaluationInputState.AVAILABLE)
-            if roster_available and (inputs.unified_context is None or roster_inputs.get("absenceAvailable"))
+            if roster_available and roster_inputs.get("absenceAvailable")
             else EvaluationInputDomain(
                 EvaluationInputState.UNAVAILABLE, ("input-not-retained",)
             )
         ),
         prior_complete_absences=(
             roster_inputs["priorCompleteAbsences"]
-            if inputs.unified_context is None or roster_inputs.get("absenceAvailable") else None
+            if roster_inputs.get("absenceAvailable") else None
         ),
         duplicate_relationships=EvaluationInputDomain(
             EvaluationInputState.AVAILABLE
@@ -1067,6 +1349,7 @@ def build_processing_result(
             )
         ),
         unified_health=inputs.unified_context,
+        rest_diagnostics=inputs.rest_diagnostics,
     )
     return ProcessingResult(observation, assessment, None, None, roster_facts)
 

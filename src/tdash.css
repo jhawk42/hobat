@@ -1858,6 +1858,28 @@ button[aria-expanded="true"] > .disclosure-icon {
 .health-coverage-pillar:has(.state-missing) { border-left-color: var(--health-poor); }
 .health-coverage-capability { color: var(--muted); font-weight: 400; }
 
+.health-rest-coverage {
+  min-width: 0;
+  margin: 8px 0 16px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.health-rest-coverage > summary {
+  min-height: 44px;
+  padding: 10px 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+.health-rest-coverage > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.health-rest-coverage h4 { margin: 12px 0 4px; }
+.health-rest-coverage p { margin: 4px 0; }
+.health-rest-coverage ul { margin: 6px 0; padding-left: 1.25rem; }
+.health-rest-coverage li + li { margin-top: 10px; }
+.health-rest-coverage-digest { color: var(--muted); font-size: 12px; }
+
 .health-finding-groups {
   display: grid;
   gap: 10px;

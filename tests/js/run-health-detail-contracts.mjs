@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {
-  renderHealthFindingDetails, renderHealthComparison, renderHealthRoster,
+  renderHealthFindingDetails, renderHealthComparison, renderHealthInsights, renderHealthRoster,
 } from "../../src/js/tdash-health.js";
 
 class Element {
@@ -297,4 +297,79 @@ const showUnknown = nodes(incomparableContainer).find(
 );
 showUnknown.click();
 assert.deepEqual(resultActions, ["unknown"]);
+
+const evidence = new Element("section");
+const findingTable = new Element("table");
+findingTable.tHead = new Element("thead");
+findingTable.tBodies = [new Element("tbody")];
+const findingWrap = new Element("div");
+const findingEmpty = new Element("div");
+const insightContainer = {querySelector: (selector) => ({
+  "#health-insights-evidence": evidence,
+  "#health-finding-table": findingTable,
+  "#health-finding-table-wrap": findingWrap,
+  "#health-insights-empty": findingEmpty,
+})[selector]};
+const assessment = {
+  status: "unknown", completeness: "complete", confidence: "high", findingGroups: [],
+  coverage: {deviceCount: 1, pillars: {}, observedPillars: {}},
+};
+const insightState = {restCoverageOpen: false};
+const insightActions = {restCoverageOpen: (open) => { insightState.restCoverageOpen = open; }};
+const renderInsights = () => renderHealthInsights(
+  insightContainer, {assessment}, insightState, insightActions,
+);
+renderInsights();
+assert.ok(!nodes(evidence).some((node) => node.className === "health-rest-coverage"));
+assessment.coverage.restDiagnostics = {
+  contractVersion: "rest-diagnostic-recovery-v1",
+  summary: {recoveredChildren: 2, recoveredRouters: 1, notProvidedDevices: 1, unavailableDevices: 1},
+  devices: [{
+    extAddress: "<img src=x onerror=alert(1)>", rloc16: "0x4401", role: "child", recoveryKind: "child-rloc",
+    fields: {
+      extAddress: {availability: "present"}, threadVersion: {availability: "not-provided"},
+      macCounters: {availability: "unavailable", reason: "<script>failed</script>"},
+      mleCounters: {availability: "not-requested"},
+    },
+  }],
+  unresolved: [{deviceId: "<node>", reasonCode: "<reason>"}],
+};
+assessment.coverage.restChildTableCoverage = {
+  networkInstance: "extpan:1234567890abcdef",
+  routers: [{
+    extAddress: "8899aabbccddeeff", rloc16: "0x4400", childCount: 1, resolvedChildCount: 0,
+    cliFiles: ["cli.json"], cliSourceObservedAt: "2026-10-30T11:00:00Z",
+    cliTimeProvenance: "embedded", restFile: "rest.json", restDiagnosticId: "diag",
+    restSourceObservedAt: "2026-10-30T11:00:01Z",
+    inputDigests: {"cli.json": "a".repeat(64)}, scopeDigests: {"cli.json": "b".repeat(64)},
+  }],
+};
+renderInsights();
+let coverageDisclosure = nodes(evidence).find((node) => node.className === "health-rest-coverage");
+assert.equal(coverageDisclosure.tagName, "details");
+assert.equal(coverageDisclosure.open, false);
+assert.equal(coverageDisclosure.children[0].tagName, "summary");
+assert.equal(coverageDisclosure.children[0].textContent,
+  "REST diagnostic coverage: 2 recovered children, 1 recovered router · 1 device with fields not provided · 1 device with unavailable fields");
+assert.ok(texts(coverageDisclosure).includes("<img src=x onerror=alert(1)> · 0x4401 · child · child-rloc"));
+assert.ok(texts(coverageDisclosure).includes("Unavailable: macCounters (<script>failed</script>)"));
+assert.ok(texts(coverageDisclosure).includes("Not requested: mleCounters"));
+assert.ok(texts(coverageDisclosure).includes("<node>: <reason>"));
+assert.ok(texts(coverageDisclosure).includes("Multi-source REST child-table coverage"));
+assert.ok(texts(coverageDisclosure).includes(`Input SHA-256 cli.json: ${"a".repeat(64)}`));
+assert.ok(!nodes(coverageDisclosure).some((node) => ["img", "script"].includes(node.tagName)));
+coverageDisclosure.open = true;
+coverageDisclosure.listeners.toggle();
+renderInsights();
+coverageDisclosure = nodes(evidence).find((node) => node.className === "health-rest-coverage");
+assert.equal(coverageDisclosure.open, true);
+assert.equal(findingTable.tHead.children[0].children.length, 6);
+assessment.coverage.restDiagnostics.summary = {};
+renderInsights();
+coverageDisclosure = nodes(evidence).find((node) => node.className === "health-rest-coverage");
+assert.ok(coverageDisclosure.children[0].textContent.includes("unknown recovered children"));
+delete assessment.coverage.restDiagnostics;
+delete assessment.coverage.restChildTableCoverage;
+renderInsights();
+assert.ok(!nodes(evidence).some((node) => node.className === "health-rest-coverage"));
 console.log("Health detail contracts passed");

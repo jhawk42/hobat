@@ -145,6 +145,7 @@ def dispatch_topology(
         unresolved_iid_skips = sum(
             isinstance(result, dict)
             and result.get("skipReasonCode") == "unresolved_mesh_local_iid"
+            and result.get("status") != "completed"
             for result in diagnostic_outcome.get("deviceResults", [])
         )
         preserve_prior_dataset = guard_affected and not diagnostics
