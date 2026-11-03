@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from types import MappingProxyType
 
@@ -9,6 +10,8 @@ import pytest
 
 from td_health_evaluator import (
     EVALUATOR_VERSION,
+    ROSTER_REASSESSMENT_RULE_IDS,
+    aggregate_assessment_state,
     evaluate_observation,
     evaluation_inputs_from_payload,
 )
@@ -1237,3 +1240,120 @@ def test_missing_capability_omits_inapplicable_external_routing_rule() -> None:
         finding.rule_id == "network.external-routing"
         for finding in assessment.findings
     )
+
+
+@pytest.mark.parametrize("completeness", list(Completeness))
+@pytest.mark.parametrize("roster", ["expected", "empty", "unavailable"])
+@pytest.mark.parametrize("absence_available", [True, False])
+@pytest.mark.parametrize("routing_available", [True, False])
+def test_roster_only_evaluation_matches_full_retained_finding_oracle(
+    monkeypatch, completeness, roster, absence_available, routing_available,
+) -> None:
+    import td_health_evaluator as evaluator
+
+    observation = replace(
+        _observation(_relationship()),
+        completeness=completeness,
+        devices=(
+            replace(_observation(_relationship()).devices[0], is_border_router=True),
+            replace(_observation(_relationship()).devices[1], state="detached"),
+        ),
+        metrics=(
+            MetricSample("extaddr:1111111111111111", "totalMacErrorRatio", 0.4, "ratio", 100, "source.json"),
+            MetricSample("extaddr:1111111111111111", "parentChanges", 9, "count", None, "source.json"),
+            MetricSample("extaddr:1111111111111111", "diagnosticTimeout", 0, "flag", None, "source.json"),
+        ),
+    )
+    policy = load_health_policy()
+    missing = "extaddr:3333333333333333"
+    first = evaluate_observation(
+        observation, policy, profile=PROFILE, expected_device_ids=frozenset({missing}),
+        omr_prefix="fd00:1::/64",
+        device_ipv6_addresses={observation.devices[0].device_id: ("fd00:1::1",)},
+    )
+    inputs = evaluation_inputs_from_payload(
+        json.loads(json.dumps(first.reproduction_context["evaluationInputs"]))
+    )
+    unavailable = EvaluationInputDomain(EvaluationInputState.UNAVAILABLE, ("test-unavailable",))
+    if not routing_available:
+        inputs = replace(
+            inputs, omr_prefix=unavailable, omr_prefix_value=None, omr_source=None,
+            device_ipv6_addresses=unavailable, device_ipv6_address_values=None,
+            duplicate_relationships=unavailable, duplicate_relationship_ids=None,
+            partition_membership=unavailable, partition_membership_evidence=None,
+        )
+    retained = evaluate_observation(
+        observation, policy, profile=PROFILE, evaluation_inputs=inputs,
+    )
+    new_inputs = replace(
+        inputs,
+        roster=unavailable if roster == "unavailable" else inputs.roster,
+        expected_device_ids=(
+            None if roster == "unavailable"
+            else frozenset({missing, observation.devices[0].device_id})
+            if roster == "expected" else frozenset()
+        ),
+        roster_context=None if roster == "unavailable" else {"schemaVersion": 1, "revision": 2},
+        absence_history=inputs.absence_history if absence_available else unavailable,
+        prior_complete_absences={missing: 3} if absence_available else None,
+    )
+
+    def assess(retained_assessment=None):
+        return evaluate_observation(
+            observation, policy, profile=PROFILE, evaluation_inputs=new_inputs,
+            assessed_at="2026-11-04T00:00:00+00:00", network_roster_revision=2,
+            retained_assessment=retained_assessment,
+        )
+
+    full = assess()
+    findings = tuple(sorted(
+        [
+            finding for finding in retained.findings
+            if finding.rule_id not in ROSTER_REASSESSMENT_RULE_IDS
+        ] + [
+            finding for finding in full.findings
+            if finding.rule_id in ROSTER_REASSESSMENT_RULE_IDS
+        ],
+        key=lambda finding: (-int(finding.rank), finding.finding_id),
+    ))
+    status, confidence = aggregate_assessment_state(
+        findings, completeness=completeness, device_count=len(observation.devices),
+        observed_pillars=full.coverage["observedPillars"], evaluation_inputs=new_inputs,
+    )
+    expected = replace(full, findings=findings, status=status, confidence=confidence)
+    created = []
+    finding_factory = evaluator._finding
+
+    def finding(*args, **kwargs):
+        created.append(kwargs["rule_id"])
+        return finding_factory(*args, **kwargs)
+
+    def discarded_work(*args, **kwargs):
+        pytest.fail(
+            f"Unexpected non-roster evaluation ({len(args)} positional, {len(kwargs)} keyword arguments)"
+        )
+
+    monkeypatch.setattr(evaluator, "_finding", finding)
+    monkeypatch.setattr(evaluator, "_evaluate_observation_evidence", discarded_work)
+    # Coverage is recomputed from admitted samples, not trusted from the old assessment.
+    actual = assess(replace(retained, coverage={}))
+    assert actual == expected
+    assert set(created) <= ROSTER_REASSESSMENT_RULE_IDS
+
+
+@pytest.mark.parametrize("field,value", [
+    ("observation_id", "observation:other"),
+    ("profile_id", "other-profile"),
+    ("evaluator_version", "snapshot-other"),
+    ("sample_contract_version", "comparison-other"),
+    ("health_policy_digest", "other-policy"),
+])
+def test_roster_only_evaluation_rejects_mismatched_retained_identity(field, value) -> None:
+    observation = _observation(_relationship())
+    policy = load_health_policy()
+    retained = evaluate_observation(observation, policy, profile=PROFILE)
+    with pytest.raises(ValueError, match="same admitted observation contract"):
+        evaluate_observation(
+            observation, policy, profile=PROFILE,
+            retained_assessment=replace(retained, **{field: value}),
+        )

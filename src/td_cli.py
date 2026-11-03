@@ -411,6 +411,9 @@ def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     health_commands.add_parser("compare", help="Compare stored health assessments", add_help=False)
     health_commands.add_parser(
+        "prepare-history", help="Prepare bounded cache-only health history", add_help=False,
+    )
+    health_commands.add_parser(
         "migrate-history",
         help="Replay retained health history under the current evaluator contract",
         add_help=False,

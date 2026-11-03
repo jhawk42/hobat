@@ -117,6 +117,8 @@ def _create_schema_fixture(path, version: int) -> None:
 
         if version >= 9:
             td_health_sqlite._migration_v9(connection)
+        if version >= 10:
+            td_health_sqlite._migration_v10(connection)
 
         connection.execute("DELETE FROM schema_migrations")
         if version == 1:
@@ -430,11 +432,12 @@ def test_migration_failure_rolls_back_schema_data_and_ledger_then_retry_succeeds
         ).fetchone() == (SCHEMA_VERSION,)
 
 
-def test_schema_v9_failure_rolls_back_column_and_ledger_then_retry_succeeds(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("target", [9, 10])
+def test_schema_failure_rolls_back_ddl_and_ledger_then_retry_succeeds(
+    tmp_path, monkeypatch, target,
 ) -> None:
-    path = tmp_path / "retry-v9.db"
-    _create_schema_fixture(path, 8)
+    path = tmp_path / f"retry-v{target}.db"
+    _create_schema_fixture(path, target - 1)
     with sqlite3.connect(path) as connection:
         before_objects = connection.execute(
             "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
@@ -446,7 +449,7 @@ def test_schema_v9_failure_rolls_back_column_and_ledger_then_retry_succeeds(
     original_registry = td_health_sqlite.SCHEMA_MIGRATIONS
     original_v9 = next(
         migration for migration in original_registry
-        if migration.to_version == 9
+        if migration.to_version == target
     )
 
     def fail_after_v9(connection):
@@ -458,7 +461,7 @@ def test_schema_v9_failure_rolls_back_column_and_ledger_then_retry_succeeds(
         "SCHEMA_MIGRATIONS",
         tuple(
             replace(migration, apply=fail_after_v9)
-            if migration.to_version == 9
+            if migration.to_version == target
             else migration
             for migration in original_registry
         ),
@@ -473,11 +476,11 @@ def test_schema_v9_failure_rolls_back_column_and_ledger_then_retry_succeeds(
         assert connection.execute(
             "SELECT version, applied_at FROM schema_migrations ORDER BY version"
         ).fetchall() == before_ledger
-        assert "relationship_type" not in {
+        assert ("relationship_type" in {
             row[1] for row in connection.execute(
                 "PRAGMA table_info(comparison_items)"
             )
-        }
+        }) is (target >= 10)
     monkeypatch.setattr(
         td_health_sqlite, "SCHEMA_MIGRATIONS", original_registry
     )
@@ -492,7 +495,7 @@ def test_schema_v9_failure_rolls_back_column_and_ledger_then_retry_succeeds(
         assert relationship_type[2:5] == ("TEXT", 0, None)
         assert connection.execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone() == (9,)
+        ).fetchone() == (SCHEMA_VERSION,)
 
 
 def test_backup_publication_failure_leaves_database_unchanged(

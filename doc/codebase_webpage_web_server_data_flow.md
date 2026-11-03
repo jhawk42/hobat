@@ -335,6 +335,34 @@ processing path stores the adjacent comparison and unique complete-only
 1/3/7/30-day interval pairs in the same SQLite transaction, subject to the
 existing 2,000-pair cap.
 
+Roster reassessment shares validated retained evidence only within that
+network's transaction, including nested automatic comparisons. Newly inserted
+assessments become visible to each source/mode-specific history group before
+comparison work. Each dataset still derives its own endpoint/monitoring-epoch
+absence counts, with per-assessment contract validation. CLI and browser writes
+retain the same atomic boundary. Invocation-local admissions never survive it.
+Roster revisions evaluate only the four retained roster/context rule IDs and
+reuse previous non-roster findings. Shared sample-derived coverage and final
+aggregation rebuild pillar states, status/confidence and assessment identities;
+the previous coverage object is not used as a shortcut. Ordinary dataset
+processing still evaluates all rules, and automatic interval comparisons and
+their writes remain inside the existing transaction. Schema 10 adds separate
+derived observation bodies and observation-only metric/relationship fragments,
+published by shared normal processing or bounded explicit `prepare-history`.
+Later transactions verify current native SQL signatures and full contracts
+before reuse, then still admit each assessment individually. Roster/absence
+context, compatibility, headers and final writes remain fresh. PATCH misses
+reconstruct without publishing; GET and dry-run remain query-only. See
+[preparation maintenance and limits](thread_network_health.md#preparing-retained-evidence).
+The dialog announces the pending save until commit, then reconciles the views.
+Post-save reconciliation owns its roster-page reads: one for the current
+filters and, only when needed to keep the selected device visible, one after
+expanding an excluding designation/presence filter to All. Its assessment
+refresh suppresses the ordinary automatic roster read; other refresh callers
+retain it.
+A failed post-commit refresh offers a refresh-only retry, distinct from an
+uncertain PATCH outcome's same-request retry.
+
 Newly processed relationship evidence preserves incoming link quality and
 queued-message counts of zero. Preferred fields fall back to aliases only
 when absent or null, not when zero or invalid. A positive queue followed by

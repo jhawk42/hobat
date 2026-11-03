@@ -5,9 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from td_health_manifest import HealthDataset
 
 from td_const import (
     OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
@@ -114,21 +119,41 @@ def sample_sources(dataset):
             if item["role"] == "records" and item["source"] != "mdns"}
 
 
-def validate_context(context, dataset, observation=None):
+@dataclass(frozen=True)
+class _PreparedContract:
+    dataset: HealthDataset
+    recipe: dict
+    recipe_digest: str
+    report_contract_digests: frozenset[str]
+
+
+def _prepare_contract(dataset: HealthDataset) -> _PreparedContract:
+    from td_health_manifest import HealthManifestError
+    if dataset.unified_recipe is None:
+        raise HealthManifestError("Invalid retained unifiedHealth context")
+    recipe = plain(dataset.unified_recipe)
+    return _PreparedContract(dataset, recipe, digest(recipe), frozenset(
+        digest(["unified-v1", builder_contract, recipe["recipeDigest"], recipe["authorityDigest"]])
+        for builder_contract in (
+            "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
+            "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
+            "unified-assembly-v9", "unified-assembly-v10",
+        )
+    ))
+
+
+def validate_context(context, dataset, observation=None, *, prepared: _PreparedContract | None = None):
     """Validate retained lineage without consulting today's raw cache."""
     from td_health_manifest import HealthManifestError
+    if prepared is None:
+        prepared = _prepare_contract(dataset)
+    elif prepared.dataset != dataset:
+        raise HealthManifestError("Prepared Unified contract does not match the selected dataset")
     value = context.get("unifiedHealth") if isinstance(context, Mapping) else None
     if (not isinstance(value, Mapping) or value.get("version") != CONTEXT_VERSION
-            or value.get("recipe") != plain(dataset.unified_recipe)
-            or value.get("recipeContractDigest") != digest(dataset.unified_recipe)
-            or value.get("reportContractDigest") not in {digest([
-                "unified-v1", builder_contract, dataset.unified_recipe["recipeDigest"],
-                dataset.unified_recipe["authorityDigest"],
-            ]) for builder_contract in (
-                "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
-                "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
-                "unified-assembly-v9", "unified-assembly-v10",
-            )}
+            or value.get("recipe") != prepared.recipe
+            or value.get("recipeContractDigest") != prepared.recipe_digest
+            or value.get("reportContractDigest") not in prepared.report_contract_digests
             or not isinstance(value.get("originalEvidenceFingerprint"), str)
             or not _DIGEST.fullmatch(value["originalEvidenceFingerprint"])
             or not isinstance(value.get("effectiveCoverage"), Mapping)):

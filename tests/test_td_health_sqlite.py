@@ -137,6 +137,165 @@ def _database_dump(store: SQLiteHealthStore) -> tuple[str, ...]:
         return tuple(connection.iterdump())
 
 
+def _encoded_comparison_fixture():
+    from td_health_comparison import derive_comparison, ResetEvidence
+
+    before, after = _result("1"), _result("2")
+    interval, derived = derive_comparison(before, after, source_roles={})
+    base = next(item for item in derived if item.kind == "presence-transition")
+    kinds = ("presence-transition", "relationship-change", "categorical-transition",
+             "gauge-change", "counter-delta", "ratio-change", "queue-persistence")
+    values = ((False, True), (True, False), (None, "\u00e9\n\""), (0.0, -0.0),
+              (False, 0), (0, None), (2, 0))
+    items = tuple(replace(
+        base, item_id=f"encoded:{index}", kind=kind,
+        scope="relationship" if kind == "relationship-change" else "device",
+        before_value=old, after_value=new, delta=-0.0 if index % 2 else None,
+        source_files=("b.json", "a.json") if index % 2 else ("a.json", "b.json"),
+        compatibility=replace(base.compatibility,
+                              reasons=("source-not-newer", "metric-missing") if index % 2
+                              else ("metric-missing", "source-not-newer")),
+        reset_evidence=ResetEvidence("unknown", "escaped\n\u00e9", False, 0) if index == 4 else None,
+        relationship_type="parent-child" if kind == "relationship-change" else None,
+    ) for index, (kind, (old, new)) in enumerate(zip(kinds, values)))
+    return before, after, interval, items
+
+
+def test_comparison_batch_preserves_all_raw_columns_and_control_encoding(tmp_path, monkeypatch):
+    from collections import Counter
+
+    before, after, interval, items = _encoded_comparison_fixture()
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.save_processing_result(*before)
+    store.save_processing_result(*after)
+    calls, encodes = Counter(), Counter()
+    dumps = json.dumps
+
+    def counted_dumps(value, *args, **kwargs):
+        if isinstance(value, tuple):
+            encodes[value] += 1
+        return dumps(value, *args, **kwargs)
+
+    class Connection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def execute(self, query, *args):
+            if "INSERT INTO comparison_items" in query:
+                calls["item-execute"] += 1
+            return self.connection.execute(query, *args)
+
+        def executemany(self, query, rows):
+            calls["batch"] += 1
+            assert iter(rows) is rows
+            return self.connection.executemany(query, rows)
+
+    with closing(store._connect()) as connection, connection:
+        connection.execute("DELETE FROM comparisons")
+        statements = []
+        connection.set_trace_callback(statements.append)
+        with monkeypatch.context() as context:
+            context.setattr(json, "dumps", counted_dumps)
+            store._store_comparison(Connection(connection), before, after, interval, items)
+        assert calls == {"batch": 1}
+        assert sum("INSERT INTO comparison_items" in statement for statement in statements) == len(items)
+        assert all(encodes[key] == 1 for key in {item.source_files for item in items})
+        # Header reasons are independent of the per-comparison item encoder.
+        assert all(encodes[key] == 1 for key in {item.compatibility.reasons for item in items})
+        rows = connection.execute("SELECT * FROM comparison_items ORDER BY item_id").fetchall()
+        for item, row in zip(items, rows):
+            has_before = item.before_value is not None and (
+                item.kind not in {"presence-transition", "relationship-change"} or item.before_value is True)
+            has_after = item.after_value is not None and (
+                item.kind not in {"presence-transition", "relationship-change"} or item.after_value is True)
+            assert tuple(row) == (
+                interval.comparison_id, item.item_id, item.scope, item.subject_id, item.kind,
+                item.metric, item.unit, item.denominator_kind,
+                dumps(item.before_value, allow_nan=False), dumps(item.after_value, allow_nan=False),
+                dumps(item.delta, allow_nan=False), item.direction, item.change, item.transition,
+                item.sample_count, int(item.compatibility.comparable), item.compatibility.primary_reason,
+                dumps(item.compatibility.reasons), dumps(item.source_files),
+                item.before_source_time, item.after_source_time,
+                item.reset_evidence.state if item.reset_evidence else "not-applicable",
+                dumps({"witness": item.reset_evidence.witness, "before": item.reset_evidence.before_value,
+                       "after": item.reset_evidence.after_value} if item.reset_evidence else {}),
+                item.subject_id if item.scope == "device" and has_before else None,
+                item.subject_id if item.scope == "device" and has_after else None,
+                item.subject_id if item.scope == "relationship" and has_before else None,
+                item.subject_id if item.scope == "relationship" and has_after else None,
+                item.relationship_type if item.kind == "relationship-change" else None,
+            )
+        store._store_comparison(Connection(connection), before, after,
+                                replace(interval, comparison_id="comparison:empty"), ())
+        assert calls == {"batch": 2}
+        assert connection.execute(
+            "SELECT item_count FROM comparisons WHERE comparison_id='comparison:empty'",
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("failure", ["duplicate", "nan", "infinity", "header", "batch-prefix"])
+def test_comparison_batch_failure_rolls_back_header_and_prefix(tmp_path, failure):
+    before, after, interval, items = _encoded_comparison_fixture()
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.save_processing_result(*before)
+    store.save_processing_result(*after)
+    with closing(store._connect()) as connection, connection:
+        connection.execute("DELETE FROM comparisons")
+    original = _database_dump(store)
+    if failure == "duplicate":
+        items = (*items, items[0])
+    elif failure in {"nan", "infinity"}:
+        items = (*items, replace(items[0], item_id="invalid", before_value=float(
+            "nan" if failure == "nan" else "inf")))
+
+    class Connection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def execute(self, query, *args):
+            result = self.connection.execute(query, *args)
+            if failure == "header" and "INSERT INTO comparisons" in query:
+                assert self.connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 1
+                raise sqlite3.DatabaseError("injected after header")
+            return result
+
+        def executemany(self, query, rows):
+            def failing_rows():
+                for index, row in enumerate(rows):
+                    if failure == "batch-prefix" and index == 2:
+                        assert self.connection.execute(
+                            "SELECT COUNT(*) FROM comparison_items").fetchone()[0] == 2
+                        raise sqlite3.DatabaseError("injected after prefix")
+                    yield row
+            return self.connection.executemany(query, failing_rows())
+
+    with pytest.raises((sqlite3.DatabaseError, ValueError)):
+        with closing(store._connect()) as connection, connection:
+            store._store_comparison(Connection(connection), before, after, interval, items)
+    assert _database_dump(store) == original
+    with closing(store._connect()) as connection, connection:
+        valid = tuple(_encoded_comparison_fixture()[-1])
+        store._store_comparison(connection, before, after, interval, valid)
+        assert connection.execute("SELECT COUNT(*) FROM comparison_items").fetchone()[0] == len(valid)
+
+
+def test_comparison_batch_retention_runs_after_success_and_can_be_deferred(tmp_path):
+    before, after, interval, _ = _encoded_comparison_fixture()
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.save_processing_result(*before)
+    store.save_processing_result(*after)
+    with closing(store._connect()) as connection, connection:
+        connection.execute("DELETE FROM comparisons")
+        for index in range(2001):
+            store._store_comparison(connection, before, after,
+                                    replace(interval, comparison_id=f"comparison:{index:04d}"), (),
+                                    enforce_retention=False)
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 2001
+        store._store_comparison(connection, before, after,
+                                replace(interval, comparison_id="comparison:latest"), ())
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 2000
+
+
 def test_atomic_save_is_idempotent_and_sets_sqlite_guards(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
     observation, assessment = _result()
@@ -176,10 +335,10 @@ def test_initialized_schema_matches_frozen_contract(tmp_path) -> None:
         "309af9199b3f0c778a99407e89433d1f6da6f052604fcf6bdc8cbf51b72e9189"
     )
     assert schema_objects_digest == (
-        "0f6903675166afd7ce7756b1f4c9ae92322fd595ac3cf3522e838635722bd297"
+        "28ca8ba725b3b632c0b07cbf5f1e748928b23651ee517818ec6ab139c6cbaa98"
     )
-    assert SCHEMA_VERSION == 9
-    assert max_migration == 9
+    assert SCHEMA_VERSION == 10
+    assert max_migration == 10
 
 
 def test_roster_source_time_and_partial_observation_do_not_refresh_projection(tmp_path) -> None:

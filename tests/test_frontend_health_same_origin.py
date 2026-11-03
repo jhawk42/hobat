@@ -10,13 +10,259 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_roster_submit_saving_feedback_preserves_retry_and_refresh_paths() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import vm from "node:vm";
+      const source = fs.readFileSync("src/js/tdash-ui.js", "utf8");
+      const html = fs.readFileSync("src/tdash.html", "utf8");
+      assert.match(html, /id="health-roster-action-status" role="status" aria-live="polite"/);
+      const code = source.slice(source.indexOf("async function submitRosterAction("),
+        source.indexOf("\nfunction changeRosterSort("));
+      const refreshCode = source.slice(source.indexOf("function clearRosterMutationRefreshStatus("),
+        source.indexOf("\nconst ROSTER_ACTION_TITLES"));
+      const deferred = () => {
+        let resolve, reject;
+        const promise = new Promise((yes, no) => {resolve = yes; reject = no;});
+        return {promise, resolve, reject};
+      };
+      const saving = "Saving roster change and updating health...";
+      for (const action of ["enroll", "mark-offline"]) {
+        for (const path of ["success", "noop", "stale", "baseline", "rejection",
+          "uncertain", "refresh-failure", "navigation"]) {
+          const element = () => ({
+            value: "", textContent: "", disabled: false, children: [], listeners: {},
+            close() {this.closed = true;},
+            replaceChildren() {this.children = [];},
+            append(...items) {this.children.push(...items);},
+            addEventListener(name, callback) {this.listeners[name] = callback;},
+          });
+          const ids = ["confirm", "cancel", "status", "dialog", "label", "reason"];
+          const nodes = Object.fromEntries(ids.map(id => [`health-roster-action-${id}`, element()]));
+          nodes["health-roster-mutation-status"] = element();
+          nodes["health-roster-action-label"].value = " Router ";
+          nodes["health-roster-action-reason"].value = " Test ";
+          const capture = {action, deviceId: "device", networkId: "network",
+            assessmentId: "assessment", datasetId: "dataset", generation: 1, revision: 0};
+          let pending = deferred(), patches = [], reconciliations = 0, reconfirmations = 0;
+          const announcements = [];
+          const context = {
+            activeRosterAction: capture, activeRosterRequest: null,
+            rosterMutationPendingDeviceId: null,
+            healthInsightsState: {assessment: {networkId: "network", assessmentId: "assessment"},
+              datasetId: "dataset", assessmentRequestVersion: 1, rosterDetail: null},
+            document: {getElementById: id => nodes[id], createElement: element},
+            createHealthMutationRequestId: () => "same-request-id",
+            renderRosterDetailPanel() {},
+            announceHealthInsight: text => announcements.push(text),
+            beginRosterAction: () => {reconfirmations++;},
+            patchHealthRosterDevice: (_network, _device, payload) => {
+              patches.push(payload); return pending.promise;
+            },
+            reconcileCommittedRosterAction: async () => {
+              reconciliations++;
+              if (path === "navigation") {
+                context.activeRosterAction = {deviceId: "new-device"};
+                nodes["health-roster-action-status"].textContent = "New dialog status";
+                throw new Error("old refresh failed");
+              }
+              if (path === "refresh-failure" && reconciliations === 1) {
+                throw new Error("refresh unavailable");
+              }
+            },
+          };
+          vm.createContext(context);
+          vm.runInContext(refreshCode + "\n" + code, context);
+          const event = {preventDefault() {}};
+          const request = context.submitRosterAction(event);
+          const status = nodes["health-roster-action-status"];
+          const confirm = nodes["health-roster-action-confirm"];
+          const cancel = nodes["health-roster-action-cancel"];
+          const dialog = nodes["health-roster-action-dialog"];
+          assert.equal(status.textContent, saving, `${action}/${path}: before response`);
+          assert.equal(confirm.disabled, true);
+          assert.equal(cancel.disabled, true);
+          assert.equal(dialog.closed, undefined);
+          await context.submitRosterAction(event);
+          assert.equal(patches.length, 1, "duplicate submit is ignored");
+          assert.equal(patches[0].reason, "Test");
+          assert.equal(patches[0].deviceLabel, action === "enroll" ? "Router" : undefined);
+          if (["success", "noop", "refresh-failure", "navigation"].includes(path)) {
+            pending.resolve({changed: path !== "noop"});
+          } else {
+            const error = new Error("request rejected");
+            if (path !== "uncertain") {
+              error.status = path === "rejection" ? 422 : 409;
+              error.code = path === "stale" ? "stale-revision" : "reassessment-baseline-unavailable";
+            }
+            pending.reject(error);
+          }
+          await request;
+          assert.equal(context.rosterMutationPendingDeviceId, null);
+          assert.equal(cancel.disabled, false);
+          assert.notEqual(status.textContent, saving);
+          if (path === "uncertain") {
+            assert.match(status.textContent, /Outcome unclear/);
+            assert.equal(confirm.textContent, "Retry same request");
+            const payload = context.activeRosterRequest;
+            pending = deferred();
+            const retry = context.submitRosterAction(event);
+            assert.equal(status.textContent, saving);
+            assert.equal(patches[1], payload);
+            assert.equal(patches[1].requestId, patches[0].requestId);
+            pending.resolve({changed: true});
+            await retry;
+            assert.equal(status.textContent, "");
+            assert.equal(reconciliations, 1);
+          } else if (path === "stale") {
+            assert.equal(status.textContent, "");
+            assert.equal(reconfirmations, 1);
+            assert.equal(context.activeRosterRequest, null);
+            assert.equal(patches.length, 1);
+          } else if (path === "baseline" || path === "rejection") {
+            assert.match(status.textContent, path === "baseline" ? /Refresh Health/ : /failed \(422\)/);
+            assert.equal(context.activeRosterRequest, null);
+            assert.equal(confirm.disabled, false);
+            assert.equal(reconciliations, 0);
+          } else {
+            assert.equal(dialog.closed, true);
+            assert.equal(reconciliations, 1);
+            assert.equal(status.textContent, path === "navigation" ? "New dialog status" : "");
+            assert.ok(announcements.includes(path === "noop"
+              ? "Roster is already in the requested state." : "Roster change saved."));
+            if (path === "refresh-failure") {
+              const external = nodes["health-roster-mutation-status"];
+              assert.match(external.children[0].textContent, /Change saved; view refresh failed/);
+              external.children[1].listeners.click();
+              await Promise.resolve();
+              await Promise.resolve();
+              assert.equal(reconciliations, 2);
+              assert.equal(patches.length, 1, "refresh retry never PATCHes again");
+              assert.equal(external.hidden, true);
+            }
+          }
+        }
+      }
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_roster_reconciliation_owns_list_reads_and_filter_expansion() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import vm from "node:vm";
+      const source = fs.readFileSync("src/js/tdash-ui.js", "utf8");
+      const extract = (start, end) => source.slice(source.indexOf(start), source.indexOf(end));
+      const deferred = () => {
+        let resolve;
+        const promise = new Promise(yes => { resolve = yes; });
+        return {promise, resolve};
+      };
+      for (const mode of ["default", "suppressed", "included", "designation", "presence", "both", "retry"]) {
+        const summary = deferred(), support = deferred(), page = deferred(), detail = deferred();
+        const enteredPage = deferred(), enteredDetail = deferred();
+        const assessment = {networkId: "network", assessmentId: "new", datasetId: "dataset"};
+        const ledger = [], announcements = [];
+        const nodes = new Map();
+        const context = {
+          currentDataset: {entry: {value: "dataset", healthEligible: true}},
+          currentView: "insights", healthInsightsTab: "roster", rosterNavigationGeneration: 7,
+          healthInsightsState: {datasetId: "dataset", assessmentRequestVersion: 0,
+            assessment: {...assessment, assessmentId: "old"}, deviceRequestVersion: 0},
+          healthAssessmentHistoryState: {mode: "latest", requestVersion: 0},
+          healthInsightsViewState: {selectedGroupId: null, selectedFindingId: null},
+          healthRosterViewState: {offset: 0, requestVersion: 0, detailVersion: 0,
+            selectedDeviceId: "device", rosterState: ["designation", "both"].includes(mode)
+              ? "intentionally-offline" : "all",
+            presence: ["presence", "both"].includes(mode) ? "missing" : "all"},
+          contextDetailsState: {}, findingDeviceReturnContext: null,
+          findingRosterActionEligibility: new Set(), findingRosterActionPending: new Set(),
+          lastRenderedDatasetByView: new Map(),
+          document: {getElementById: id => {
+            if (!nodes.has(id)) nodes.set(id, {value: "", setAttribute() {},
+              classList: {add() {}, remove() {}}});
+            return nodes.get(id);
+          }},
+          contextDetailsController: {setCollapsed() {}},
+          setContextDetailsMode() {}, renderHealthStatusSummary() {}, renderNetworkInsights() {},
+          updateHealthPresentationControls() {}, updateHealthRefreshControls() {},
+          enableHealthColoringOnFirstInsightsVisit() {}, applyHealthAssessmentPresentation() {},
+          reconcileHealthInsightsSelection: () => ({}), clearRosterMutationRefreshStatus() {},
+          announceHealthInsight: text => announcements.push(text), renderRosterDetailPanel() {},
+          fetchHealthAssessment: () => summary.promise,
+          fetchHealthSupport: () => support.promise,
+          fetchHealthRosterDevice: (_network, _device, _signal, id) => {
+            ledger.push(["detail", id]); enteredDetail.resolve(); return detail.promise;
+          },
+          loadRosterPage: offset => {
+            ledger.push(["list", offset, context.healthInsightsState.assessment.assessmentId,
+              context.healthRosterViewState.rosterState, context.healthRosterViewState.presence]);
+            enteredPage.resolve();
+            return page.promise;
+          },
+        };
+        vm.createContext(context);
+        vm.runInContext(extract("async function refreshHealthAssessment(",
+          "\nfunction invalidateHealthRefresh()") + "\n" +
+          extract("async function reconcileCommittedRosterAction(",
+            "\nasync function submitRosterAction("), context);
+        const capture = {datasetId: "dataset", networkId: "network", deviceId: "device",
+          navigation: {tab: "roster", generation: 7, view: "insights",
+            groupId: null, findingId: null}};
+        const reconcile = !["default", "suppressed"].includes(mode);
+        const task = reconcile ? context.reconcileCommittedRosterAction(capture)
+          : mode === "default" ? context.refreshHealthAssessment()
+          : context.refreshHealthAssessment({refreshRoster: false});
+        assert.equal(ledger.length, 0);
+        summary.resolve(assessment);
+        await new Promise(setImmediate);
+        assert.equal(ledger.length, mode === "default" ? 1 : 0,
+          `${mode}: no unowned automatic read while support is pending: ${context.healthInsightsState.error}`);
+        support.resolve({capabilities: {}, observations: []});
+        if (reconcile) {
+          await enteredPage.promise;
+          assert.equal(ledger.filter(row => row[0] === "list").length, 1);
+          assert.equal(ledger.filter(row => row[0] === "detail").length, 0);
+          page.resolve();
+          await enteredDetail.promise;
+          detail.resolve({rosterState: "retired", presenceState: "present"});
+        }
+        await task;
+        const lists = ledger.filter(row => row[0] === "list");
+        const expanded = ["designation", "presence", "both"].includes(mode);
+        assert.equal(lists.length, mode === "suppressed" ? 0 : expanded ? 2 : 1, mode);
+        if (expanded) {
+          assert.notDeepEqual(lists[0], lists[1]);
+          assert.equal(context.healthRosterViewState.rosterState, "all");
+          assert.equal(context.healthRosterViewState.presence, "all");
+          assert.match(announcements.at(-1), /filter changed to All/);
+        }
+        if (reconcile) {
+          assert.equal(context.healthRosterViewState.selectedDeviceId, "device");
+          assert.equal(context.healthInsightsState.rosterDetail.rosterState, "retired");
+        }
+      }
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_health_refresh_owns_late_summary_support_and_continuations() -> None:
     script = r"""
       import assert from "node:assert/strict";
       import fs from "node:fs";
       import vm from "node:vm";
       const source = fs.readFileSync("src/js/tdash-ui.js", "utf8");
-      const code = source.slice(source.indexOf("async function refreshHealthAssessment()"),
+      const code = source.slice(source.indexOf("async function refreshHealthAssessment("),
         source.indexOf("\nfunction invalidateHealthRefresh()"));
       const deferred = () => {
         let resolve, reject;
@@ -108,7 +354,7 @@ def test_health_refresh_owns_late_summary_support_and_continuations() -> None:
             for (const [start, end] of [
               ["function resetHealthAssessmentHistory()", "function selectHealthAssessment("],
               ["function resetHealthRosterViewState()", "function restoreHealthNavigationContext("],
-              ["function resetHealthInsightsForDatasetChange()", "async function refreshHealthAssessment()"],
+              ["function resetHealthInsightsForDatasetChange()", "async function refreshHealthAssessment("],
             ]) {
               vm.runInContext(source.slice(source.indexOf(start), source.indexOf(end)), context);
             }

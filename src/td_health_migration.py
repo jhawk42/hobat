@@ -706,9 +706,9 @@ def inventory_health_history(
     with closing(store._connect()) as connection:
         connection.execute("BEGIN")
         schema_version = validate_health_schema_connection(connection)
-        if schema_version not in {7, 8, 9}:
+        if schema_version not in {7, 8, 9, 10}:
             raise HealthMigrationInventoryError(
-                f"Health-history migration supports database schemas 7, 8, and 9, not {schema_version}"
+                f"Health-history migration supports database schemas 7, 8, 9, and 10, not {schema_version}"
             )
         rows = connection.execute(
             f"""SELECT a.*, o.datasource_id, o.dataset_id, o.network_id,
@@ -1564,7 +1564,7 @@ def migrate_health_history(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
             )
-            if current_schema not in {7, 8, 9}:
+            if current_schema not in {7, 8, 9, 10}:
                 raise HealthMigrationError(
                     f"Health-history migration does not support schema {current_schema}"
                 )

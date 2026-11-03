@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import json
+import base64
 import hashlib
 import math
 import os
 import sqlite3
 import uuid
 from contextlib import closing
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Iterator, Mapping
+from typing import TYPE_CHECKING, Callable, Iterator, Mapping
 
 from td_const import (
     OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
@@ -31,10 +32,10 @@ from td_const import (
 from td_health_comparison import (
     COMPARISON_INTERVALS, COMPARISON_VERSION, METRIC_CATALOG, ROUTE64_SAMPLE_CONTRACT_VERSION,
     ComparisonItem, ComparisonInterval, ComparisonPolicy, UnsupportedSourceContractError,
-    comparison_id, derive_comparison, resolve_interval_candidate, source_roles_for_dataset,
+    comparison_id, compare_interval, derive_comparison, resolve_interval_candidate, source_roles_for_dataset,
     source_signature,
 )
-from td_health_manifest import HealthDataset, load_health_manifest
+from td_health_manifest import HealthDataset, HealthManifest, load_health_manifest
 from td_dataset_catalog import RETIRED_HEALTH_DATASET_IDS
 from td_health_observation_model import (
     Assessment, Completeness, Confidence, DeviceSample, HealthStatus, MetricSample,
@@ -50,10 +51,21 @@ from td_health_observation_store import (
     StoreResult,
 )
 from td_health_roster import RosterFact
+from td_health_preparation import (
+    Preparation, PreparationCorruptionError, VERSION as PREPARATION_VERSION,
+    OBSERVATION_COLUMNS, PAIR_COLUMNS, canonical as preparation_canonical,
+    STATIC_ITEM_KINDS, digest as preparation_digest, migrate as _migration_v10,
+)
+
+if TYPE_CHECKING:
+    from td_health_manifest_history import ContractCandidate, ManifestHistoryResolver
+    from td_health_unified import _PreparedContract
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 _PURGE_TABLES = (
+    "health_observation_preparation",
+    "health_pair_preparation",
     "observations",
     "observation_sources",
     "device_samples",
@@ -543,6 +555,226 @@ def _finding_device_references(device_ids_json: str) -> frozenset[str]:
     return frozenset(device_ids)
 
 
+_AbsenceGroups = dict[str, tuple[str, set[str]]]
+_SAMPLE_ORDER = {
+    "observation_sources": "filename",
+    "device_samples": "device_id",
+    "relationship_samples": "relationship_id",
+    "metric_samples": "device_id, metric, source_file",
+    "device_fact_samples": "device_id, field_key, source_file",
+}
+
+
+@dataclass
+class _QualifiedAbsenceGroup:
+    groups: _AbsenceGroups = field(default_factory=dict)
+    offset: int = 0
+
+
+@dataclass(frozen=True)
+class _RetainedAdmission:
+    selected_dataset: HealthDataset | None
+    effective_dataset: HealthDataset
+    context: dict | None
+
+
+class _RetainedHistory:
+    """Read-only evidence reuse for one network and one reassessment invocation."""
+
+    def __init__(self, connection: sqlite3.Connection, network_id: str, *,
+                 publish: bool = False, scan_network: bool = True,
+                 publish_observation_ids: frozenset[str] | None = None):
+        self.connection = connection
+        self.network_id = network_id
+        self.publish = publish
+        self.publish_observation_ids = publish_observation_ids
+        self.scan_network = scan_network
+        self.preparation = Preparation(connection, network_id)
+        self.input_digests: dict[str, str] = {}
+        self._rows: list[sqlite3.Row] | None = None
+        self._assessment_ids: set[str] = set()
+        self._samples: dict[str, dict[str, tuple[sqlite3.Row, ...]]] = {}
+        self._released_samples: dict[str, set[str]] = {}
+        self._manifest: HealthManifest | None = None
+        self._resolver: ManifestHistoryResolver | None = None
+        self._candidates: dict[tuple[str, str, str, str], tuple[ContractCandidate, ...]] = {}
+        self.contracts: list[HealthDataset] = []
+        self.bodies: dict[tuple[str, str, int], Observation] = {}
+        self.validated_rows: set[tuple[str, int, bool]] = set()
+        self.admissions: dict[str, list[_RetainedAdmission]] = {}
+        self.prepared_contracts: dict[int, _PreparedContract] = {}
+        self.groups: dict[tuple[str, bool], _QualifiedAbsenceGroup] = {}
+
+    @property
+    def manifest(self) -> HealthManifest:
+        if self._manifest is None:
+            self._manifest = load_health_manifest()
+        return self._manifest
+
+    @property
+    def resolver(self) -> ManifestHistoryResolver:
+        if self._resolver is None:
+            from td_health_manifest_history import load_manifest_history
+            self._resolver = load_manifest_history()
+        return self._resolver
+
+    def matching_candidates(
+        self, dataset_id: str, datasource_id: str, profile_id: str, sample_contract: str,
+    ) -> tuple[ContractCandidate, ...]:
+        key = (dataset_id, datasource_id, profile_id, sample_contract)
+        if key not in self._candidates:
+            self._candidates[key] = self.resolver.matching_candidates(*key)
+        return self._candidates[key]
+
+    def contract_slot(self, dataset: HealthDataset) -> int:
+        for slot, admitted in enumerate(self.contracts):
+            if admitted == dataset:
+                return slot
+        self.contracts.append(dataset)
+        return len(self.contracts) - 1
+
+    def prepared_contract(self, dataset: HealthDataset) -> _PreparedContract:
+        from td_health_unified import _prepare_contract
+        for slot, admitted in enumerate(self.contracts):
+            if admitted == dataset and slot in self.prepared_contracts:
+                return self.prepared_contracts[slot]
+        return _prepare_contract(dataset)
+
+    @property
+    def rows(self) -> list[sqlite3.Row]:
+        if self._rows is None:
+            self._rows = self.connection.execute(
+                """SELECT o.*, a.*
+                   FROM observations o JOIN assessments a USING(observation_id)
+                   WHERE o.network_id=?""", (self.network_id,),
+            ).fetchall()
+            self._assessment_ids.update(row["assessment_id"] for row in self._rows)
+        return self._rows
+
+    def register(self, assessment_id: str) -> None:
+        if self._rows is None or assessment_id in self._assessment_ids:
+            return
+        row = self.connection.execute(
+            """SELECT o.*, a.* FROM observations o JOIN assessments a USING(observation_id)
+               WHERE o.network_id=? AND a.assessment_id=?""",
+            (self.network_id, assessment_id),
+        ).fetchone()
+        if row is None:
+            raise sqlite3.DatabaseError("New retained assessment is missing")
+        self._rows.append(row)
+        self._assessment_ids.add(assessment_id)
+
+    def samples(self, table: str, observation_id: str) -> tuple[sqlite3.Row, ...]:
+        if observation_id in self._released_samples.get(table, ()):
+            self._samples[table][observation_id] = _retained_samples(self.connection, table, observation_id)
+            self._released_samples[table].remove(observation_id)
+        if not self.scan_network:
+            rows = self._samples.setdefault(table, {})
+            if observation_id not in rows:
+                rows[observation_id] = _retained_samples(self.connection, table, observation_id)
+            return rows[observation_id]
+        if table not in self._samples:
+            order = _SAMPLE_ORDER[table]
+            if table == "relationship_samples":
+                query = """SELECT s.*, r.from_device_id, r.to_device_id
+                    FROM relationship_samples s JOIN relationships r USING(relationship_id)
+                    JOIN observations o USING(observation_id)
+                    WHERE o.network_id=? ORDER BY s.observation_id, s.relationship_id"""
+            else:
+                fact_filter = (
+                    " AND s.field_key IN ('leaderData.partitionId','rloc16')"
+                    if table == "device_fact_samples" else ""
+                )
+                query = f"""SELECT s.* FROM {table} s JOIN observations o USING(observation_id)
+                    WHERE o.network_id=?{fact_filter} ORDER BY s.observation_id, {order}"""
+            rows: dict[str, list[sqlite3.Row]] = {}
+            for row in self.connection.execute(query, (self.network_id,)):
+                rows.setdefault(row["observation_id"], []).append(row)
+            self._samples[table] = {key: tuple(value) for key, value in rows.items()}
+        return self._samples[table].get(observation_id, ())
+
+    def release_prepared_samples(self, observation_id: str) -> None:
+        for table in _SAMPLE_ORDER:
+            if table != "observation_sources" and observation_id in self._samples.get(table, {}):
+                del self._samples[table][observation_id]
+                self._released_samples.setdefault(table, set()).add(observation_id)
+
+    def input_digest(self, row) -> str:
+        observation_id = row["observation_id"]
+        if observation_id not in self.input_digests:
+            metadata = [row[name] for name in (
+                "observation_id", "datasource_id", "dataset_id", "network_id",
+                "network_name", "observed_at", "ingested_at", "completeness",
+                "source_set_digest",
+            )]
+            inputs = [metadata, *[
+                [tuple(sample) for sample in self.samples(table, observation_id)]
+                for table in _SAMPLE_ORDER
+            ]]
+            try:
+                self.input_digests[observation_id] = hashlib.sha256(
+                    preparation_canonical(inputs)
+                ).hexdigest()
+            except (TypeError, ValueError) as exc:
+                raise PreparationCorruptionError("Invalid native preparation inputs") from exc
+        return self.input_digests[observation_id]
+
+
+def _retained_samples(
+    connection: sqlite3.Connection, table: str, observation_id: str,
+    *, history: _RetainedHistory | None = None,
+) -> tuple[sqlite3.Row, ...]:
+    if history is not None:
+        return history.samples(table, observation_id)
+    if table == "relationship_samples":
+        query = """SELECT s.*, r.from_device_id, r.to_device_id
+            FROM relationship_samples s JOIN relationships r USING(relationship_id)
+            WHERE s.observation_id=? ORDER BY s.relationship_id"""
+    else:
+        fact_filter = (
+            " AND field_key IN ('leaderData.partitionId','rloc16')"
+            if table == "device_fact_samples" else ""
+        )
+        query = f"SELECT * FROM {table} WHERE observation_id=?{fact_filter} ORDER BY {_SAMPLE_ORDER[table]}"
+    return tuple(connection.execute(query, (observation_id,)))
+
+
+def _encode_comparison_items(
+    comparison_id: str, items: tuple[ComparisonItem, ...],
+) -> Iterator[tuple]:
+    reasons: dict[tuple[str, ...], str] = {}
+    sources: dict[tuple[str, ...], str] = {}
+    for item in items:
+        if item.compatibility.reasons not in reasons:
+            reasons[item.compatibility.reasons] = json.dumps(item.compatibility.reasons)
+        if item.source_files not in sources:
+            sources[item.source_files] = json.dumps(item.source_files)
+        has_before = item.before_value is not None and (
+            item.kind not in {"presence-transition", "relationship-change"} or item.before_value is True
+        )
+        has_after = item.after_value is not None and (
+            item.kind not in {"presence-transition", "relationship-change"} or item.after_value is True
+        )
+        yield (
+            comparison_id, item.item_id, item.scope, item.subject_id,
+            item.kind, item.metric, item.unit, item.denominator_kind,
+            json.dumps(item.before_value, allow_nan=False), json.dumps(item.after_value, allow_nan=False),
+            json.dumps(item.delta, allow_nan=False), item.direction, item.change, item.transition,
+            item.sample_count, int(item.compatibility.comparable), item.compatibility.primary_reason,
+            reasons[item.compatibility.reasons], sources[item.source_files],
+            item.before_source_time, item.after_source_time,
+            item.reset_evidence.state if item.reset_evidence else "not-applicable",
+            json.dumps({"witness": item.reset_evidence.witness,
+                        "before": item.reset_evidence.before_value,
+                        "after": item.reset_evidence.after_value}) if item.reset_evidence else "{}",
+            item.subject_id if item.scope == "device" and has_before else None,
+            item.subject_id if item.scope == "device" and has_after else None,
+            item.subject_id if item.scope == "relationship" and has_before else None,
+            item.subject_id if item.scope == "relationship" and has_after else None,
+            item.relationship_type if item.kind == "relationship-change" else None,
+        )
+
+
 class SQLiteHealthStore:
     def __init__(
         self,
@@ -554,6 +786,7 @@ class SQLiteHealthStore:
         self.path = path
         self.max_observations = max_observations
         self.read_only = read_only
+        self.preparation_stats: dict[str, int] = {}
         if not read_only:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._initialize()
@@ -680,6 +913,7 @@ class SQLiteHealthStore:
     def save_processing_result(
         self, observation: Observation, assessment: Assessment,
         *, roster_facts: tuple[RosterFact, ...] = (),
+        prepare: bool = False,
     ) -> StoreResult:
         if assessment.observation_id != observation.observation_id:
             raise ValueError("Assessment and observation IDs do not match")
@@ -716,7 +950,19 @@ class SQLiteHealthStore:
                 assessment.assessment_id,
                 new_observation=observation_created or not had_assessment_before,
             )
-            self._auto_compare(connection, observation, assessment)
+            history = None
+            if prepare:
+                history = _RetainedHistory(
+                    connection, observation.network_id, publish=True, scan_network=False,
+                    publish_observation_ids=frozenset({observation.observation_id}),
+                )
+                self.preparation_stats = history.preparation.stats
+                row = connection.execute(
+                    """SELECT o.*, a.* FROM observations o JOIN assessments a USING(observation_id)
+                       WHERE a.assessment_id=?""", (assessment.assessment_id,),
+                ).fetchone()
+                self._retained_observation(connection, row, history=history)
+            self._auto_compare(connection, observation, assessment, history=history)
             self._set_current_assessment(
                 connection, observation.network_id, observation.dataset_id
             )
@@ -856,13 +1102,42 @@ class SQLiteHealthStore:
                     )
 
     @staticmethod
-    def _endpoint(connection: sqlite3.Connection, assessment_id: str) -> tuple[Observation, Assessment] | None:
+    def _endpoint(
+        connection: sqlite3.Connection, assessment_id: str, *,
+        history: _RetainedHistory | None = None,
+    ) -> tuple[Observation, Assessment] | None:
         row = connection.execute(
             """SELECT a.*, o.* FROM assessments a JOIN observations o USING (observation_id)
                WHERE a.assessment_id=?""", (assessment_id,)
         ).fetchone()
         if row is None:
             return None
+        unified = row["sample_contract_version"] == "comparison-v1-unified"
+        from td_health_evaluator import evaluator_version_for_dataset
+        current_contract = row["evaluator_version"] == evaluator_version_for_dataset(
+            row["dataset_id"], row["sample_contract_version"],
+        )
+        observation = (
+            SQLiteHealthStore._retained_observation(connection, row, history=history)
+            if unified or (history is not None and current_contract)
+            else SQLiteHealthStore._file_endpoint_observation(connection, row)
+        )
+        assessment = Assessment(row["assessment_id"], row["observation_id"], row["policy_version"],
+                                row["policy_digest"], row["evaluator_version"], row["profile_id"],
+                                HealthStatus(row["status"]), Confidence(row["confidence"]), {}, (),
+                                row["assessed_at"], row["sample_contract_version"], row["health_policy_digest"])
+        if unified:
+            assessment = replace(
+                assessment, coverage=json.loads(row["coverage_json"]),
+                reproduction_context=json.loads(row["reproduction_context_json"]),
+                roster_context_digest=row["roster_context_digest"],
+                presence_input_digest=row["presence_input_digest"],
+                network_roster_revision=row["network_roster_revision"],
+            )
+        return observation, assessment
+
+    @staticmethod
+    def _file_endpoint_observation(connection: sqlite3.Connection, row: sqlite3.Row) -> Observation:
         observation_id = row["observation_id"]
         sources = tuple(SourceEvidence(item["filename"], item["digest"], item["kind"],
                                        item["state"], item["source_observed_at"])
@@ -891,20 +1166,7 @@ class SQLiteHealthStore:
                                   row["network_id"], row["network_name"], row["observed_at"],
                                   row["ingested_at"], Completeness(row["completeness"]),
                                   row["source_set_digest"], sources, devices, relationships, metrics)
-        assessment = Assessment(row["assessment_id"], observation_id, row["policy_version"],
-                                row["policy_digest"], row["evaluator_version"], row["profile_id"],
-                                HealthStatus(row["status"]), Confidence(row["confidence"]), {}, (),
-                                row["assessed_at"], row["sample_contract_version"], row["health_policy_digest"])
-        if row["sample_contract_version"] == "comparison-v1-unified":
-            observation = SQLiteHealthStore._retained_observation(connection, row)
-            assessment = replace(
-                assessment, coverage=json.loads(row["coverage_json"]),
-                reproduction_context=json.loads(row["reproduction_context_json"]),
-                roster_context_digest=row["roster_context_digest"],
-                presence_input_digest=row["presence_input_digest"],
-                network_roster_revision=row["network_roster_revision"],
-            )
-        return observation, assessment
+        return observation
 
     @staticmethod
     def _store_comparison(connection: sqlite3.Connection, before: tuple[Observation, Assessment],
@@ -934,15 +1196,8 @@ class SQLiteHealthStore:
              interval.elapsed_seconds, interval.gap_state, reset_summary, interval.baseline_state,
              json.dumps(witness, sort_keys=True), len(items), datetime.now(timezone.utc).isoformat()),
         )
-        for item in items:
-            has_before = item.before_value is not None and (
-                item.kind not in {"presence-transition", "relationship-change"} or item.before_value is True
-            )
-            has_after = item.after_value is not None and (
-                item.kind not in {"presence-transition", "relationship-change"} or item.after_value is True
-            )
-            connection.execute(
-                """INSERT INTO comparison_items (
+        connection.executemany(
+            """INSERT INTO comparison_items (
                     comparison_id, item_id, scope, subject_id, item_kind, metric,
                     unit, denominator_kind, before_json, after_json, delta_json,
                     direction, change, transition_state, sample_count, comparable,
@@ -953,23 +1208,8 @@ class SQLiteHealthStore:
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?)""",
-                (interval.comparison_id, item.item_id, item.scope, item.subject_id,
-                 item.kind, item.metric, item.unit, item.denominator_kind,
-                 json.dumps(item.before_value, allow_nan=False), json.dumps(item.after_value, allow_nan=False),
-                 json.dumps(item.delta, allow_nan=False), item.direction, item.change, item.transition,
-                 item.sample_count, int(item.compatibility.comparable), item.compatibility.primary_reason,
-                 json.dumps(item.compatibility.reasons), json.dumps(item.source_files),
-                 item.before_source_time, item.after_source_time,
-                 item.reset_evidence.state if item.reset_evidence else "not-applicable",
-                 json.dumps({"witness": item.reset_evidence.witness,
-                             "before": item.reset_evidence.before_value,
-                             "after": item.reset_evidence.after_value} if item.reset_evidence else {}),
-                 item.subject_id if item.scope == "device" and has_before else None,
-                 item.subject_id if item.scope == "device" and has_after else None,
-                 item.subject_id if item.scope == "relationship" and has_before else None,
-                 item.subject_id if item.scope == "relationship" and has_after else None,
-                 item.relationship_type if item.kind == "relationship-change" else None),
-            )
+            _encode_comparison_items(interval.comparison_id, items),
+        )
         if enforce_retention:
             connection.execute(
                 """DELETE FROM comparisons WHERE comparison_id IN (
@@ -980,20 +1220,27 @@ class SQLiteHealthStore:
 
     @staticmethod
     def _derive_pair(connection: sqlite3.Connection,
-                     before: tuple[Observation, Assessment], after: tuple[Observation, Assessment]
+                     before: tuple[Observation, Assessment], after: tuple[Observation, Assessment],
+                     *, history: _RetainedHistory | None = None,
+                     prepare_only: bool = False,
                      ) -> tuple[ComparisonInterval, tuple[ComparisonItem, ...]]:
-        dataset = SQLiteHealthStore._retained_dataset(
-            after[0].dataset_id, after[0].datasource_id,
-            after[1].profile_id, after[1].sample_contract_version,
+        dataset = (
+            history.manifest.dataset(after[0].dataset_id)
+            if history is not None and after[0].dataset_id not in RETIRED_HEALTH_DATASET_IDS
+            else SQLiteHealthStore._retained_dataset(
+                after[0].dataset_id, after[0].datasource_id,
+                after[1].profile_id, after[1].sample_contract_version,
+            )
         )
         endpoints = []
         for observation, assessment in (before, after):
-            if assessment.sample_contract_version == "comparison-v1-unified":
+            if assessment.sample_contract_version == "comparison-v1-unified" and not prepare_only:
                 context = dict(assessment.reproduction_context)
                 unified_health = context["unifiedHealth"]
                 _, available, positives = SQLiteHealthStore._unified_absences(
                     connection, network_id=observation.network_id,
                     witness=unified_health["absenceWitness"], expected_records=(),
+                    history=history,
                 )
                 context["unifiedHealth"] = {
                     **unified_health, "absenceOrderingAvailable": available,
@@ -1014,8 +1261,59 @@ class SQLiteHealthStore:
             endpoint_facts[observation.observation_id] = tuple(
                 {**dict(row), "value": json.loads(row["value_json"])} for row in rows
             )
-        return derive_comparison(before, after, source_roles=source_roles_for_dataset(dataset),
-                                 endpoint_facts=endpoint_facts)
+        roles = source_roles_for_dataset(dataset)
+        static_items = None
+        identity = None
+        rows = []
+        if history is not None and history.preparation.available:
+            contracts = []
+            for observation, assessment in (before, after):
+                row = connection.execute(
+                    """SELECT o.*, a.* FROM observations o JOIN assessments a USING(observation_id)
+                       WHERE a.assessment_id=?""", (assessment.assessment_id,),
+                ).fetchone()
+                if row is None:
+                    raise sqlite3.DatabaseError("Preparation endpoint assessment is missing")
+                contract, _ = SQLiteHealthStore._resolve_retained_contract(row, history=history)
+                contracts.append(history.preparation.contract_digest(contract))
+                rows.append(row)
+            interval = compare_interval(
+                before, after, before_assessment_id=before[1].assessment_id,
+                after_assessment_id=after[1].assessment_id, source_roles=roles,
+            )
+            metadata = [
+                (assessment.profile_id, assessment.evaluator_version, assessment.health_policy_digest,
+                 {key: assessment.reproduction_context.get("unifiedHealth", {}).get(key)
+                  for key in ("version", "recipeContractDigest", "reportContractDigest")})
+                for _, assessment in (before, after)
+            ]
+            identity = {
+                "before_observation_id": before[0].observation_id,
+                "after_observation_id": after[0].observation_id,
+                "before_contract": contracts[0], "after_contract": contracts[1],
+                "before_sample": before[1].sample_contract_version,
+                "after_sample": after[1].sample_contract_version,
+                "policy_digest": preparation_digest([
+                    ComparisonPolicy().digest, interval.compatibility, interval.elapsed_seconds,
+                    interval.gap_state, interval.source_signature, metadata,
+                ]),
+                "preparation_version": PREPARATION_VERSION,
+            }
+            static_items = history.preparation.load_pair(
+                identity, lambda: (history.input_digest(rows[0]), history.input_digest(rows[1])),
+            )
+        if static_items is None:
+            result = derive_comparison(before, after, source_roles=roles, endpoint_facts=endpoint_facts)
+        else:
+            result = derive_comparison(
+                before, after, source_roles=roles, endpoint_facts=endpoint_facts, static_items=static_items,
+            )
+        if identity is not None and history is not None and history.publish and static_items is None:
+            history.preparation.publish_pair(
+                identity, (history.input_digest(rows[0]), history.input_digest(rows[1])),
+                tuple(item for item in result[1] if item.kind in STATIC_ITEM_KINDS),
+            )
+        return result
 
     def compare_assessments(self, before_assessment_id: str, after_assessment_id: str,
                             *, dry_run: bool = False) -> tuple[ComparisonInterval, tuple[ComparisonItem, ...], bool]:
@@ -1041,6 +1339,122 @@ class SQLiteHealthStore:
             else:
                 connection.commit()
             return interval, items, inserted
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def prepare_history(
+        self, *, network_id: str, limit: int = 25, max_pairs: int = 100,
+        cursor: str | None = None, dry_run: bool = False,
+    ) -> dict:
+        if not network_id or not 1 <= limit <= 25 or not 1 <= max_pairs <= 100:
+            raise ValueError("Preparation requires a network, limit 1-25 and max-pairs 1-100")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN" if dry_run else "BEGIN IMMEDIATE")
+            history = _RetainedHistory(
+                connection, network_id, publish=not dry_run, scan_network=False,
+            )
+            self.preparation_stats = history.preparation.stats
+            rows = sorted(history.rows, key=lambda row: row["assessment_id"])
+            if not rows:
+                raise ValueError("No retained health history for the selected network")
+            retained_pairs = connection.execute(
+                """SELECT c.comparison_id, c.before_assessment_id, c.after_assessment_id,
+                          c.comparison_policy_digest
+                   FROM comparisons c
+                   JOIN assessments ba ON ba.assessment_id=c.before_assessment_id
+                   JOIN assessments aa ON aa.assessment_id=c.after_assessment_id
+                   JOIN observations bo ON bo.observation_id=ba.observation_id
+                   JOIN observations ao ON ao.observation_id=aa.observation_id
+                   WHERE c.network_id=? AND bo.network_id=? AND ao.network_id=?
+                   ORDER BY c.comparison_id""", (network_id, network_id, network_id),
+            ).fetchall()
+            pairs = [(row["before_assessment_id"], row["after_assessment_id"])
+                     for row in retained_pairs]
+            inventory = preparation_digest({
+                "assessments": [dict(row) for row in rows],
+                "comparisons": [tuple(row) for row in retained_pairs],
+            })
+            identities = {
+                "version": PREPARATION_VERSION, "network": network_id, "inventory": inventory,
+            }
+            position = {"observation": 0, "pair": 0}
+            if cursor is not None:
+                try:
+                    decoded = json.loads(base64.urlsafe_b64decode(cursor))
+                    if (not isinstance(decoded, dict)
+                            or set(decoded) != {*identities, *position}
+                            or any(decoded[key] != value for key, value in identities.items())
+                            or any(type(decoded[key]) is not int or decoded[key] < 0 for key in position)):
+                        raise ValueError("Cursor identity or source history changed")
+                    position = {key: decoded[key] for key in position}
+                except (ValueError, TypeError, KeyError) as exc:
+                    raise ValueError("Invalid/stale preparation cursor; restart without --cursor") from exc
+            bodies = {}
+            for row in rows:
+                dataset, _ = self._resolve_retained_contract(row, history=history)
+                key = (row["observation_id"], row["sample_contract_version"], preparation_digest(dataset))
+                bodies.setdefault(key, (row, dataset))
+            candidates = list(bodies.values())
+            if position["observation"] > len(candidates) or position["pair"] > len(pairs):
+                raise ValueError("Preparation cursor is outside retained history")
+            selected = candidates[position["observation"]:position["observation"] + limit]
+            history.publish_observation_ids = frozenset(row["observation_id"] for row, _ in selected)
+            examined_pairs = 0
+            if not dry_run:
+                for row, dataset in selected:
+                    self._retained_observation(
+                        connection, row, source_dataset=dataset, history=history,
+                    )
+                position["observation"] += len(selected)
+                if position["observation"] == len(candidates):
+                    by_assessment = {row["assessment_id"]: row for row in rows}
+                    for pair in pairs[position["pair"]:position["pair"] + max_pairs]:
+                        endpoints = [by_assessment[assessment_id] for assessment_id in pair]
+                        required = set(history.bodies)
+                        for row in endpoints:
+                            dataset, _ = self._resolve_retained_contract(row, history=history)
+                            required.add((row["observation_id"], row["sample_contract_version"],
+                                          history.contract_slot(dataset)))
+                            if history.preparation.observation_record(row, dataset) is None:
+                                raise ValueError(
+                                    "Preparation budget evicted required history; restart with a smaller history set"
+                                )
+                        if len(required) > limit:
+                            if not history.bodies:
+                                raise ValueError(
+                                    "The next pair needs --limit at least 2; retry with a larger limit and this cursor"
+                                )
+                            break
+                        before = self._endpoint(connection, pair[0], history=history)
+                        after = self._endpoint(connection, pair[1], history=history)
+                        if before is None or after is None:
+                            raise sqlite3.DatabaseError("Preparation comparison endpoint is missing")
+                        self._derive_pair(connection, before, after, history=history, prepare_only=True)
+                        position["pair"] += 1
+                        examined_pairs += 1
+            more = position["observation"] < len(candidates) or position["pair"] < len(pairs)
+            continuation = base64.urlsafe_b64encode(
+                preparation_canonical({**identities, **position})
+            ).decode("ascii") if more else None
+            report = {
+                "schemaVersion": 1, "networkId": network_id, "dryRun": dry_run,
+                "observationCandidates": len(selected), "pairCandidates": examined_pairs,
+                "remainingObservations": len(candidates) - position["observation"],
+                "remainingPairs": len(pairs) - position["pair"],
+                "ineligiblePairs": connection.execute(
+                    "SELECT COUNT(*) FROM comparisons WHERE network_id=?", (network_id,),
+                ).fetchone()[0] - len(pairs),
+                "nextCursor": continuation, "counters": dict(history.preparation.stats),
+            }
+            if dry_run:
+                connection.rollback()
+            else:
+                connection.commit()
+            return report
         except Exception:
             connection.rollback()
             raise
@@ -1963,6 +2377,7 @@ class SQLiteHealthStore:
         allowed_assessment_ids: frozenset[str] | None = None,
         reserved_comparison_ids: frozenset[str] | None = None,
         enforce_retention: bool = True,
+        history: _RetainedHistory | None = None,
     ) -> tuple[int, int]:
         if observation.completeness is not Completeness.COMPLETE:
             return (0, 0)
@@ -2065,18 +2480,18 @@ class SQLiteHealthStore:
             ) >= 2000:
                 deferred_count += 1
                 continue
-            before = self._endpoint(connection, before_assessment_id)
+            before = self._endpoint(connection, before_assessment_id, history=history)
             if before is None:
                 raise sqlite3.DatabaseError(
                     "Retained comparison baseline could not be reconstructed"
                 )
             if after is None:
-                after = self._endpoint(connection, assessment.assessment_id)
+                after = self._endpoint(connection, assessment.assessment_id, history=history)
             if after is None:
                 raise sqlite3.DatabaseError(
                     "Retained comparison endpoint could not be reconstructed"
                 )
-            interval, items = self._derive_pair(connection, before, after)
+            interval, items = self._derive_pair(connection, before, after, history=history)
             if enforce_retention:
                 self._store_comparison(
                     connection, before, after, interval, items
@@ -2305,55 +2720,137 @@ class SQLiteHealthStore:
     def _retained_observation(
         connection: sqlite3.Connection, assessment_row: sqlite3.Row,
         *, source_dataset: HealthDataset | None = None,
+        history: _RetainedHistory | None = None,
     ) -> Observation:
-        from td_health_manifest import load_health_manifest
-
-        dataset = source_dataset or SQLiteHealthStore._retained_dataset(
-            assessment_row["dataset_id"], assessment_row["datasource_id"],
-            assessment_row["profile_id"], assessment_row["sample_contract_version"],
+        dataset, context = SQLiteHealthStore._resolve_retained_contract(
+            assessment_row, source_dataset=source_dataset, history=history,
         )
+        slot = history.contract_slot(dataset) if history is not None else 0
+        key = (assessment_row["observation_id"], assessment_row["sample_contract_version"], slot)
+        observation = history.bodies.get(key) if history is not None else None
+        if observation is None:
+            if history is not None:
+                observation = history.preparation.load_observation(
+                    assessment_row, dataset, lambda: history.input_digest(assessment_row),
+                )
+                if observation is not None:
+                    history.release_prepared_samples(assessment_row["observation_id"])
+            if observation is None:
+                if history is not None:
+                    history.preparation.event("observation-reconstructed")
+                observation = SQLiteHealthStore._reconstruct_retained_samples(
+                    connection, assessment_row, dataset, history=history,
+                )
+            if history is not None:
+                history.bodies[key] = observation
+        validation_key = (assessment_row["assessment_id"], slot, source_dataset is not None)
+        if history is None or validation_key not in history.validated_rows:
+            SQLiteHealthStore._validate_retained_assessment_context(
+                assessment_row, dataset, context, observation,
+                prepared=history.prepared_contracts.get(slot) if history is not None else None,
+            )
+            if history is not None:
+                history.validated_rows.add(validation_key)
+                history.preparation.event("assessment-validated")
+        if history is not None:
+            admissions = history.admissions.setdefault(assessment_row["assessment_id"], [])
+            if not any(entry.selected_dataset == source_dataset for entry in admissions):
+                admissions.append(_RetainedAdmission(source_dataset, dataset, context))
+            if (history.publish
+                    and (history.publish_observation_ids is None
+                         or assessment_row["observation_id"] in history.publish_observation_ids)
+                    and history.preparation.observation_record(assessment_row, dataset) is None):
+                history.preparation.publish_observation(
+                    assessment_row, dataset, observation, history.input_digest(assessment_row),
+                )
+        return observation
+
+    @staticmethod
+    def _resolve_retained_contract(
+        assessment_row: sqlite3.Row, *, source_dataset: HealthDataset | None = None,
+        history: _RetainedHistory | None = None,
+    ) -> tuple[HealthDataset, dict | None]:
+        if history is not None:
+            for entry in history.admissions.get(assessment_row["assessment_id"], ()):
+                if entry.selected_dataset == source_dataset:
+                    return entry.effective_dataset, entry.context
+        if source_dataset is not None:
+            dataset = source_dataset
+        elif history is None:
+            dataset = SQLiteHealthStore._retained_dataset(
+                assessment_row["dataset_id"], assessment_row["datasource_id"],
+                assessment_row["profile_id"], assessment_row["sample_contract_version"],
+            )
+        elif assessment_row["dataset_id"] not in RETIRED_HEALTH_DATASET_IDS:
+            dataset = history.manifest.dataset(assessment_row["dataset_id"])
+        else:
+            source = history.resolver.resolve_source(
+                assessment_row["dataset_id"], assessment_row["datasource_id"],
+                assessment_row["profile_id"], assessment_row["sample_contract_version"],
+            )
+            if source.dataset is None:
+                raise sqlite3.DatabaseError(f"Unsupported retained health contract: {source.reason}")
+            dataset = source.dataset
         if (
             dataset.dataset_id != assessment_row["dataset_id"]
             or dataset.datasource_id != assessment_row["datasource_id"]
         ):
             raise sqlite3.DatabaseError("Stored observation source/dataset identity mismatch")
+        context = None
         if assessment_row["sample_contract_version"] == "comparison-v1-unified":
             from td_health_unified import validate_recipe
             from td_health_manifest_history import _profile
             try:
-                retained_context = json.loads(assessment_row["reproduction_context_json"])
-                retained_profile = dict(retained_context["healthProfile"])
+                context = json.loads(assessment_row["reproduction_context_json"])
+                retained_profile = dict(context["healthProfile"])
                 profile_id = retained_profile.pop("profileId")
                 retained_dataset = replace(
                     dataset,
-                    unified_recipe=validate_recipe(retained_context["unifiedHealth"]["recipe"]),
+                    unified_recipe=validate_recipe(context["unifiedHealth"]["recipe"]),
                     health_profile=_profile(profile_id, retained_profile),
                 )
                 if retained_dataset != dataset:
                     if source_dataset is not None:
                         raise ValueError("Retained Unified recipe contradicts the selected source contract")
                     from td_health_manifest_history import load_manifest_history
-                    candidates = load_manifest_history().matching_candidates(
+                    matching_candidates = (
+                        history.matching_candidates if history is not None
+                        else load_manifest_history().matching_candidates
+                    )
+                    candidates = matching_candidates(
                         retained_dataset.dataset_id, retained_dataset.datasource_id,
                         retained_dataset.health_profile.profile_id, "comparison-v1-unified",
                     )
                     if not any(candidate.dataset == retained_dataset for candidate in candidates):
                         raise ValueError("Unsupported retained Unified recipe/profile contract")
-                dataset = retained_dataset
+                    dataset = retained_dataset
             except (TypeError, KeyError, ValueError) as exc:
                 raise sqlite3.DatabaseError("Invalid retained Unified recipe/profile") from exc
+        if dataset.unified_recipe is not None:
+            from td_health_unified import _prepare_contract, validate_context
+            prepared = history.prepared_contract(dataset) if history is not None else _prepare_contract(dataset)
+            try:
+                if context is None:
+                    context = json.loads(assessment_row["reproduction_context_json"])
+                validate_context(context, dataset, prepared=prepared)
+            except (TypeError, ValueError) as exc:
+                raise sqlite3.DatabaseError("Invalid retained Unified health contract") from exc
+            if history is not None:
+                history.prepared_contracts[history.contract_slot(dataset)] = prepared
+        return dataset, context
+
+    @staticmethod
+    def _reconstruct_retained_samples(
+        connection: sqlite3.Connection, assessment_row: sqlite3.Row, dataset: HealthDataset,
+        *, history: _RetainedHistory | None = None,
+    ) -> Observation:
         safe_sources = {
             *dataset.files,
             dataset.health_profile.identity_file,
             *dataset.health_profile.required_outcomes,
         }
         if dataset.unified_recipe is not None:
-            from td_health_unified import safe_sources as unified_sources, validate_context
-            try:
-                context = json.loads(assessment_row["reproduction_context_json"])
-                validate_context(context, dataset)
-            except (TypeError, ValueError) as exc:
-                raise sqlite3.DatabaseError("Invalid retained Unified health contract") from exc
+            from td_health_unified import safe_sources as unified_sources
             safe_sources.update(unified_sources(dataset))
             from td_health_unified import sample_sources
             safe_sample_sources = sample_sources(dataset)
@@ -2382,10 +2879,8 @@ class SQLiteHealthStore:
                 item["filename"], item["digest"], item["kind"], item["state"],
                 item["source_observed_at"],
             )
-            for item in connection.execute(
-                """SELECT filename, digest, kind, state, source_observed_at
-                   FROM observation_sources WHERE observation_id=? ORDER BY filename""",
-                (assessment_row["observation_id"],),
+            for item in _retained_samples(
+                connection, "observation_sources", assessment_row["observation_id"], history=history,
             )
         )
         for item in sources:
@@ -2400,8 +2895,6 @@ class SQLiteHealthStore:
                      sourceObservedAt=s.source_observed_at)
                 for s in sources if s.filename in unified_sources(dataset)
             ]
-            if digest(originals) != context["unifiedHealth"]["originalEvidenceFingerprint"]:
-                raise sqlite3.DatabaseError("Invalid retained Unified original evidence")
         verified_source_digest = hashlib.sha256(
             "\0".join(
                 f"{item.filename}:{item.digest}"
@@ -2413,10 +2906,8 @@ class SQLiteHealthStore:
         if verified_source_digest != assessment_row["source_set_digest"]:
             raise sqlite3.DatabaseError("Stored observation source digest is inconsistent")
         devices: list[DeviceSample] = []
-        for item in connection.execute(
-            """SELECT device_id, role, state, is_border_router, source_files_json
-               FROM device_samples WHERE observation_id=? ORDER BY device_id""",
-            (assessment_row["observation_id"],),
+        for item in _retained_samples(
+            connection, "device_samples", assessment_row["observation_id"], history=history,
         ):
             try:
                 device_id = device_id_from_ext_address(
@@ -2437,11 +2928,8 @@ class SQLiteHealthStore:
                 )
             )
         relationships: list[RelationshipSample] = []
-        for item in connection.execute(
-            """SELECT rs.*, r.from_device_id, r.to_device_id
-               FROM relationship_samples rs JOIN relationships r USING (relationship_id)
-               WHERE rs.observation_id=? ORDER BY rs.relationship_id""",
-            (assessment_row["observation_id"],),
+        for item in _retained_samples(
+            connection, "relationship_samples", assessment_row["observation_id"], history=history,
         ):
             endpoints = (item["from_device_id"], item["to_device_id"])
             try:
@@ -2501,11 +2989,8 @@ class SQLiteHealthStore:
             "observedLinkQuality3Count": "count",
         }
         mac_ratio_metrics = {"totalMacErrorRatio", "totalMacDiscardRatio"}
-        for item in connection.execute(
-            """SELECT device_id, metric, value, unit, denominator, source_file
-               FROM metric_samples WHERE observation_id=?
-               ORDER BY device_id, metric, source_file""",
-            (assessment_row["observation_id"],),
+        for item in _retained_samples(
+            connection, "metric_samples", assessment_row["observation_id"], history=history,
         ):
             if (
                 device_id_from_ext_address(
@@ -2553,8 +3038,31 @@ class SQLiteHealthStore:
             tuple(relationships), tuple(metrics),
         )
         try:
+            source_signature(observation, source_roles_for_dataset(dataset))
+        except (UnsupportedSourceContractError, ValueError) as exc:
+            raise sqlite3.DatabaseError(
+                "Stored observation violates its approved source contract"
+            ) from exc
+        return observation
+
+    @staticmethod
+    def _validate_retained_assessment_context(
+        assessment_row: sqlite3.Row, dataset: HealthDataset, context: dict | None,
+        observation: Observation, *, prepared: _PreparedContract | None = None,
+    ) -> None:
+        sources = observation.sources
+        if dataset.unified_recipe is not None:
+            from td_health_unified import digest, safe_sources, validate_context
+            originals = [
+                dict(filename=s.filename, digest=s.digest, kind=s.kind, state=s.state,
+                     sourceObservedAt=s.source_observed_at)
+                for s in sources if s.filename in safe_sources(dataset)
+            ]
+            if context is None or digest(originals) != context["unifiedHealth"]["originalEvidenceFingerprint"]:
+                raise sqlite3.DatabaseError("Invalid retained Unified original evidence")
+        try:
             if dataset.unified_recipe is not None:
-                validate_context(context, dataset, observation)
+                validate_context(context, dataset, observation, prepared=prepared)
                 if (
                     json.loads(assessment_row["coverage_json"]).get("restChildTableCoverage")
                     != context["unifiedHealth"].get("restChildTableCoverage")
@@ -2570,18 +3078,15 @@ class SQLiteHealthStore:
                 )
                 if json.loads(assessment_row["coverage_json"]).get("restDiagnostics") != context["restDiagnostics"]:
                     raise ValueError("Retained REST diagnostic coverage differs from its context")
-            source_signature(
-                observation, source_roles_for_dataset(dataset)
-            )
         except (UnsupportedSourceContractError, ValueError) as exc:
             raise sqlite3.DatabaseError(
                 "Stored observation violates its approved source contract"
             ) from exc
-        return observation
 
     @staticmethod
     def _reassessment_inputs(
-        connection: sqlite3.Connection, assessment_id: str
+        connection: sqlite3.Connection, assessment_id: str, *,
+        history: _RetainedHistory | None = None,
     ) -> tuple[Observation, Assessment, object, object, dict, EvaluationInputs]:
         from td_health_evaluator import (
             evaluator_version_for_dataset,
@@ -2647,7 +3152,8 @@ class SQLiteHealthStore:
                 topology_authority=profile_data["topologyAuthority"],
                 border_router_authority=profile_data["borderRouterAuthority"],
                 input_mode=("unified" if row["sample_contract_version"] == "comparison-v1-unified" else "files"),
-                evidence_report=(load_health_manifest().dataset(row["dataset_id"]).health_profile.evidence_report
+                evidence_report=((history.manifest if history is not None else load_health_manifest())
+                                 .dataset(row["dataset_id"]).health_profile.evidence_report
                                  if row["sample_contract_version"] == "comparison-v1-unified" else None),
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -2677,7 +3183,7 @@ class SQLiteHealthStore:
                 "reassessment-baseline-unavailable: saved sample contract is inconsistent"
             )
 
-        observation = SQLiteHealthStore._retained_observation(connection, row)
+        observation = SQLiteHealthStore._retained_observation(connection, row, history=history)
         original = Assessment(
             assessment_id=row["assessment_id"],
             observation_id=row["observation_id"],
@@ -2703,7 +3209,7 @@ class SQLiteHealthStore:
         self, connection: sqlite3.Connection, network_id: str
     ) -> list[dict]:
         from td_health_evaluator import (
-            aggregate_assessment_state,
+            ROSTER_REASSESSMENT_RULE_IDS,
             evaluate_observation,
         )
 
@@ -2720,6 +3226,8 @@ class SQLiteHealthStore:
             (network_id,),
         ).fetchone()
         network_revision = int(current_revision_row["revision"]) if current_revision_row else 0
+        history = _RetainedHistory(connection, network_id)
+        self.preparation_stats = history.preparation.stats
         roster_records = [
             {
                 "deviceId": row["device_id"],
@@ -2743,7 +3251,7 @@ class SQLiteHealthStore:
                 old_context,
                 old_evaluation_inputs,
             ) = self._reassessment_inputs(
-                connection, pointer["assessment_id"]
+                connection, pointer["assessment_id"], history=history,
             )
             # Absence history is re-derived below; only a missing roster blocks reassessment.
             if (
@@ -2798,6 +3306,7 @@ class SQLiteHealthStore:
                 prior_absences, available, positives = self._unified_absences(
                     connection, network_id=network_id, witness=unified_health["absenceWitness"],
                     expected_records=roster_records,
+                    history=history,
                 )
                 unified_health = {
                     **unified_health, "positiveDeviceIds": sorted(positives - observed_ids),
@@ -2814,6 +3323,7 @@ class SQLiteHealthStore:
                 prior_absences, available, positives = self._unified_absences(
                     connection, network_id=network_id, witness=witness,
                     expected_records=roster_records, file_mode=True,
+                    history=history,
                 )
                 available = available and not ((expected_ids - observed_ids) & positives)
                 prior_absences = {
@@ -2827,25 +3337,6 @@ class SQLiteHealthStore:
                         EvaluationInputState.UNAVAILABLE, ("absence-witness-unavailable",)),
                     prior_complete_absences=prior_absences if available else None,
                 )
-            revised = evaluate_observation(
-                observation,
-                policy,
-                profile=profile,
-                expected_device_ids=frozenset(expected_ids),
-                prior_complete_absences=prior_absences,
-                assessed_at=datetime.now(timezone.utc).isoformat(),
-                roster_context=roster_context,
-                network_roster_revision=network_revision,
-                history_boundary=None,
-                evaluation_inputs=evaluation_inputs,
-                sample_contract_version=previous.sample_contract_version,
-                unified_health=unified_health,
-                rest_diagnostics=old_context.get("restDiagnostics"),
-            )
-            roster_rules = {
-                "device.missing", "device.offline", "network.offline-impact",
-                "observation.evaluation-context-unavailable",
-            }
             previous_findings = [
                 Finding(
                     item["finding_id"], item["rule_id"], HealthStatus(item["status"]),
@@ -2861,37 +3352,32 @@ class SQLiteHealthStore:
                     "SELECT * FROM findings WHERE assessment_id=?",
                     (previous.assessment_id,),
                 )
-                if item["rule_id"] not in roster_rules
+                if item["rule_id"] not in ROSTER_REASSESSMENT_RULE_IDS
             ]
-            revised_findings = tuple(sorted(
-                previous_findings + [
-                    finding for finding in revised.findings
-                    if finding.rule_id in roster_rules
-                ],
-                key=lambda item: (-int(item.rank), item.finding_id),
-            ))
-            coverage = dict(revised.coverage)
-            observed_pillars = coverage["observedPillars"]
-            status, confidence = aggregate_assessment_state(
-                revised_findings,
-                completeness=observation.completeness,
-                device_count=len(observation.devices),
-                observed_pillars=observed_pillars,
+            assessment = evaluate_observation(
+                observation,
+                policy,
+                profile=profile,
+                expected_device_ids=frozenset(expected_ids),
+                prior_complete_absences=prior_absences,
+                assessed_at=datetime.now(timezone.utc).isoformat(),
+                roster_context=roster_context,
+                network_roster_revision=network_revision,
+                history_boundary=None,
                 evaluation_inputs=evaluation_inputs,
-            )
-            assessment = replace(
-                revised,
-                findings=revised_findings,
-                coverage=coverage,
-                status=status,
-                confidence=confidence,
+                sample_contract_version=previous.sample_contract_version,
+                unified_health=unified_health,
+                rest_diagnostics=old_context.get("restDiagnostics"),
+                retained_assessment=replace(previous, findings=tuple(previous_findings)),
             )
             assessment_created = self._insert_assessment(connection, assessment)
+            if assessment_created:
+                history.register(assessment.assessment_id)
             self.consider_native_preference(
                 connection, assessment.assessment_id
             )
             if assessment_created:
-                self._auto_compare(connection, observation, assessment)
+                self._auto_compare(connection, observation, assessment, history=history)
             self._set_current_assessment(
                 connection, network_id, pointer["dataset_id"]
             )
@@ -3395,6 +3881,16 @@ class SQLiteHealthStore:
             if affected_observations:
                 placeholders = ",".join("?" for _ in affected_observations)
                 connection.execute(
+                    f"DELETE FROM health_observation_preparation WHERE observation_id IN ({placeholders})",
+                    affected_observations,
+                )
+                connection.execute(
+                    f"""DELETE FROM health_pair_preparation
+                        WHERE before_observation_id IN ({placeholders})
+                        OR after_observation_id IN ({placeholders})""",
+                    (*affected_observations, *affected_observations),
+                )
+                connection.execute(
                     f"""DELETE FROM comparisons WHERE before_observation_id IN ({placeholders})
                         OR after_observation_id IN ({placeholders})""",
                     (*affected_observations, *affected_observations),
@@ -3585,14 +4081,30 @@ class SQLiteHealthStore:
             }
 
     @staticmethod
-    def _unified_absences(connection, *, network_id, witness, expected_records, file_mode=False):
+    def _unified_absences(
+        connection, *, network_id, witness, expected_records, file_mode=False,
+        history: _RetainedHistory | None = None,
+    ):
         """Count qualified original collections once, never across authority domains."""
-        from td_health_manifest_history import supports_current_sample_contract
-        from td_health_unified import witness_for_sources, timestamp
-
         if witness is None:
             return {}, False, frozenset()
-        current_datasets = load_health_manifest().datasets if file_mode else {}
+        history = history if history is not None else _RetainedHistory(connection, network_id)
+        groups = SQLiteHealthStore._qualified_absence_groups(
+            history, domain=witness["domain"], file_mode=file_mode,
+        )
+        return SQLiteHealthStore._count_qualified_absences(
+            groups, witness=witness, expected_records=expected_records,
+        )
+
+    @staticmethod
+    def _qualified_absence_groups(
+        history: _RetainedHistory, *, domain: str, file_mode: bool,
+    ) -> _AbsenceGroups:
+        from td_health_manifest_history import supports_current_sample_contract
+        from td_health_unified import witness_for_sources
+
+        connection, network_id = history.connection, history.network_id
+        current_datasets = history.manifest.datasets if file_mode else {}
 
         def current_dataset(row: sqlite3.Row) -> HealthDataset | None:
             dataset = current_datasets.get(row["dataset_id"])
@@ -3607,44 +4119,45 @@ class SQLiteHealthStore:
                 return None
             return dataset
 
-        groups = {}
-        resolver = None
-        rows = connection.execute(
-            """SELECT o.*, a.*
-               FROM observations o JOIN assessments a USING(observation_id)
-               WHERE o.network_id=?""", (network_id,),
-        ).fetchall()
-        for row in rows:
+        state = history.groups.setdefault((domain, file_mode), _QualifiedAbsenceGroup())
+        groups = state.groups
+        rows = history.rows
+        for row in rows[state.offset:]:
             sources = tuple(SourceEvidence(
                 item["filename"], item["digest"], item["kind"], item["state"],
                 item["source_observed_at"],
-            ) for item in connection.execute(
-                "SELECT * FROM observation_sources WHERE observation_id=?", (row["observation_id"],),
+            ) for item in _retained_samples(
+                connection, "observation_sources", row["observation_id"], history=history,
             ))
             candidate = None
             if row["sample_contract_version"] == "comparison-v1-unified":
                 try:
-                    context = json.loads(row["reproduction_context_json"])
                     dataset = (
                         current_dataset(row) if file_mode
-                        else load_health_manifest().dataset(row["dataset_id"])
+                        else history.manifest.dataset(row["dataset_id"])
                     )
                     if dataset is None:
                         continue
                     from td_health_unified import validate_context
                     original = SQLiteHealthStore._retained_observation(
                         connection, row, source_dataset=dataset if file_mode else None,
+                        history=history,
                     )
-                    from td_health_unified import validate_recipe
-                    dataset = replace(dataset, unified_recipe=validate_recipe(context["unifiedHealth"]["recipe"]))
-                    retained = validate_context(context, dataset, original)
+                    admitted, context = SQLiteHealthStore._resolve_retained_contract(
+                        row, source_dataset=dataset if file_mode else None, history=history,
+                    )
+                    dataset = replace(dataset, unified_recipe=admitted.unified_recipe)
+                    retained = validate_context(
+                        context, dataset, original, prepared=history.prepared_contract(dataset),
+                    )
                     candidate = retained["absenceWitness"]
-                    if candidate != witness_for_sources(network_id, sources, witness["domain"]):
+                    if candidate != witness_for_sources(network_id, sources, domain):
                         continue
+                except PreparationCorruptionError:
+                    raise
                 except (KeyError, TypeError, ValueError, sqlite3.DatabaseError):
                     continue
             elif row["completeness"] == "complete":
-                domain = witness["domain"]
                 if row["datasource_id"] != domain and not (
                     domain == "otbr-cli" and row["datasource_id"] == "multi-source"
                 ):
@@ -3654,10 +4167,7 @@ class SQLiteHealthStore:
                     if dataset is None:
                         continue
                 else:
-                    from td_health_manifest_history import load_manifest_history
-                    if resolver is None:
-                        resolver = load_manifest_history()
-                    candidates = resolver.matching_candidates(
+                    candidates = history.matching_candidates(
                         row["dataset_id"], row["datasource_id"], row["profile_id"],
                         row["sample_contract_version"],
                     )
@@ -3665,9 +4175,11 @@ class SQLiteHealthStore:
                         continue
                     dataset = candidates[0].dataset
                 try:
-                    SQLiteHealthStore._retained_observation(
-                        connection, row, source_dataset=dataset,
+                    original = SQLiteHealthStore._retained_observation(
+                        connection, row, source_dataset=dataset, history=history,
                     )
+                except PreparationCorruptionError:
+                    raise
                 except (KeyError, TypeError, ValueError, sqlite3.DatabaseError):
                     continue
                 required = (
@@ -3687,12 +4199,17 @@ class SQLiteHealthStore:
                     for name in required
                 )):
                     candidate = witness_for_sources(network_id, sources, domain)
-            if candidate is None or candidate["domain"] != witness["domain"]:
+            if candidate is None or candidate["domain"] != domain:
                 continue
-            group = groups.setdefault(candidate["key"], [candidate["sourceObservedAt"], set()])
-            group[1].update(item["device_id"] for item in connection.execute(
-                "SELECT device_id FROM device_samples WHERE observation_id=?", (row["observation_id"],),
-            ))
+            group = groups.setdefault(candidate["key"], (candidate["sourceObservedAt"], set()))
+            group[1].update(device.device_id for device in original.devices)
+        state.offset = len(rows)
+        return groups
+
+    @staticmethod
+    def _count_qualified_absences(groups: _AbsenceGroups, *, witness, expected_records):
+        from td_health_unified import timestamp
+
         current_time = timestamp(witness["sourceObservedAt"])
         positives = frozenset(groups.get(witness["key"], [None, set()])[1])
         preceding = [(timestamp(value[0]), key, value[1]) for key, value in groups.items()
@@ -4065,6 +4582,41 @@ def _require_columns(
 
 
 def _validate_schema_structure(connection: sqlite3.Connection, version: int) -> None:
+    if version >= 10:
+        for table, columns in (
+            ("health_observation_preparation", OBSERVATION_COLUMNS),
+            ("health_pair_preparation", PAIR_COLUMNS),
+        ):
+            _require_columns(connection, table, columns, version)
+            layout = {row[1]: row for row in connection.execute(f"PRAGMA table_info({table})")}
+            if any(layout[column][2] != ("BLOB" if column == "payload" else "TEXT")
+                   or layout[column][3] != 1 for column in columns):
+                raise HealthStoreMigrationError("schema-invalid", "Invalid preparation column layout")
+            primary_key = (
+                ("observation_id", "sample_version", "contract_digest", "preparation_version")
+                if table == "health_observation_preparation" else ("preparation_key",)
+            )
+            if primary_key not in _index_columns(connection, table):
+                raise HealthStoreMigrationError("schema-invalid", "Invalid preparation primary key")
+            network_index = (
+                "idx_health_prepared_observation_network" if table == "health_observation_preparation"
+                else "idx_health_prepared_pair_network"
+            )
+            if tuple(row[2] for row in connection.execute(
+                f"PRAGMA index_info({network_index})"
+            )) != ("network_id",):
+                raise HealthStoreMigrationError("schema-invalid", "Missing preparation network index")
+            foreign_keys = {
+                (row[3], row[2], row[4], row[6])
+                for row in connection.execute(f"PRAGMA foreign_key_list({table})")
+            }
+            required = (
+                {"observation_id"} if table == "health_observation_preparation"
+                else {"before_observation_id", "after_observation_id"}
+            )
+            if any((column, "observations", "observation_id", "CASCADE") not in foreign_keys
+                   for column in required):
+                raise HealthStoreMigrationError("schema-invalid", "Invalid preparation foreign keys")
     base_table_columns = {
         "observations": {
             "observation_id", "datasource_id", "dataset_id", "network_id",
@@ -4461,6 +5013,7 @@ SCHEMA_MIGRATIONS = (
     SchemaMigration("health-schema-v7-receipt-device-identity", 6, 7, "online-additive", _migration_v7),
     SchemaMigration("health-schema-v8-assessment-preferences", 7, 8, "online-additive", _migration_v8),
     SchemaMigration("health-schema-v9-comparison-relationship-type", 8, 9, "online-additive", _migration_v9),
+    SchemaMigration("health-schema-v10-derived-preparation", 9, 10, "online-additive", _migration_v10),
 )
 
 
@@ -4782,6 +5335,7 @@ def initialize_health_store(store: SQLiteHealthStore) -> None:
                 _migration_v7(connection)
                 _migration_v8(connection)
                 _migration_v9(connection)
+                _migration_v10(connection)
                 connection.executemany(
                     "INSERT INTO schema_migrations(version, applied_at) "
                     "VALUES (?, CURRENT_TIMESTAMP)",

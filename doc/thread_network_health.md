@@ -43,7 +43,7 @@ operations and `--export-latest` require one concrete dataset ID.
 
 ## Migrating Health Store Schema
 
-Health schema version 9 is the current contract. Inspect an existing database
+Health schema version 10 is the current contract. Inspect an existing database
 without creating a store or changing any files:
 
 ```bash
@@ -63,6 +63,48 @@ JSON metadata recording source/target schema versions and verification. Copies
 are retained after success and failure; failed migrations roll back their
 schema, rows, and version ledger. Check-only and read-only health paths never
 create a recovery copy or repair an existing store.
+
+## Preparing Retained Evidence
+
+Normal cache-only processing publishes derived observation bodies and static
+metric/relationship comparison fragments in the same dataset transaction.
+They accelerate later roster changes across processes; they are not new
+observations, historical replay, or precomputed roster decisions. Existing
+comparison intervals, fresh roster/absence checks and atomic writes still run.
+
+Prepare older retained history explicitly:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health prepare-history \
+  --network extpan:1234567890abcdef --limit 25 --max-pairs 100 --json
+```
+
+Repeat with the returned `--cursor TOKEN` until `nextCursor` is null.
+Each transaction admits at most 25 observation bodies and examines at most
+100 stored comparison pairs, subject to that observation limit. A concurrent
+source-history change invalidates the cursor; restart without it. Repeated
+starts are safe. `--dry-run` inspects without migration, publication or writes.
+No collector files are read or changed by backfill.
+
+Prepared reads verify current native SQL inputs, full source contracts and
+payload checksums, then still validate each assessment's own saved context.
+Observation bodies use versioned compressed JSON arrays; comparison fragments
+share immutable control templates while preserving numeric types and item order.
+Native rows used for admission are released after a prepared body is loaded
+and reloaded if another retained contract needs them.
+Missing or obsolete preparation reconstructs validated evidence; corruption
+fails the operation rather than hiding behind a miss. Diagnostics and the
+backfill JSON counters distinguish hits, misses, stale versions,
+reconstruction, assessment validation, publication and budget eviction.
+Roster PATCH misses and GETs never publish preparation.
+
+Preparation is limited per network to 2,000 observation records, 2,000 pair
+records and 128 MiB of compressed payloads, independently of comparison
+retention. SQL/index allocation is additional. Oldest preparation is evicted
+first; oversized records are explicitly skipped. Purging observations removes
+their preparation; device purge also invalidates preparation for surviving
+observations whose samples changed. Backfill refuses pairs whose required
+bodies were evicted, rather than silently exceeding its bounds.
 
 Full data-directory backups omit `.migration-backups/` to avoid recursively
 copying recovery history. Restore preserves the active directory's existing
@@ -532,6 +574,29 @@ retained-evidence reassessment commit atomically. Reassessment can create a
 new current assessment revision without collecting data; previous assessments
 and comparisons stay immutable. A no-op records a replayable receipt without
 creating a lifecycle event or reassessment.
+
+While a roster request is pending, the confirmation dialog shows
+"Saving roster change and updating health..." and disables confirm/cancel.
+The save remains pending until network-wide health reassessment commits;
+it never starts live collection. An unclear network outcome offers **Retry
+same request**, preserving the request ID so a committed change is not repeated.
+After a committed save, **Change saved; view refresh failed** means only the
+display refresh needs retrying, not the roster mutation.
+
+Roster reassessment reuses successful retained-contract admission and prepared
+Unified constants only within that network's transaction. Every assessment
+still validates its own evidence, coverage and recovery context. It evaluates
+only missing/offline, network offline-impact and evaluation-context findings,
+retaining the previous non-roster findings. Coverage counts are recomputed
+from admitted samples, not trusted from the previous assessment; pillar states,
+status/confidence and reproduction identities are finalized by the same
+evaluator path as normal processing. Normal dataset processing still evaluates
+all rules. Schema 10 adds the independently admitted, cross-process
+[retained preparation](#preparing-retained-evidence); it does not cache future
+roster decisions.
+Comparisons prepare endpoint lookups per pair and stream item inserts as a
+batch; all items and their original JSON encodings remain intact. Failure anywhere in that
+batch rolls back the entire roster change, not only the comparison.
 
 Health GET routes, including roster context, remain query-only and no-store;
 PATCH alone writes. The write path requires the current roster schema and an

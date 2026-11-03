@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sqlite3
 import sys
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -90,6 +91,15 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--after-assessment", required=True)
     compare.add_argument("--dry-run", action="store_true")
     compare.add_argument("--json", action="store_true", dest="json_output")
+    prepare = commands.add_parser(
+        "prepare-history", description="Prepare bounded retained health evidence without collection.",
+    )
+    prepare.add_argument("--network", required=True, dest="network_id")
+    prepare.add_argument("--limit", type=int, default=25)
+    prepare.add_argument("--max-pairs", type=int, default=100)
+    prepare.add_argument("--cursor")
+    prepare.add_argument("--dry-run", action="store_true")
+    prepare.add_argument("--json", action="store_true", dest="json_output")
     migrate = commands.add_parser(
         "migrate-history",
         description="Replay retained health assessments without collecting data.",
@@ -423,10 +433,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     data_dir = resolve_data_dir(
         args.datadir,
-        create_default=args.health_command not in {"migrate-history", "migrate"},
+        create_default=args.health_command not in {"migrate-history", "migrate", "prepare-history"},
     )
     if args.health_command == "migrate":
         return _run_schema_migration(args, data_dir)
+    if args.health_command == "prepare-history":
+        if not 1 <= args.limit <= 25 or not 1 <= args.max_pairs <= 100:
+            parser.error("Preparation requires limit 1-25 and max-pairs 1-100")
+        database_path = data_dir / HOBAT_DATABASE_FILENAME
+        if not database_path.is_file():
+            parser.error("Health store is not available")
+        try:
+            store = SQLiteHealthStore(database_path, read_only=args.dry_run)
+            report = store.prepare_history(
+                network_id=args.network_id, limit=args.limit, max_pairs=args.max_pairs,
+                cursor=args.cursor, dry_run=args.dry_run,
+            )
+        except (ValueError, sqlite3.DatabaseError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(report, sort_keys=True) if args.json_output else (
+            f"Health preparation: {report['remainingObservations']} observations and "
+            f"{report['remainingPairs']} pairs remain; cursor: {report['nextCursor']}"
+        ))
+        return 0
     if args.health_command == "migrate-history":
         return _run_history_migration(args, parser, data_dir)
     if args.health_command in {"purge", "purge-all", "purge-by-device"}:

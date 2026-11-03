@@ -38,6 +38,10 @@ REST_RECOVERY_DATASETS = frozenset({
     "otbr_restapi_topology_mdns",
     "multi_source_otbr_topology_mdns",
 })
+ROSTER_REASSESSMENT_RULE_IDS = frozenset({
+    "device.missing", "device.offline", "network.offline-impact",
+    "observation.evaluation-context-unavailable",
+})
 
 
 def evaluator_version_for_dataset(dataset_id: str, sample_contract_version: str) -> str:
@@ -136,40 +140,44 @@ def _evaluate_availability(
     absences: Mapping[str, int],
     complete: bool,
     witness_positive_ids: frozenset[str] = frozenset(),
+    *,
+    include_observed_findings: bool = True,
 ) -> tuple[list[Finding], AvailabilityFacts]:
     findings: list[Finding] = []
     observed_ids = frozenset(device.device_id for device in observation.devices)
     attachment_failed_device_ids: set[str] = set()
     for device in observation.devices:
-        findings.append(
-            _finding(
-                observation,
-                rule_id="device.observed",
-                status=HealthStatus.STRONG,
-                scope=FindingScope.DEVICE,
-                rank=FindingRank.INFO,
-                summary="Device is present in this observation.",
-                evidence={"present": True, "completeness": observation.completeness.value},
-                device_ids=(device.device_id,),
-                source_files=device.source_files,
-            )
-        )
-        attachment = (device.state or device.role or "").lower()
-        if attachment in {"detached", "disabled", "orphaned"}:
-            attachment_failed_device_ids.add(device.device_id)
+        if include_observed_findings:
             findings.append(
                 _finding(
                     observation,
-                    rule_id="device.attachment-failure",
-                    status=HealthStatus.POOR,
+                    rule_id="device.observed",
+                    status=HealthStatus.STRONG,
                     scope=FindingScope.DEVICE,
-                    rank=FindingRank.POOR,
-                    summary=f"Device reports current state {attachment}.",
-                    evidence={"attachment": attachment},
+                    rank=FindingRank.INFO,
+                    summary="Device is present in this observation.",
+                    evidence={"present": True, "completeness": observation.completeness.value},
                     device_ids=(device.device_id,),
                     source_files=device.source_files,
                 )
             )
+        attachment = (device.state or device.role or "").lower()
+        if attachment in {"detached", "disabled", "orphaned"}:
+            attachment_failed_device_ids.add(device.device_id)
+            if include_observed_findings:
+                findings.append(
+                    _finding(
+                        observation,
+                        rule_id="device.attachment-failure",
+                        status=HealthStatus.POOR,
+                        scope=FindingScope.DEVICE,
+                        rank=FindingRank.POOR,
+                        summary=f"Device reports current state {attachment}.",
+                        evidence={"attachment": attachment},
+                        device_ids=(device.device_id,),
+                        source_files=device.source_files,
+                    )
+                )
 
     missing_expected_ids = tuple(sorted(expected_device_ids - observed_ids))
     offline_required = _policy_value(
@@ -277,6 +285,8 @@ def _evaluate_topology_resilience(
     complete: bool,
     omr_prefix: str | None,
     device_ipv6_addresses: Mapping[str, tuple[str, ...]],
+    *,
+    include_findings: bool = True,
 ) -> tuple[list[Finding], TopologyFacts]:
     findings: list[Finding] = []
     router_ids = tuple(sorted(
@@ -289,7 +299,7 @@ def _evaluate_topology_resilience(
     ))
     router_count = len(router_ids)
     border_router_count = len(border_router_ids)
-    if profile.coverage["resilience"] == "sufficient":
+    if include_findings and profile.coverage["resilience"] == "sufficient":
         router_count_threshold = _policy_value(
             policy, "network.router-redundancy", "thresholds.routerCount"
         )["unstableAtOrBelow"]
@@ -316,7 +326,7 @@ def _evaluate_topology_resilience(
             })),
             confidence=Confidence.HIGH if router_count else Confidence.LOW,
         ))
-    if profile.border_router_authority:
+    if include_findings and profile.border_router_authority:
         border_router_count_threshold = _policy_value(
             policy,
             "network.border-router-redundancy",
@@ -385,39 +395,40 @@ def _evaluate_topology_resilience(
             device_id for device_id in border_router_ids
             if any(in_omr(addr) for addr in addresses.get(device_id, ()))
         ))
-        findings.append(_finding(
-            observation,
-            rule_id="network.external-routing",
-            status=(
-                HealthStatus.STRONG if omr_border_router_ids
-                else HealthStatus.MODERATE if border_router_ids
-                else HealthStatus.UNKNOWN
-            ),
-            scope=FindingScope.EXTERNAL,
-            rank=(
-                FindingRank.INFO if omr_border_router_ids
-                else FindingRank.MODERATE if border_router_ids
-                else FindingRank.INFO
-            ),
-            summary=(
-                f"{len(omr_border_router_ids)} Border Router"
-                f"{'s' if len(omr_border_router_ids) != 1 else ''} "
-                "advertise an address in the OMR prefix."
-                if omr_border_router_ids
-                else "No Border Router has an observed address within the OMR prefix."
-            ),
-            evidence={
-                "omrPrefix": omr_prefix,
-                "borderRouterCount": len(border_router_ids),
-                "omrBorderRouterIds": omr_border_router_ids,
-            },
-            device_ids=omr_border_router_ids or border_router_ids,
-            confidence=(
-                Confidence.HIGH if omr_border_router_ids
-                else Confidence.MEDIUM if border_router_ids
-                else Confidence.LOW
-            ),
-        ))
+        if include_findings:
+            findings.append(_finding(
+                observation,
+                rule_id="network.external-routing",
+                status=(
+                    HealthStatus.STRONG if omr_border_router_ids
+                    else HealthStatus.MODERATE if border_router_ids
+                    else HealthStatus.UNKNOWN
+                ),
+                scope=FindingScope.EXTERNAL,
+                rank=(
+                    FindingRank.INFO if omr_border_router_ids
+                    else FindingRank.MODERATE if border_router_ids
+                    else FindingRank.INFO
+                ),
+                summary=(
+                    f"{len(omr_border_router_ids)} Border Router"
+                    f"{'s' if len(omr_border_router_ids) != 1 else ''} "
+                    "advertise an address in the OMR prefix."
+                    if omr_border_router_ids
+                    else "No Border Router has an observed address within the OMR prefix."
+                ),
+                evidence={
+                    "omrPrefix": omr_prefix,
+                    "borderRouterCount": len(border_router_ids),
+                    "omrBorderRouterIds": omr_border_router_ids,
+                },
+                device_ids=omr_border_router_ids or border_router_ids,
+                confidence=(
+                    Confidence.HIGH if omr_border_router_ids
+                    else Confidence.MEDIUM if border_router_ids
+                    else Confidence.LOW
+                ),
+            ))
 
     router_id_set = frozenset(router_ids)
     router_relationships = tuple(
@@ -438,6 +449,11 @@ def _evaluate_topology_resilience(
             for relationship in router_relationships
         ),
     )
+    if not include_findings:
+        return findings, TopologyFacts(
+            router_ids, border_router_ids, router_relationships, graph_analysis,
+            omr_border_router_ids,
+        )
     bridge_relationship_ids = frozenset(graph_analysis.bridge_relationship_ids)
     bridge_device_ids = tuple(sorted({
         device_id
@@ -995,6 +1011,8 @@ def _evaluate_metrics(
     policy: HealthPolicy,
     profile: HealthProfile,
     attachment_failed_device_ids: frozenset[str],
+    *,
+    include_findings: bool = True,
 ) -> tuple[list[Finding], MetricFacts]:
     findings: list[Finding] = []
     metric_sources: dict[str, set[str]] = {}
@@ -1015,6 +1033,8 @@ def _evaluate_metrics(
             continue
         if metric.metric == "meshdiagTableNotProvided":
             meshdiag_not_provided_device_ids.add(metric.device_id)
+            continue
+        if not include_findings:
             continue
         metric_rule_id = f"device.{metric.metric}"
         if metric_rule_id not in HEALTH_RULE_CATALOG.rule_ids:
@@ -1128,20 +1148,21 @@ def _evaluate_metrics(
             )
         )
 
-    for device_id in sorted(diagnostic_timeout_device_ids):
-        findings.append(
-            _finding(
-                observation,
-                rule_id="device.diagnostic-timeout",
-                status=HealthStatus.UNKNOWN,
-                scope=FindingScope.DEVICE,
-                rank=FindingRank.INFO,
-                summary="The device did not respond to a mesh diagnostic query in this observation.",
-                evidence={"responseTimeout": True},
-                device_ids=(device_id,),
-                confidence=Confidence.LOW,
+    if include_findings:
+        for device_id in sorted(diagnostic_timeout_device_ids):
+            findings.append(
+                _finding(
+                    observation,
+                    rule_id="device.diagnostic-timeout",
+                    status=HealthStatus.UNKNOWN,
+                    scope=FindingScope.DEVICE,
+                    rank=FindingRank.INFO,
+                    summary="The device did not respond to a mesh diagnostic query in this observation.",
+                    evidence={"responseTimeout": True},
+                    device_ids=(device_id,),
+                    confidence=Confidence.LOW,
+                )
             )
-        )
 
     return findings, MetricFacts(
         metric_sources={key: frozenset(value) for key, value in metric_sources.items()},
@@ -1563,79 +1584,17 @@ def _evaluate_partition_distribution(
     ]
 
 
-def evaluate_observation(
+def _evaluate_observation_evidence(
     observation: Observation,
     policy: HealthPolicy,
-    *,
     profile: HealthProfile,
-    expected_device_ids: frozenset[str] = frozenset(),
-    prior_complete_absences: Mapping[str, int] | None = None,
-    assessed_at: str | None = None,
-    omr_prefix: str | None = None,
-    device_ipv6_addresses: Mapping[str, tuple[str, ...]] | None = None,
-    roster_context: Mapping[str, Any] | None = None,
-    network_roster_revision: int = 0,
-    history_boundary: Mapping[str, Any] | None = None,
-    evaluation_inputs: EvaluationInputs | None = None,
-    sample_contract_version: str = "comparison-v1",
-    unified_health: Mapping[str, Any] | None = None,
-    rest_diagnostics: Mapping[str, Any] | None = None,
-) -> Assessment:
-    evaluator_version = evaluator_version_for_dataset(
-        observation.dataset_id, sample_contract_version
-    )
-    declared_profile = profile
-    if sample_contract_version == "comparison-v1-unified":
-        from dataclasses import replace
-        from td_health_unified import validate_context
-        from td_health_manifest import load_health_manifest
-        dataset = load_health_manifest().dataset(observation.dataset_id)
-        validate_context({"unifiedHealth": unified_health}, dataset, observation)
-        profile = replace(
-            profile, coverage=unified_health["effectiveCoverage"],
-            topology_authority=bool(unified_health["absenceWitness"]),
-            border_router_authority=bool(unified_health["absenceWitness"]),
-        )
-    inputs = evaluation_inputs or _legacy_evaluation_inputs(
-        observation,
-        expected_device_ids=expected_device_ids,
-        prior_complete_absences=prior_complete_absences or {},
-        roster_context=roster_context,
-        network_roster_revision=network_roster_revision,
-        history_boundary=history_boundary,
-        omr_prefix=omr_prefix,
-        device_ipv6_addresses=device_ipv6_addresses,
-        profile=profile,
-    )
-    expected_device_ids = (
-        inputs.expected_device_ids or frozenset()
-        if inputs.roster.state is EvaluationInputState.AVAILABLE
-        else frozenset()
-    )
-    absences = (
-        inputs.prior_complete_absences or {}
-        if inputs.absence_history.state is EvaluationInputState.AVAILABLE
-        else {}
-    )
-    omr_prefix = (
-        inputs.omr_prefix_value
-        if inputs.omr_prefix.state is EvaluationInputState.AVAILABLE
-        else None
-    )
-    device_ipv6_addresses = (
-        inputs.device_ipv6_address_values or {}
-        if inputs.device_ipv6_addresses.state is EvaluationInputState.AVAILABLE
-        else {}
-    )
+    inputs: EvaluationInputs,
+    availability_facts: AvailabilityFacts,
+    complete: bool,
+    omr_prefix: str | None,
+    device_ipv6_addresses: Mapping[str, tuple[str, ...]],
+) -> tuple[list[Finding], TopologyFacts, MetricFacts]:
     findings: list[Finding] = []
-    complete = observation.completeness is Completeness.COMPLETE
-    availability_findings, availability_facts = _evaluate_availability(
-        observation, policy, inputs, expected_device_ids, absences, complete,
-        frozenset(unified_health.get("positiveDeviceIds", ())) if unified_health else frozenset(),
-    )
-    findings.extend(availability_findings)
-    observed_ids = availability_facts.observed_ids
-    missing_expected_ids = availability_facts.missing_expected_ids
     attachment_failed_device_ids = availability_facts.attachment_failed_device_ids
 
     topology_findings, topology_facts = _evaluate_topology_resilience(
@@ -1648,14 +1607,8 @@ def evaluate_observation(
         device_ipv6_addresses,
     )
     findings.extend(topology_findings)
-    router_ids = topology_facts.router_ids
-    border_router_ids = topology_facts.border_router_ids
-    router_relationships = topology_facts.router_relationships
     graph_analysis = topology_facts.graph_analysis
     bridge_relationship_ids = topology_facts.bridge_relationship_ids
-    omr_border_router_ids = topology_facts.omr_border_router_ids
-    router_count = len(router_ids)
-    border_router_count = len(border_router_ids)
 
     metric_findings, metric_facts = _evaluate_metrics(
         observation, policy, profile, attachment_failed_device_ids
@@ -1663,7 +1616,6 @@ def evaluate_observation(
     findings.extend(metric_findings)
     metric_sources = metric_facts.metric_sources
     lq_counts = metric_facts.lq_counts
-    diagnostic_timeout_device_ids = metric_facts.diagnostic_timeout_device_ids
     device_roles = metric_facts.device_roles
 
     if (
@@ -1683,36 +1635,6 @@ def evaluate_observation(
                 ),
                 evidence={"relationshipIds": inputs.duplicate_relationship_ids},
                 relationship_ids=inputs.duplicate_relationship_ids,
-                confidence=Confidence.LOW,
-            )
-        )
-
-    unavailable_domains = [
-        {
-            "domain": name,
-            "reasonCodes": list(domain.reason_codes),
-            "affectedRuleIds": {
-                "roster": ["device.missing", "device.offline", "network.offline-impact"],
-                "absenceHistory": ["device.offline", "network.offline-impact"],
-                "duplicateRelationships": ["observation.duplicate-source-entry"],
-                "omrPrefix": ["network.external-routing"],
-                "deviceIpv6Addresses": ["network.external-routing"],
-                "partitionMembership": ["network.partition-distribution"],
-            }[name],
-        }
-        for name, domain in inputs.domains().items()
-        if domain.state is EvaluationInputState.UNAVAILABLE
-    ]
-    if unavailable_domains:
-        findings.append(
-            _finding(
-                observation,
-                rule_id="observation.evaluation-context-unavailable",
-                status=HealthStatus.UNKNOWN,
-                scope=FindingScope.NETWORK,
-                rank=FindingRank.INFO,
-                summary="One or more historical evaluation inputs are unavailable.",
-                evidence={"unavailableDomains": unavailable_domains},
                 confidence=Confidence.LOW,
             )
         )
@@ -1768,7 +1690,7 @@ def evaluate_observation(
             )
         )
 
-    relationship_findings, relationship_facts = _evaluate_relationships(
+    relationship_findings, _ = _evaluate_relationships(
         observation,
         policy,
         profile,
@@ -1777,10 +1699,17 @@ def evaluate_observation(
         graph_analysis,
     )
     findings.extend(relationship_findings)
+    return findings, topology_facts, metric_facts
 
-    for finding in findings:
-        _validate_finding_applicability(finding, observation, profile)
 
+def _observation_evidence_counts(
+    observation: Observation,
+    profile: HealthProfile,
+    complete: bool,
+    omr_prefix: str | None,
+    topology_facts: TopologyFacts,
+    metric_facts: MetricFacts,
+) -> dict[str, dict[str, int | None]]:
     valid_mac_metrics = sum(
         metric.metric in {"totalMacErrorRatio", "totalMacDiscardRatio"}
         and metric.denominator is not None
@@ -1792,24 +1721,15 @@ def evaluate_observation(
         and relationship.link_quality_out is not None
         for relationship in observation.relationships
     )
-    observed_counts = {
-        "availability": {
-            "observedDevices": len(observation.devices),
-            "expectedRosterEntries": (
-                len(expected_device_ids)
-                if inputs.roster.state is EvaluationInputState.AVAILABLE else None
-            ),
-            "expectedDevicesPresent": (
-                len(expected_device_ids & observed_ids)
-                if inputs.roster.state is EvaluationInputState.AVAILABLE else None
-            ),
-            "attachmentStates": sum(bool(device.state or device.role) for device in observation.devices),
-            "offlineEligible": int(complete and bool(expected_device_ids)),
-        },
+    graph_analysis = topology_facts.graph_analysis
+    observed_counts: dict[str, dict[str, int | None]] = {
         "connectivity": {
             "relationships": len(observation.relationships),
-            "parentChildRelationships": sum(relationship_facts.child_parent_counts.values()),
-            "routerNeighborRelationships": len(router_relationships),
+            "parentChildRelationships": sum(
+                relationship.relationship_type == "parent-child"
+                for relationship in observation.relationships
+            ),
+            "routerNeighborRelationships": len(topology_facts.router_relationships),
             "completeDirectionalLqPairs": complete_lq_pairs,
         },
         "delivery": {
@@ -1823,11 +1743,11 @@ def evaluate_observation(
                 relationship.queued_message_count is not None
                 for relationship in observation.relationships
             ),
-            "diagnosticTimeouts": len(diagnostic_timeout_device_ids),
+            "diagnosticTimeouts": len(metric_facts.diagnostic_timeout_device_ids),
         },
         "resilience": {
-            "routers": router_count,
-            "borderRouters": border_router_count,
+            "routers": len(topology_facts.router_ids),
+            "borderRouters": len(topology_facts.border_router_ids),
             "routerNeighborEdges": graph_analysis.edge_count,
             "bridges": len(graph_analysis.bridge_relationship_ids),
             "articulationPoints": len(graph_analysis.articulation_device_ids),
@@ -1836,9 +1756,165 @@ def evaluate_observation(
         },
         "externalRouting": {
             "omrPrefixAvailable": int(bool(omr_prefix)),
-            "borderRouters": border_router_count,
-            "borderRoutersWithOmrAddress": len(omr_border_router_ids) if profile.border_router_authority and complete and omr_prefix else 0,
+            "borderRouters": len(topology_facts.border_router_ids),
+            "borderRoutersWithOmrAddress": len(topology_facts.omr_border_router_ids) if profile.border_router_authority and complete and omr_prefix else 0,
         },
+    }
+    return observed_counts
+
+
+def evaluate_observation(
+    observation: Observation,
+    policy: HealthPolicy,
+    *,
+    profile: HealthProfile,
+    expected_device_ids: frozenset[str] = frozenset(),
+    prior_complete_absences: Mapping[str, int] | None = None,
+    assessed_at: str | None = None,
+    omr_prefix: str | None = None,
+    device_ipv6_addresses: Mapping[str, tuple[str, ...]] | None = None,
+    roster_context: Mapping[str, Any] | None = None,
+    network_roster_revision: int = 0,
+    history_boundary: Mapping[str, Any] | None = None,
+    evaluation_inputs: EvaluationInputs | None = None,
+    sample_contract_version: str = "comparison-v1",
+    unified_health: Mapping[str, Any] | None = None,
+    rest_diagnostics: Mapping[str, Any] | None = None,
+    retained_assessment: Assessment | None = None,
+) -> Assessment:
+    """Evaluate fully, or reuse admitted non-roster evidence for the same observation."""
+    evaluator_version = evaluator_version_for_dataset(
+        observation.dataset_id, sample_contract_version
+    )
+    declared_profile = profile
+    if sample_contract_version == "comparison-v1-unified":
+        from dataclasses import replace
+        from td_health_unified import validate_context
+        from td_health_manifest import load_health_manifest
+        dataset = load_health_manifest().dataset(observation.dataset_id)
+        validate_context({"unifiedHealth": unified_health}, dataset, observation)
+        profile = replace(
+            profile, coverage=unified_health["effectiveCoverage"],
+            topology_authority=bool(unified_health["absenceWitness"]),
+            border_router_authority=bool(unified_health["absenceWitness"]),
+        )
+    inputs = evaluation_inputs or _legacy_evaluation_inputs(
+        observation,
+        expected_device_ids=expected_device_ids,
+        prior_complete_absences=prior_complete_absences or {},
+        roster_context=roster_context,
+        network_roster_revision=network_roster_revision,
+        history_boundary=history_boundary,
+        omr_prefix=omr_prefix,
+        device_ipv6_addresses=device_ipv6_addresses,
+        profile=profile,
+    )
+    expected_device_ids = (
+        inputs.expected_device_ids or frozenset()
+        if inputs.roster.state is EvaluationInputState.AVAILABLE
+        else frozenset()
+    )
+    absences = (
+        inputs.prior_complete_absences or {}
+        if inputs.absence_history.state is EvaluationInputState.AVAILABLE
+        else {}
+    )
+    omr_prefix = (
+        inputs.omr_prefix_value
+        if inputs.omr_prefix.state is EvaluationInputState.AVAILABLE
+        else None
+    )
+    device_ipv6_addresses = (
+        inputs.device_ipv6_address_values or {}
+        if inputs.device_ipv6_addresses.state is EvaluationInputState.AVAILABLE
+        else {}
+    )
+    if retained_assessment is not None and (
+        retained_assessment.observation_id != observation.observation_id
+        or retained_assessment.profile_id != profile.profile_id
+        or retained_assessment.evaluator_version != evaluator_version
+        or retained_assessment.sample_contract_version != sample_contract_version
+        or retained_assessment.health_policy_digest != policy.digest
+    ):
+        raise ValueError("Roster reevaluation requires the same admitted observation contract")
+    complete = observation.completeness is Completeness.COMPLETE
+    findings, availability_facts = _evaluate_availability(
+        observation, policy, inputs, expected_device_ids, absences, complete,
+        frozenset(unified_health.get("positiveDeviceIds", ())) if unified_health else frozenset(),
+        include_observed_findings=retained_assessment is None,
+    )
+    observed_ids = availability_facts.observed_ids
+    missing_expected_ids = availability_facts.missing_expected_ids
+    if retained_assessment is None:
+        evidence_findings, topology_facts, metric_facts = (
+            _evaluate_observation_evidence(
+                observation, policy, profile, inputs, availability_facts, complete,
+                omr_prefix, device_ipv6_addresses,
+            )
+        )
+        findings.extend(evidence_findings)
+    else:
+        findings.extend(
+            finding for finding in retained_assessment.findings
+            if finding.rule_id not in ROSTER_REASSESSMENT_RULE_IDS
+        )
+        _, topology_facts = _evaluate_topology_resilience(
+            observation, policy, profile, inputs, complete, omr_prefix,
+            device_ipv6_addresses, include_findings=False,
+        )
+        _, metric_facts = _evaluate_metrics(
+            observation, policy, profile, availability_facts.attachment_failed_device_ids,
+            include_findings=False,
+        )
+    observed_counts = _observation_evidence_counts(
+        observation, profile, complete, omr_prefix, topology_facts, metric_facts,
+    )
+    diagnostic_timeout_count = len(metric_facts.diagnostic_timeout_device_ids)
+    not_provided_count = len(metric_facts.meshdiag_not_provided_device_ids)
+    unavailable_domains = [
+        {
+            "domain": name,
+            "reasonCodes": list(domain.reason_codes),
+            "affectedRuleIds": {
+                "roster": ["device.missing", "device.offline", "network.offline-impact"],
+                "absenceHistory": ["device.offline", "network.offline-impact"],
+                "duplicateRelationships": ["observation.duplicate-source-entry"],
+                "omrPrefix": ["network.external-routing"],
+                "deviceIpv6Addresses": ["network.external-routing"],
+                "partitionMembership": ["network.partition-distribution"],
+            }[name],
+        }
+        for name, domain in inputs.domains().items()
+        if domain.state is EvaluationInputState.UNAVAILABLE
+    ]
+    if unavailable_domains:
+        findings.append(
+            _finding(
+                observation,
+                rule_id="observation.evaluation-context-unavailable",
+                status=HealthStatus.UNKNOWN,
+                scope=FindingScope.NETWORK,
+                rank=FindingRank.INFO,
+                summary="One or more historical evaluation inputs are unavailable.",
+                evidence={"unavailableDomains": unavailable_domains},
+                confidence=Confidence.LOW,
+            )
+        )
+    for finding in findings:
+        if retained_assessment is None or finding.rule_id in ROSTER_REASSESSMENT_RULE_IDS:
+            _validate_finding_applicability(finding, observation, profile)
+    observed_counts["availability"] = {
+        "observedDevices": len(observation.devices),
+        "expectedRosterEntries": (
+            len(expected_device_ids)
+            if inputs.roster.state is EvaluationInputState.AVAILABLE else None
+        ),
+        "expectedDevicesPresent": (
+            len(expected_device_ids & observed_ids)
+            if inputs.roster.state is EvaluationInputState.AVAILABLE else None
+        ),
+        "attachmentStates": sum(bool(device.state or device.role) for device in observation.devices),
+        "offlineEligible": int(complete and bool(expected_device_ids)),
     }
     observed_pillars: dict[str, dict[str, object]] = {}
     for pillar, static_state in profile.coverage.items():
@@ -1934,13 +2010,13 @@ def evaluate_observation(
             and inputs.roster.state is EvaluationInputState.AVAILABLE
             and inputs.absence_history.state is EvaluationInputState.AVAILABLE
         ),
-        "diagnosticTimeoutDeviceCount": len(diagnostic_timeout_device_ids),
+        "diagnosticTimeoutDeviceCount": diagnostic_timeout_count,
         "diagnosticTimeoutRatio": (
-            len(diagnostic_timeout_device_ids) / len(observation.devices)
+            diagnostic_timeout_count / len(observation.devices)
             if observation.devices
             else 0.0
         ),
-        **({"meshdiagTablesNotProvided": len(metric_facts.meshdiag_not_provided_device_ids)}
+        **({"meshdiagTablesNotProvided": not_provided_count}
            if sample_contract_version == "comparison-v1-unified" else {}),
         **({"restChildTableCoverage": unified_health["restChildTableCoverage"]}
            if unified_health and "restChildTableCoverage" in unified_health else {}),

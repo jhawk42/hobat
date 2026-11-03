@@ -22,7 +22,7 @@ import td_cli
 import td_health_cli
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_read import TDHealthReadService
-from td_health_sqlite import SQLiteHealthStore
+from td_health_sqlite import SCHEMA_VERSION, SQLiteHealthStore
 from td_health_migration import (
     inventory_health_history,
     migrate_health_history,
@@ -53,6 +53,59 @@ def _seed(data_dir) -> None:
         json.dumps([{"extAddress": "8672766ae0578187", "role": "router"}]),
         encoding="utf-8",
     )
+
+
+def test_preparation_reuse_across_fresh_processing_and_roster_processes(tmp_path):
+    from td_unified_dataset import build_unified_dataset
+    from test_td_health_unified import NETWORK, collection, expected
+
+    root = Path(__file__).resolve().parents[1]
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    expected(store)
+    for day in (1, 2):
+        collection(tmp_path, "otbr_cli_unified", day)
+        build_unified_dataset(tmp_path, "otbr_cli_unified")
+        result = subprocess.run(
+            [sys.executable, str(root / "src/td_cli.py"), "--datadir", str(tmp_path),
+             "health", "process-dataset", "--dataset", "otbr_cli_unified", "--json"],
+            cwd=root, capture_output=True, text=True, timeout=30, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+    before_sources = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
+    code = (
+        "import json,sys; from pathlib import Path; "
+        "from td_health_sqlite import SQLiteHealthStore; "
+        "s=SQLiteHealthStore(Path(sys.argv[1])); "
+        "s.upsert_expected_device(sys.argv[2],sys.argv[3],'fresh process','retired'); "
+        "print(json.dumps(s.preparation_stats))"
+    )
+    from test_td_health_unified import MISSING
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(store.path), NETWORK, MISSING],
+        cwd=root / "src", capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    counters = json.loads(result.stdout)
+    assert counters["pair-hit"] >= 1
+    assert counters["observation-hit"] >= 2
+    assert counters["assessment-validated"] >= 2
+    assert not counters.get("pair-published") and not counters.get("observation-published")
+    assert before_sources == {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
+    with closing(store._connect()) as connection:
+        before = tuple(connection.iterdump())
+    arguments = [sys.executable, str(root / "src/td_cli.py"), "--datadir", str(tmp_path),
+                 "health", "prepare-history", "--network", NETWORK, "--json"]
+    preview = subprocess.run(
+        [*arguments, "--dry-run"], cwd=root, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert preview.returncode == 0, preview.stderr
+    assert json.loads(preview.stdout)["dryRun"]
+    with closing(store._connect()) as connection:
+        assert tuple(connection.iterdump()) == before
+    invalid = subprocess.run(
+        [*arguments, "--limit", "26"], cwd=root, capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert invalid.returncode == 2 and "limit 1-25" in invalid.stderr
 
 
 def test_history_subprocess_discovery_and_network_scope(tmp_path) -> None:
@@ -552,8 +605,8 @@ def test_schema_migration_check_is_read_only_and_apply_is_verified(tmp_path) -> 
     assert check["operation"] == "check"
     assert check["outcome"] == "pending"
     assert check["sourceSchemaVersion"] == 3
-    assert check["targetSchemaVersion"] == 9
-    assert [item["toVersion"] for item in check["migrations"]] == [4, 5, 6, 7, 8, 9]
+    assert check["targetSchemaVersion"] == SCHEMA_VERSION
+    assert [item["toVersion"] for item in check["migrations"]] == list(range(4, SCHEMA_VERSION + 1))
     assert check["backupRequired"] and not check["backupVerified"]
     assert database_path.read_bytes() == before_database
     assert sorted(path.name for path in tmp_path.iterdir()) == before_entries
@@ -571,7 +624,7 @@ def test_schema_migration_check_is_read_only_and_apply_is_verified(tmp_path) -> 
     assert backup_path.is_file()
     metadata = json.loads(backup_path.with_suffix(".json").read_text(encoding="utf-8"))
     assert metadata["sourceSchemaVersion"] == 3
-    assert metadata["targetSchemaVersion"] == 9
+    assert metadata["targetSchemaVersion"] == SCHEMA_VERSION
     assert metadata["integrityCheck"] == "ok"
 
     output = io.StringIO()

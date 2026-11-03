@@ -4142,7 +4142,7 @@ function beginRosterAction(action, deviceId, knownDetail = null) {
 async function reconcileCommittedRosterAction(capture) {
   if (healthInsightsState.datasetId !== capture.datasetId
       || healthInsightsState.assessment?.networkId !== capture.networkId) return;
-  await refreshHealthAssessment();
+  await refreshHealthAssessment({ refreshRoster: false });
   if (healthInsightsState.error || !healthInsightsState.assessment) {
     throw new Error(healthInsightsState.error || "Current assessment could not be refreshed.");
   }
@@ -4236,6 +4236,7 @@ async function submitRosterAction(event) {
   confirm.disabled = true;
   cancel.disabled = true;
   rosterMutationPendingDeviceId = capture.deviceId;
+  const savingMessage = "Saving roster change and updating health...";
   let reconfirmAfterConflict = false;
   if (healthInsightsState.rosterDetail?.deviceId === capture.deviceId) {
     renderRosterDetailPanel(
@@ -4243,9 +4244,13 @@ async function submitRosterAction(event) {
     );
   }
   try {
+    status.textContent = savingMessage;
     const response = await patchHealthRosterDevice(
       capture.networkId, capture.deviceId, requestPayload,
     );
+    if (activeRosterAction === capture && status.textContent === savingMessage) {
+      status.textContent = "";
+    }
     document.getElementById("health-roster-action-dialog").close();
     if (activeRosterAction === capture) {
       activeRosterAction = null;
@@ -4255,7 +4260,6 @@ async function submitRosterAction(event) {
     try {
       await reconcileCommittedRosterAction(capture);
     } catch (error) {
-      status.textContent = "";
       showRosterMutationRefreshFailure(capture, error);
     }
   } catch (error) {
@@ -4279,6 +4283,9 @@ async function submitRosterAction(event) {
       }
     }
   } finally {
+    if (activeRosterAction === capture && status.textContent === savingMessage) {
+      status.textContent = "";
+    }
     if (rosterMutationPendingDeviceId === capture.deviceId) {
       rosterMutationPendingDeviceId = null;
     }
@@ -5081,7 +5088,7 @@ function resetHealthInsightsForNetworkChange() {
   contextDetailsController.setCollapsed(true);
 }
 
-async function refreshHealthAssessment() {
+async function refreshHealthAssessment({ refreshRoster = true } = {}) {
   const requestVersion = ++healthInsightsState.assessmentRequestVersion;
   const dataset = currentDataset;
   const entry = currentDataset?.entry;
@@ -5191,7 +5198,7 @@ async function refreshHealthAssessment() {
     if (healthInsightsTab === "roster" && healthInsightsState.rosterDetail) {
       document.getElementById("device-details").classList.add("roster-selected");
     }
-    void loadRosterPage(healthRosterViewState.offset);
+    if (refreshRoster) void loadRosterPage(healthRosterViewState.offset);
     Object.assign(
       healthInsightsViewState,
       reconcileHealthInsightsSelection(healthInsightsViewState, assessment),

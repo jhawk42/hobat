@@ -977,7 +977,7 @@ def test_dataset_health_refresh_preserves_context_details_visibility() -> None:
     ui_text = _read_text(UI_JS)
     dataset_reset_start = ui_text.index("function resetHealthInsightsForDatasetChange()")
     network_reset_start = ui_text.index("function resetHealthInsightsForNetworkChange()")
-    refresh_start = ui_text.index("async function refreshHealthAssessment()")
+    refresh_start = ui_text.index("async function refreshHealthAssessment(")
     dataset_change_source = ui_text[dataset_reset_start:network_reset_start]
     network_change_source = ui_text[network_reset_start:refresh_start]
     refresh_source = ui_text[refresh_start:ui_text.index("\nfunction ", refresh_start)]

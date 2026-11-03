@@ -1368,6 +1368,7 @@ def process_health(**kwargs: Any) -> ProcessingResult:
             saved = store.save_processing_result(
                 result.observation, result.assessment,
                 roster_facts=result.roster_facts,
+                prepare=True,
             )
             break
         except StaleRosterContextError:

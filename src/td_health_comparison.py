@@ -10,7 +10,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from td_health_manifest import HealthDataset
-from td_health_observation_model import Assessment, Completeness, Observation
+from td_health_observation_model import (
+    Assessment, Completeness, DeviceSample, MetricSample, Observation, RelationshipSample,
+)
 
 
 COMPARISON_VERSION = "comparison-v1"
@@ -277,9 +279,46 @@ RELATIONSHIP_CATALOG: Mapping[str, tuple[str, str | None]] = {
 }
 
 
+@dataclass(frozen=True)
+class _EndpointIndex:
+    devices: dict[str, DeviceSample]
+    relationships: dict[str, RelationshipSample]
+    metrics: dict[tuple[str, str, str], MetricSample]
+    parents: dict[str, list[RelationshipSample]]
+    facts: dict[tuple[object, object], list[Mapping[str, object]]]
+    source_times: dict[str, str | None]
+    source_instants: dict[str, datetime]
+    route64_coverage: set[tuple[str, str]]
+
+
+def _prepare_endpoint(
+    observation: Observation, facts: tuple[Mapping[str, object], ...] = (),
+) -> _EndpointIndex:
+    parents: dict[str, list[RelationshipSample]] = {}
+    for link in observation.relationships:
+        if link.relationship_type == "parent-child":
+            parents.setdefault(link.to_device_id, []).append(link)
+    by_field: dict[tuple[object, object], list[Mapping[str, object]]] = {}
+    for fact in facts:
+        by_field.setdefault((fact["device_id"], fact["field_key"]), []).append(fact)
+    times = {
+        filename: source_time_for_sample(observation, filename)
+        for filename in {source.filename for source in observation.sources}
+    }
+    return _EndpointIndex(
+        {item.device_id: item for item in observation.devices},
+        {item.relationship_id: item for item in observation.relationships},
+        {(item.device_id, item.metric, item.source_file): item for item in observation.metrics},
+        parents, by_field, times,
+        {filename: _utc_timestamp(value) for filename, value in times.items() if value is not None},
+        {(item.device_id, item.source_file) for item in observation.metrics
+         if item.metric == "route64Coverage" and item.unit == "flag" and item.value == 1.0},
+    )
+
+
 def _common_newer_source(
-    before_obs: Observation,
-    after_obs: Observation,
+    before: _EndpointIndex,
+    after: _EndpointIndex,
     old_files: tuple[str, ...] | None,
     new_files: tuple[str, ...] | None,
 ) -> str | None:
@@ -289,28 +328,26 @@ def _common_newer_source(
             continue
         if new_files is not None and filename not in new_files:
             continue
-        before_time = source_time_for_sample(before_obs, filename)
-        after_time = source_time_for_sample(after_obs, filename)
+        before_time = before.source_instants.get(filename)
+        after_time = after.source_instants.get(filename)
         if (
             before_time
             and after_time
-            and _utc_timestamp(after_time) > _utc_timestamp(before_time)
+            and after_time > before_time
         ):
             return filename
     return None
 
 
 def _derive_device_comparison_items(
-    before_obs: Observation,
-    after_obs: Observation,
+    before: _EndpointIndex,
+    after: _EndpointIndex,
     interval: ComparisonInterval,
     roster_device_ids: frozenset[str],
-    endpoint_facts: Mapping[str, tuple[Mapping[str, object], ...]] | None,
     unified_contexts: tuple[Mapping, Mapping] | None = None,
 ) -> list[ComparisonItem]:
     items: list[ComparisonItem] = []
-    old_devices = {device.device_id: device for device in before_obs.devices}
-    new_devices = {device.device_id: device for device in after_obs.devices}
+    old_devices, new_devices = before.devices, after.devices
     for device_id in sorted(old_devices.keys() | new_devices.keys() | roster_device_ids):
         old_device = old_devices.get(device_id)
         new_device = new_devices.get(device_id)
@@ -318,10 +355,10 @@ def _derive_device_comparison_items(
         new_files = new_device.source_files if new_device else None
         source_files = tuple(sorted(set(old_files or ()) | set(new_files or ())))
         source_file = _common_newer_source(
-            before_obs, after_obs, old_files, new_files
+            before, after, old_files, new_files
         )
-        old_time = source_time_for_sample(before_obs, source_file) if source_file else None
-        new_time = source_time_for_sample(after_obs, source_file) if source_file else None
+        old_time = before.source_times.get(source_file) if source_file else None
+        new_time = after.source_times.get(source_file) if source_file else None
         if old_device or new_device:
             presence_source, presence_old_time, presence_new_time = source_file, old_time, new_time
             if unified_contexts is not None and (old_device is None or new_device is None):
@@ -365,20 +402,18 @@ def _derive_device_comparison_items(
                     after_value=getattr(new_device, field), before_source_time=old_time,
                     after_source_time=new_time, source_files=source_files,
                 ))
-        if endpoint_facts:
+        if before.facts or after.facts:
             for field, metric in (
                 ("leaderData.partitionId", "partition"),
                 ("rloc16", "rloc16"),
             ):
                 matches = [
-                    fact for fact in endpoint_facts.get(before_obs.observation_id, ())
-                    if fact["device_id"] == device_id and fact["field_key"] == field
-                    and fact["conflict_state"] == "none"
+                    fact for fact in before.facts.get((device_id, field), ())
+                    if fact["conflict_state"] == "none"
                 ]
                 newer = [
-                    fact for fact in endpoint_facts.get(after_obs.observation_id, ())
-                    if fact["device_id"] == device_id and fact["field_key"] == field
-                    and fact["conflict_state"] == "none"
+                    fact for fact in after.facts.get((device_id, field), ())
+                    if fact["conflict_state"] == "none"
                 ]
                 for old_fact in matches:
                     matching = [
@@ -390,9 +425,9 @@ def _derive_device_comparison_items(
                         len(matches) == len(newer) == len(matching) == 1
                         and old_fact["roster_policy_digest"]
                         and old_fact["source_observed_at"]
-                        == source_time_for_sample(before_obs, old_fact["source_file"])
+                        == before.source_times.get(old_fact["source_file"])
                         and matching[0]["source_observed_at"]
-                        == source_time_for_sample(after_obs, matching[0]["source_file"])
+                        == after.source_times.get(matching[0]["source_file"])
                     ):
                         items.append(derive_discrete_item(
                             interval, kind="categorical-transition", scope="device",
@@ -402,44 +437,33 @@ def _derive_device_comparison_items(
                             after_source_time=matching[0]["source_observed_at"],
                             source_files=(old_fact["source_file"],),
                         ))
-        old_parents = [
-            link for link in before_obs.relationships
-            if link.relationship_type == "parent-child" and link.to_device_id == device_id
-        ]
-        new_parents = [
-            link for link in after_obs.relationships
-            if link.relationship_type == "parent-child" and link.to_device_id == device_id
-        ]
+        old_parents = before.parents.get(device_id, ())
+        new_parents = after.parents.get(device_id, ())
         if len(old_parents) == len(new_parents) == 1:
             old_parent, new_parent = old_parents[0], new_parents[0]
             parent_files = tuple(sorted(set(old_parent.source_files) | set(new_parent.source_files)))
             common_file = _common_newer_source(
-                before_obs, after_obs, old_parent.source_files, new_parent.source_files
+                before, after, old_parent.source_files, new_parent.source_files
             )
             items.append(derive_discrete_item(
                 interval, kind="categorical-transition", scope="device", subject_id=device_id,
                 metric="parent", before_value=old_parent.from_device_id,
                 after_value=new_parent.from_device_id,
-                before_source_time=source_time_for_sample(before_obs, common_file) if common_file else None,
-                after_source_time=source_time_for_sample(after_obs, common_file) if common_file else None,
+                before_source_time=before.source_times.get(common_file) if common_file else None,
+                after_source_time=after.source_times.get(common_file) if common_file else None,
                 source_files=parent_files,
             ))
     return items
 
 
 def _derive_metric_comparison_items(
-    before_obs: Observation,
-    after_obs: Observation,
+    before: _EndpointIndex,
+    after: _EndpointIndex,
     interval: ComparisonInterval,
     policy: ComparisonPolicy,
 ) -> list[ComparisonItem]:
     items: list[ComparisonItem] = []
-    old_metrics = {
-        (item.device_id, item.metric, item.source_file): item for item in before_obs.metrics
-    }
-    new_metrics = {
-        (item.device_id, item.metric, item.source_file): item for item in after_obs.metrics
-    }
+    old_metrics, new_metrics = before.metrics, after.metrics
     for key in sorted(old_metrics.keys() | new_metrics.keys()):
         device_id, metric_name, filename = key
         if metric_name not in METRIC_CATALOG:
@@ -463,29 +487,28 @@ def _derive_metric_comparison_items(
             after_value=new.value if new and new.unit == unit else None,
             before_denominator=old.denominator if old else None,
             after_denominator=new.denominator if new else None,
-            before_source_time=source_time_for_sample(before_obs, filename),
-            after_source_time=source_time_for_sample(after_obs, filename),
+            before_source_time=before.source_times.get(filename),
+            after_source_time=after.source_times.get(filename),
             source_files=(filename,), reset_evidence=reset, preference=preference,
         ))
     return items
 
 
 def _derive_relationship_comparison_items(
-    before_obs: Observation,
-    after_obs: Observation,
+    before: _EndpointIndex,
+    after: _EndpointIndex,
     interval: ComparisonInterval,
 ) -> list[ComparisonItem]:
     items: list[ComparisonItem] = []
-    old_links = {item.relationship_id: item for item in before_obs.relationships}
-    new_links = {item.relationship_id: item for item in after_obs.relationships}
+    old_links, new_links = before.relationships, after.relationships
     for link_id in sorted(old_links.keys() | new_links.keys()):
         old, new = old_links.get(link_id), new_links.get(link_id)
         old_files = old.source_files if old else None
         new_files = new.source_files if new else None
         source_files = tuple(sorted(set(old_files or ()) | set(new_files or ())))
-        common = _common_newer_source(before_obs, after_obs, old_files, new_files)
-        old_time = source_time_for_sample(before_obs, common) if common else None
-        new_time = source_time_for_sample(after_obs, common) if common else None
+        common = _common_newer_source(before, after, old_files, new_files)
+        old_time = before.source_times.get(common) if common else None
+        new_time = after.source_times.get(common) if common else None
         relationship_type = old.relationship_type if old else new.relationship_type
         item = derive_discrete_item(
             interval, kind="relationship-change", scope="relationship", subject_id=link_id,
@@ -506,15 +529,8 @@ def _derive_relationship_comparison_items(
         if relationship_type == "router-route":
             reporter_id = (old or new).reporter_device_id
             if not common or not reporter_id or any(
-                not any(
-                    metric.device_id == reporter_id
-                    and metric.source_file == common
-                    and metric.metric == "route64Coverage"
-                    and metric.unit == "flag"
-                    and metric.value == 1.0
-                    for metric in observation.metrics
-                )
-                for observation in (before_obs, after_obs)
+                (reporter_id, common) not in endpoint.route64_coverage
+                for endpoint in (before, after)
             ):
                 item = replace(
                     item,
@@ -556,6 +572,7 @@ def derive_comparison(
     *, source_roles: Mapping[str, str], policy: ComparisonPolicy = ComparisonPolicy(),
     roster_device_ids: frozenset[str] = frozenset(),
     endpoint_facts: Mapping[str, tuple[Mapping[str, object], ...]] | None = None,
+    static_items: tuple[ComparisonItem, ...] | None = None,
 ) -> tuple[ComparisonInterval, tuple[ComparisonItem, ...]]:
     """Derive only endpoint evidence; roster IDs select candidates, never samples."""
     before_obs, before_assessment = before
@@ -564,15 +581,25 @@ def derive_comparison(
         before, after, before_assessment_id=before_assessment.assessment_id,
         after_assessment_id=after_assessment.assessment_id, source_roles=source_roles, policy=policy,
     )
+    old_index = _prepare_endpoint(
+        before_obs, endpoint_facts.get(before_obs.observation_id, ()) if endpoint_facts else (),
+    )
+    new_index = _prepare_endpoint(
+        after_obs, endpoint_facts.get(after_obs.observation_id, ()) if endpoint_facts else (),
+    )
+    if static_items is None:
+        static_items = (
+            *_derive_metric_comparison_items(old_index, new_index, interval, policy),
+            *_derive_relationship_comparison_items(old_index, new_index, interval),
+        )
     items = [
         *_derive_device_comparison_items(
-            before_obs, after_obs, interval, roster_device_ids, endpoint_facts,
+            old_index, new_index, interval, roster_device_ids,
             (before_assessment.reproduction_context.get("unifiedHealth", {}),
              after_assessment.reproduction_context.get("unifiedHealth", {}))
             if after_assessment.sample_contract_version == "comparison-v1-unified" else None,
         ),
-        *_derive_metric_comparison_items(before_obs, after_obs, interval, policy),
-        *_derive_relationship_comparison_items(before_obs, after_obs, interval),
+        *static_items,
     ]
     return interval, tuple(sorted(items, key=lambda item: (item.scope, item.subject_id, item.kind, item.metric or "", item.item_id)))
 

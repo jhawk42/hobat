@@ -2,7 +2,9 @@
 
 import json
 import os
-from contextlib import closing
+import sqlite3
+from collections import Counter
+from contextlib import closing, contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -13,7 +15,7 @@ from td_health_migration import inventory_health_history
 from td_health_policy import load_health_policy
 from td_health_processor import HealthProcessingError, build_processing_result, process_health
 from td_health_read import TDHealthReadService
-from td_health_sqlite import SQLiteHealthStore
+from td_health_sqlite import SQLiteHealthStore, _RetainedHistory
 from td_unified_dataset import build_unified_dataset, read_original_evidence
 from test_td_unified_dataset import NETWORK, SOURCE_TIME, _entry, _save, _seed, _seed_ha
 
@@ -459,7 +461,49 @@ def expected(store):
         connection.execute("UPDATE expected_devices SET expected_since='2025-12-01T00:00:00+00:00'")
 
 
-def collection(directory, dataset_id, day, *, positive=False, variant=False):
+def roster_history_records(day, count):
+    """Supported synthetic raw evidence for opt-in dense performance runs."""
+    records = []
+    for index in range(count):
+        router = index < 32
+        record = {
+            "extAddress": f"{0x0200000000000000 + index:016x}",
+            "rloc16": f"0x{((index if router else (index - 32) % 32) << 10) | (0 if router else index):04x}",
+            "deviceLabel": f"Synthetic {index:03d}",
+            "role": ("router" if day % 2 else "leader") if router else "child",
+            "state": "attached",
+            "leaderData": {"partitionId": 1234 + day % 2},
+            "mleCounters": {
+                "parentChanges": day % 4, "partitionIdChanges": day,
+                "betterPartitionAttachAttempts": day + 1,
+                "totalParentPartitionChangesCount": day * 2,
+            },
+            "timeStatistics": {"routerPct": 80.0 + day, "detachedDisabledPct": 0.0},
+            "macCounters": {
+                "ifTotalPkts": 1000 + day, "ifTotalErrorsTotalPktsRatio": 0.01,
+                "ifTotalDiscardsTotalPktsRatio": 0.0,
+            },
+        }
+        if router:
+            record["routerId"] = index
+            record["routerNeighbors"] = [{
+                "extAddress": f"{0x0200000000000000 + (index + step) % 32:016x}",
+                "linkQualityIn": step % 4, "linkQualityOut": 3,
+                "averageRssi": -50 - step, "lastRssi": -51 - step,
+            } for step in range(1, 9)]
+            record["childTable"] = [{
+                "extAddress": f"{0x0200000000000000 + child:016x}",
+                "linkQualityIn": 0, "linkQualityOut": 3,
+                "queuedMessageCount": day % 2,
+            } for child in range(32 + index, count, 32)]
+            record["route64"] = {"id_sequence": day, "route_data": [{
+                "route_id": f"0x{(index + step) % 32:02x}", "route_cost": step,
+            } for step in range(1, 5)]}
+        records.append(record)
+    return records
+
+
+def collection(directory, dataset_id, day, *, positive=False, variant=False, devices=1):
     _seed(directory, dataset_id)
     time = f"2026-01-{day:02d}T00:00:00+00:00"
     epoch = int(datetime.fromisoformat(time).timestamp() * 1_000_000_000)
@@ -469,6 +513,13 @@ def collection(directory, dataset_id, day, *, positive=False, variant=False):
             continue
         payload = json.loads(path.read_text())
         if item["role"] == "records":
+            if devices > 1 and dataset_id != "mdns_unified":
+                rows = roster_history_records(day, devices)
+                if "diagnostics-fetch-all" not in item["file"] and "networkdiag-fetch-all" not in item["file"]:
+                    for record in rows:
+                        for field in ("mleCounters", "timeStatistics", "macCounters"):
+                            record.pop(field)
+                payload = {"data": rows} if isinstance(payload, dict) and "data" in payload else rows
             records = payload["data"] if isinstance(payload, dict) and "data" in payload else payload
             for record in records:
                 record["sourceObservedAt"] = time
@@ -487,6 +538,723 @@ def collection(directory, dataset_id, day, *, positive=False, variant=False):
 def missing_finding(result):
     return next(f for f in result.assessment.findings if MISSING in f.device_ids
                 and f.rule_id in {"device.missing", "device.offline"})
+
+
+def roster_history_seed(directory, *, days=3, datasets=None, devices=1):
+    """Synthetic cross-source history shared by parity and operation-count checks."""
+    datasets = datasets or (
+        "ha_matter_ws_unified", "multi_source_otbr_topology_mdns",
+        "multi_source_unified", "otbr_cli_diagnostics_fetch", "otbr_cli_topology",
+        "otbr_cli_topology_mdns", "otbr_cli_unified",
+        "otbr_restapi_devices_diagnostics_fetch", "otbr_restapi_topology",
+        "otbr_restapi_topology_mdns", "otbr_restapi_unified",
+    )
+    store = SQLiteHealthStore(directory / "hobat_v1.db")
+    expected(store)
+    _save(directory, "td-static-extaddr-device-label.json", [])
+    results = {}
+    for day in range(1, days + 1):
+        for source in ("otbr_cli_unified", "otbr_restapi_unified", "mdns_unified"):
+            collection(directory, source, day, devices=devices)
+        entry = _seed_ha(directory)
+        time = f"2026-01-{day:02d}T00:00:00+00:00"
+        for item in entry["unified"]["inputs"]:
+            path = directory / item["file"]
+            if path.exists():
+                payload = path.read_text().replace(SOURCE_TIME, time).replace(
+                    "1767225600000", str(int(datetime.fromisoformat(time).timestamp() * 1000)),
+                )
+                _save(directory, item["file"], json.loads(payload))
+        build_unified_dataset(directory, "ha_matter_ws_unified")
+        build_unified_dataset(directory, "multi_source_unified")
+        for dataset_id in datasets:
+            results[dataset_id] = process(directory, dataset_id, store)
+    return store, results
+
+
+def test_prepared_comparison_matches_full_items_and_raw_columns(tmp_path, monkeypatch):
+    import td_health_comparison as comparison
+    from td_health_sqlite import _encode_comparison_items
+
+    store, _ = roster_history_seed(tmp_path, datasets=("otbr_cli_unified",), devices=2)
+    with closing(store._connect()) as connection:
+        pair = connection.execute(
+            "SELECT before_assessment_id, after_assessment_id FROM comparisons "
+            "ORDER BY after_observed_at DESC LIMIT 1",
+        ).fetchone()
+        endpoints = [store._endpoint(connection, assessment_id) for assessment_id in pair]
+        reference = store._derive_pair(connection, *endpoints)
+        history = _RetainedHistory(connection, NETWORK)
+        cached = [store._endpoint(connection, assessment_id, history=history) for assessment_id in pair]
+
+        def unexpected(*args, **kwargs):
+            pytest.fail("A prepared hit repeated static comparison derivation")
+
+        monkeypatch.setattr(comparison, "_derive_metric_comparison_items", unexpected)
+        monkeypatch.setattr(comparison, "_derive_relationship_comparison_items", unexpected)
+        actual = store._derive_pair(connection, *cached, history=history)
+        assert actual == reference
+        assert list(_encode_comparison_items(actual[0].comparison_id, actual[1])) == list(
+            _encode_comparison_items(reference[0].comparison_id, reference[1])
+        )
+        assert history.preparation.stats["pair-hit"] == 1
+        assert history.preparation.stats["observation-hit"] >= 2
+        assert history.preparation.stats["assessment-validated"] >= 2
+
+
+@pytest.mark.parametrize("damage", ["payload", "network", "native-metric", "native-fact", "context"])
+def test_preparation_fails_closed_without_swallowing_corruption(tmp_path, damage):
+    from td_health_preparation import PreparationCorruptionError
+
+    store, results = roster_history_seed(tmp_path, days=1, datasets=("otbr_cli_unified",))
+    result = results["otbr_cli_unified"]
+    with closing(store._connect()) as connection, connection:
+        if damage == "payload":
+            connection.execute("UPDATE health_observation_preparation SET payload=x'00'")
+        elif damage == "network":
+            connection.execute("UPDATE health_observation_preparation SET network_id='wrong-network'")
+        elif damage == "native-metric":
+            connection.execute(
+                """INSERT OR REPLACE INTO metric_samples
+                   (observation_id, device_id, metric, value, unit, source_file)
+                   VALUES (?,?,?,?,?,?)""",
+                (result.observation.observation_id, result.observation.devices[0].device_id,
+                 "parentChanges", 1.0, "count", result.observation.sources[0].filename),
+            )
+        elif damage == "native-fact":
+            connection.execute("UPDATE device_fact_samples SET value_json='\"changed\"'")
+        else:
+            context = json.loads(connection.execute(
+                "SELECT reproduction_context_json FROM assessments"
+            ).fetchone()[0])
+            context["unifiedHealth"]["originalEvidenceFingerprint"] = "invalid"
+            connection.execute("UPDATE assessments SET reproduction_context_json=?", (json.dumps(context),))
+        history = _RetainedHistory(connection, NETWORK)
+        with pytest.raises(sqlite3.DatabaseError):
+            store._endpoint(connection, result.assessment.assessment_id, history=history)
+        if damage != "context":
+            witness = result.assessment.reproduction_context["unifiedHealth"]["absenceWitness"]
+            with pytest.raises(PreparationCorruptionError):
+                store._unified_absences(
+                    connection, network_id=NETWORK, witness=witness,
+                    expected_records=(), history=_RetainedHistory(connection, NETWORK),
+                )
+
+
+@pytest.mark.parametrize("state", ["missing", "stale"])
+def test_preparation_misses_are_query_only_and_explicit(tmp_path, state):
+    store, results = roster_history_seed(tmp_path, days=1, datasets=("otbr_cli_unified",))
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            "DELETE FROM health_observation_preparation" if state == "missing"
+            else "UPDATE health_observation_preparation SET preparation_version='obsolete'"
+        )
+    readonly = SQLiteHealthStore(store.path, read_only=True)
+    with closing(readonly._connect()) as connection:
+        before = connection.total_changes
+        history = _RetainedHistory(connection, NETWORK)
+        actual = store._endpoint(
+            connection, results["otbr_cli_unified"].assessment.assessment_id, history=history,
+        )
+        assert actual[0] == results["otbr_cli_unified"].observation
+        assert history.preparation.stats[f"observation-{state}"] == 1
+        assert history.preparation.stats["observation-reconstructed"] == 1
+        assert connection.total_changes == before
+
+
+def test_preparation_backfill_is_bounded_resumable_and_read_only_in_preview(tmp_path):
+    store, _ = roster_history_seed(tmp_path, days=3, datasets=("otbr_cli_unified",))
+    with closing(store._connect()) as connection, connection:
+        connection.execute("DELETE FROM health_observation_preparation")
+        connection.execute("DELETE FROM health_pair_preparation")
+        before = tuple(connection.iterdump())
+    report = SQLiteHealthStore(store.path, read_only=True).prepare_history(
+        network_id=NETWORK, limit=2, dry_run=True,
+    )
+    with closing(store._connect()) as connection:
+        assert tuple(connection.iterdump()) == before
+    assert report["dryRun"] and not report["counters"]
+    cursor = None
+    reports = []
+    for _ in range(10):
+        report = store.prepare_history(network_id=NETWORK, limit=2, max_pairs=1, cursor=cursor)
+        assert report["counters"].get("observation-published", 0) <= 2
+        assert report["counters"].get("pair-published", 0) <= 1
+        assert report["counters"].get("observation-hit", 0) + report["counters"].get(
+            "observation-reconstructed", 0
+        ) <= 2
+        reports.append(report)
+        cursor = report["nextCursor"]
+        if cursor is None:
+            break
+    assert cursor is None
+    assert sum(report["counters"].get("observation-published", 0) for report in reports) == 3
+    assert sum(report["counters"].get("pair-published", 0) for report in reports) == 2
+    with pytest.raises(ValueError, match="limit at least 2"):
+        cursor = None
+        for _ in range(5):
+            cursor = store.prepare_history(network_id=NETWORK, limit=1, cursor=cursor)["nextCursor"]
+    report = store.prepare_history(network_id=NETWORK, limit=1)
+    store.upsert_expected_device(NETWORK, MISSING, "changed", "retired")
+    with pytest.raises(ValueError, match="stale preparation cursor"):
+        store.prepare_history(network_id=NETWORK, limit=1, cursor=report["nextCursor"])
+    with pytest.raises(ValueError, match="cursor"):
+        store.prepare_history(network_id=NETWORK, cursor="not-a-cursor")
+
+
+def test_preparation_purge_invalidates_samples_and_rolls_back_preview(tmp_path):
+    store, results = roster_history_seed(tmp_path, datasets=("otbr_cli_unified",))
+    device_id = results["otbr_cli_unified"].observation.devices[0].device_id
+    with closing(store._connect()) as connection:
+        before = tuple(connection.iterdump())
+    store.purge_device(device_id, network_id=NETWORK, dry_run=True)
+    with closing(store._connect()) as connection:
+        assert tuple(connection.iterdump()) == before
+    store.purge_device(device_id, network_id=NETWORK)
+    with closing(store._connect()) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM health_observation_preparation").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM health_pair_preparation").fetchone()[0] == 0
+        assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+
+
+def test_preparation_caps_and_observation_cascade(tmp_path, monkeypatch):
+    import td_health_preparation as preparation
+
+    store, _ = roster_history_seed(tmp_path, datasets=("otbr_cli_unified",))
+    with closing(store._connect()) as connection, connection:
+        monkeypatch.setattr(preparation, "MAX_RECORDS", 1)
+        cache = preparation.Preparation(connection, NETWORK)
+        cache.trim()
+        assert connection.execute("SELECT COUNT(*) FROM health_observation_preparation").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM health_pair_preparation").fetchone()[0] == 1
+        monkeypatch.setattr(preparation, "MAX_PAYLOAD_BYTES", 1)
+        cache.trim()
+        assert cache.stats["budget-eviction"] >= 2
+        assert connection.execute("SELECT COUNT(*) FROM health_observation_preparation").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM health_pair_preparation").fetchone()[0] == 0
+    monkeypatch.undo()
+    store.prepare_history(network_id=NETWORK)
+    with closing(store._connect()) as connection, connection:
+        connection.execute("DELETE FROM observations")
+        assert connection.execute("SELECT COUNT(*) FROM health_observation_preparation").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM health_pair_preparation").fetchone()[0] == 0
+
+
+def test_prepared_roster_failure_after_item_prefix_rolls_back_every_write(tmp_path, monkeypatch):
+    import td_health_sqlite
+
+    store, _ = roster_history_seed(tmp_path, datasets=("otbr_cli_unified",), devices=2)
+    with closing(store._connect()) as connection:
+        before = tuple(connection.iterdump())
+    encode = td_health_sqlite._encode_comparison_items
+
+    def fail_after_prefix(comparison_id, items):
+        iterator = encode(comparison_id, items)
+        yield next(iterator)
+        raise RuntimeError("injected after nonempty comparison prefix")
+
+    monkeypatch.setattr(td_health_sqlite, "_encode_comparison_items", fail_after_prefix)
+    with pytest.raises(RuntimeError, match="nonempty comparison prefix"):
+        store.upsert_expected_device(NETWORK, MISSING, "retired", "retired")
+    assert store.preparation_stats["pair-hit"] >= 1
+    with closing(store._connect()) as connection:
+        assert tuple(connection.iterdump()) == before
+    monkeypatch.undo()
+    store.upsert_expected_device(NETWORK, MISSING, "retired", "retired")
+    assert store.preparation_stats["pair-hit"] >= 1
+
+
+def test_preparation_skips_orphan_pairs_and_detects_changed_pair_inventory(tmp_path):
+    store, _ = roster_history_seed(tmp_path, datasets=("otbr_cli_unified",))
+    report = store.prepare_history(network_id=NETWORK, limit=1)
+    with closing(store._connect()) as connection:
+        ids = connection.execute(
+            """SELECT a.assessment_id FROM assessments a JOIN observations o USING(observation_id)
+               ORDER BY o.observed_at"""
+        ).fetchall()
+    assert store.compare_assessments(ids[0][0], ids[-1][0])[2]
+    with pytest.raises(ValueError, match="stale preparation cursor"):
+        store.prepare_history(network_id=NETWORK, cursor=report["nextCursor"])
+    with closing(store._connect()) as connection, connection:
+        connection.execute("DELETE FROM observations WHERE observed_at LIKE '2026-01-01%'")
+    report = store.prepare_history(network_id=NETWORK)
+    assert report["ineligiblePairs"] == 2
+    assert report["nextCursor"] is None
+
+
+def test_roster_reassessment_only_inserts_assessments_not_sample_history(tmp_path):
+    store, results = roster_history_seed(tmp_path)
+    with closing(store._connect()) as connection:
+        before = {
+            table: [tuple(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+            for table in ("observations", "observation_sources", "device_samples",
+                          "relationship_samples", "metric_samples")
+        }
+        assessments = connection.execute("SELECT COUNT(*) FROM assessments").fetchone()[0]
+        comparisons = connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0]
+    store.upsert_expected_device(NETWORK, MISSING, "changed", "expected")
+    with closing(store._connect()) as connection:
+        assert before == {
+            table: [tuple(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+            for table in before
+        }
+        assert connection.execute("SELECT COUNT(*) FROM assessments").fetchone()[0] == assessments + len(results)
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] > comparisons
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_roster_reassessment_matches_full_evaluator_for_every_current_dataset(
+    tmp_path, monkeypatch, reverse,
+):
+    import td_health_evaluator as evaluator
+
+    datasets = (
+        "ha_matter_ws_unified", "multi_source_otbr_topology_mdns",
+        "multi_source_unified", "otbr_cli_diagnostics_fetch", "otbr_cli_topology",
+        "otbr_cli_topology_mdns", "otbr_cli_unified",
+        "otbr_restapi_devices_diagnostics_fetch", "otbr_restapi_topology",
+        "otbr_restapi_topology_mdns", "otbr_restapi_unified",
+    )
+    store, _ = roster_history_seed(
+        tmp_path, datasets=tuple(reversed(datasets)) if reverse else datasets,
+    )
+    evaluate = evaluator.evaluate_observation
+    checked = []
+
+    def oracle(observation, policy, **kwargs):
+        retained = kwargs["retained_assessment"]
+        full = evaluate(observation, policy, **{**kwargs, "retained_assessment": None})
+        findings = tuple(sorted(
+            list(retained.findings) + [
+                finding for finding in full.findings
+                if finding.rule_id in evaluator.ROSTER_REASSESSMENT_RULE_IDS
+            ],
+            key=lambda finding: (-int(finding.rank), finding.finding_id),
+        ))
+        status, confidence = evaluator.aggregate_assessment_state(
+            findings, completeness=observation.completeness,
+            device_count=len(observation.devices),
+            observed_pillars=full.coverage["observedPillars"],
+            evaluation_inputs=kwargs["evaluation_inputs"],
+        )
+        expected = replace(full, findings=findings, status=status, confidence=confidence)
+        actual = evaluate(observation, policy, **kwargs)
+        assert actual == expected
+        checked.append(observation.dataset_id)
+        return actual
+
+    monkeypatch.setattr(evaluator, "evaluate_observation", oracle)
+    for state in ("retired", "expected"):
+        store.upsert_expected_device(NETWORK, MISSING, f"oracle-{state}", state)
+    assert Counter(checked) == Counter({dataset_id: 2 for dataset_id in datasets})
+
+
+def _shared_history_scan(statement):
+    sql = " ".join(statement.lower().split())
+    if not sql.startswith("select ") or "where o.network_id=" not in sql:
+        return None
+    if "and a.assessment_id=" in sql:
+        return None
+    if "from observations o join assessments a using(observation_id)" in sql:
+        return "inventory"
+    for table in ("observation_sources", "device_samples", "relationship_samples", "metric_samples"):
+        if f"from {table} s join " in sql:
+            return table
+    return None
+
+
+@contextmanager
+def _history_trace(connection):
+    counts = Counter()
+    statements = []
+
+    def trace(statement):
+        statements.append(statement)
+        kind = _shared_history_scan(statement)
+        if kind:
+            counts[kind] += 1
+
+    connection.set_trace_callback(trace)
+    try:
+        yield counts, statements
+    finally:
+        connection.set_trace_callback(None)
+
+
+def test_roster_history_trace_classifier():
+    assert _shared_history_scan(
+        "SELECT o.*, a.* FROM observations o JOIN assessments a USING(observation_id) WHERE o.network_id='n'"
+    ) == "inventory"
+    for table in ("observation_sources", "device_samples", "relationship_samples", "metric_samples"):
+        assert _shared_history_scan(
+            f"SELECT s.* FROM {table} s JOIN observations o USING(observation_id) WHERE o.network_id='n'"
+        ) == table
+    for sql in (
+        "SELECT * FROM device_samples WHERE observation_id='o'",
+        "SELECT o.*, a.* FROM observations o JOIN assessments a USING(observation_id) "
+        "WHERE o.network_id='n' AND a.assessment_id='a'",
+        "SELECT * FROM current_assessments WHERE network_id='n'",
+        "UPDATE assessments SET status='good'",
+    ):
+        assert _shared_history_scan(sql) is None
+
+
+def _retained_row(connection, assessment_id):
+    return connection.execute(
+        "SELECT o.*, a.* FROM observations o JOIN assessments a USING(observation_id) WHERE a.assessment_id=?",
+        (assessment_id,),
+    ).fetchone()
+
+
+def test_roster_history_reuses_bodies_and_bounds_shared_queries(tmp_path, monkeypatch):
+    store, results = roster_history_seed(tmp_path)
+    store.upsert_expected_device(NETWORK, MISSING, "duplicate assessments", "expected")
+    with closing(store._connect()) as connection, connection:
+        connection.execute("DELETE FROM health_observation_preparation")
+        connection.execute("DELETE FROM health_pair_preparation")
+    builds, validations, owners = Counter(), Counter(), []
+    reconstruct = store._reconstruct_retained_samples
+    validate = store._validate_retained_assessment_context
+
+    def build(connection, row, dataset, *, history=None):
+        assert history is not None
+        if not owners:
+            owners.append(history)
+        assert history is owners[0]
+        builds[(row["observation_id"], row["sample_contract_version"], history.contract_slot(dataset))] += 1
+        return reconstruct(connection, row, dataset, history=history)
+
+    def check(row, dataset, context, observation, **kwargs):
+        validations[row["assessment_id"]] += 1
+        return validate(row, dataset, context, observation, **kwargs)
+
+    monkeypatch.setattr(SQLiteHealthStore, "_reconstruct_retained_samples", staticmethod(build))
+    monkeypatch.setattr(SQLiteHealthStore, "_validate_retained_assessment_context", staticmethod(check))
+    with closing(store._connect()) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "UPDATE network_roster_revisions SET revision=revision+1 WHERE network_id=?", (NETWORK,),
+        )
+        with _history_trace(connection) as (counts, statements):
+            revisions = store._reassess_network(connection, NETWORK)
+        assert len(revisions) == len(results)
+        assert set(builds.values()) == {1}
+        assert len(builds) < sum(validations.values())
+        assert set(validations) >= {item["assessmentId"] for item in revisions}
+        assert counts == Counter({
+            "inventory": 1, "observation_sources": 1, "device_samples": 1,
+            "relationship_samples": 1, "metric_samples": 1,
+        })
+        registrations = [s for s in statements if "WHERE o.network_id=" in s and "AND a.assessment_id=" in s]
+        assert len(registrations) == len(results) - 1  # HA's null witness is still lazy.
+
+
+@pytest.mark.parametrize("file_first", [False, True])
+@pytest.mark.parametrize("prepared_first", [False, True])
+def test_roster_history_keeps_contract_admission_and_complete_identity_separate(
+    tmp_path, monkeypatch, file_first, prepared_first,
+):
+    from td_health_manifest_history import ManifestHistoryResolver
+
+    store, results = roster_history_seed(
+        tmp_path, days=1, datasets=("otbr_cli_unified", "otbr_restapi_unified"),
+    )
+    result = results["otbr_cli_unified"]
+    dataset = load_health_manifest().dataset("otbr_cli_unified")
+    historical = replace(dataset, health_profile=replace(dataset.health_profile, topology_authority=False))
+    matching = ManifestHistoryResolver.matching_candidates
+
+    def candidates(resolver, *args):
+        admitted = matching(resolver, *args)
+        if args == (dataset.dataset_id, dataset.datasource_id, dataset.health_profile.profile_id,
+                    "comparison-v1-unified"):
+            return (*admitted, replace(admitted[0], dataset=historical))
+        return admitted
+
+    monkeypatch.setattr(ManifestHistoryResolver, "matching_candidates", candidates)
+    with closing(store._connect()) as connection, connection:
+        current = _retained_row(connection, result.assessment.assessment_id)
+        context = json.loads(current["reproduction_context_json"])
+        context["healthProfile"]["topologyAuthority"] = False
+        sibling = replace(
+            result.assessment, assessment_id="assessment:historical-sibling",
+            policy_digest="synthetic-historical-policy", reproduction_context=context,
+        )
+        assert store._insert_assessment(connection, sibling)
+        row = _retained_row(connection, sibling.assessment_id)
+        history = _RetainedHistory(connection, NETWORK)
+        if prepared_first:
+            assert store._retained_observation(
+                connection, current, source_dataset=dataset, history=history,
+            ) == result.observation
+            assert current["observation_id"] in history._released_samples["device_samples"]
+
+        def admitted():
+            return store._retained_observation(connection, row, history=history)
+
+        def rejected():
+            with pytest.raises(sqlite3.DatabaseError, match="recipe/profile"):
+                store._retained_observation(connection, row, source_dataset=dataset, history=history)
+
+        if file_first:
+            rejected()
+            admitted()
+        else:
+            admitted()
+            rejected()
+        assert store._retained_observation(
+            connection, current, source_dataset=dataset, history=history,
+        ) == result.observation
+        assert history.contracts == ([dataset, historical] if prepared_first else [historical, dataset])
+        assert len(history.bodies) == 2
+        assert store._retained_observation(connection, row, history=history) == result.observation
+        for dataset_id in ("otbr_cli_unified", "otbr_restapi_unified"):
+            witness = results[dataset_id].assessment.reproduction_context["unifiedHealth"]["absenceWitness"]
+            for file_mode in (True, False):
+                args = dict(network_id=NETWORK, witness=witness, expected_records=(), file_mode=file_mode)
+                assert store._unified_absences(connection, **args, history=history) == (
+                    store._unified_absences(connection, **args)
+                )
+
+
+def test_roster_history_admissions_decode_once_and_prepare_once(tmp_path, monkeypatch):
+    import td_health_unified
+
+    store, results = roster_history_seed(tmp_path, days=2, datasets=("otbr_cli_unified",))
+    dataset = load_health_manifest().dataset("otbr_cli_unified")
+    loads, prepares = Counter(), []
+    decode, prepare = json.loads, td_health_unified._prepare_contract
+
+    def counted_decode(raw, *args, **kwargs):
+        if isinstance(raw, str) and '"unifiedHealth"' in raw:
+            loads[raw] += 1
+        return decode(raw, *args, **kwargs)
+
+    def counted_prepare(contract):
+        prepares.append(contract)
+        return prepare(contract)
+
+    with closing(store._connect()) as connection:
+        rows = connection.execute(
+            "SELECT o.*, a.* FROM observations o JOIN assessments a USING(observation_id)",
+        ).fetchall()
+        history = _RetainedHistory(connection, NETWORK)
+        monkeypatch.setattr(json, "loads", counted_decode)
+        monkeypatch.setattr(td_health_unified, "_prepare_contract", counted_prepare)
+        for _ in range(3):
+            for row in rows:
+                for selected in (None, dataset, replace(dataset)):
+                    store._retained_observation(
+                        connection, row, source_dataset=selected, history=history,
+                    )
+        witness = results["otbr_cli_unified"].assessment.reproduction_context["unifiedHealth"]["absenceWitness"]
+        for domain in ("otbr-cli", "otbr-restapi"):
+            for file_mode in (True, False):
+                store._qualified_absence_groups(history, domain=domain, file_mode=file_mode)
+        assert sum(loads.values()) == 2 * len(rows)
+        assert prepares == [dataset]
+        assert len(history.contracts) == len(history.prepared_contracts) == 1
+        assert all(len(entries) == 2 for entries in history.admissions.values())
+        assert all(isinstance(entry.context["unifiedHealth"]["positiveDeviceIds"], list)
+                   for entries in history.admissions.values() for entry in entries)
+        assert set(history.admissions) == {row["assessment_id"] for row in rows}
+
+
+def test_roster_history_resolves_each_full_contract_once_per_invocation(tmp_path, monkeypatch):
+    from td_health_manifest_history import ManifestHistoryResolver
+
+    store, _ = roster_history_seed(
+        tmp_path, days=2, datasets=("otbr_cli_diagnostics_fetch", "otbr_cli_unified"),
+    )
+    matching = ManifestHistoryResolver.matching_candidates
+    calls = Counter()
+
+    def counted(resolver, *args):
+        calls[args] += 1
+        return matching(resolver, *args)
+
+    monkeypatch.setattr(ManifestHistoryResolver, "matching_candidates", counted)
+    with closing(store._connect()) as connection:
+        for invocation in (1, 2):
+            history = _RetainedHistory(connection, NETWORK)
+            for _ in range(2):
+                for domain in ("otbr-cli", "otbr-restapi"):
+                    for file_mode in (False, True):
+                        store._qualified_absence_groups(history, domain=domain, file_mode=file_mode)
+            assert calls and set(calls.values()) == {invocation}
+            assert history.preparation.stats["assessment-validated"] >= len(history.rows)
+
+
+def test_unified_prepared_contract_binding_and_mapping_protocol(tmp_path):
+    from collections import UserDict
+    from types import MappingProxyType
+    from td_health_unified import _prepare_contract, digest, freeze, plain, validate_context
+
+    store, results = roster_history_seed(tmp_path, days=1, datasets=("otbr_cli_unified",))
+    result = results["otbr_cli_unified"]
+    dataset = load_health_manifest().dataset("otbr_cli_unified")
+    prepared = _prepare_contract(dataset)
+    context = result.assessment.reproduction_context
+    assert validate_context(context, dataset, result.observation, prepared=prepared) == (
+        validate_context(context, dataset, result.observation)
+    )
+    different = replace(dataset, health_profile=replace(dataset.health_profile, topology_authority=False))
+    with pytest.raises(ValueError, match="Prepared Unified contract"):
+        validate_context(context, different, result.observation, prepared=prepared)
+    value = {"outer": [{"inner": [False, 0, None, "escaped\ntext"]}]}
+    for mapping in (value, MappingProxyType(value), UserDict(value), freeze(value)):
+        assert plain(mapping) == value
+        assert digest(mapping) == digest(value)
+        assert plain(freeze(mapping)) == value
+
+
+@pytest.mark.parametrize("field", ["recipe", "originalEvidenceFingerprint", "effectiveCoverage",
+                                  "coverage", "restDiagnostics", "absenceWitness"])
+def test_roster_history_does_not_hide_invalid_assessment_context(tmp_path, field):
+    store, results = roster_history_seed(tmp_path, days=1, datasets=("otbr_restapi_unified",))
+    result = results["otbr_restapi_unified"]
+    with closing(store._connect()) as connection, connection:
+        good = _retained_row(connection, result.assessment.assessment_id)
+        context = json.loads(good["reproduction_context_json"])
+        coverage = json.loads(good["coverage_json"])
+        if field == "coverage":
+            coverage["restChildTableCoverage"] = {"invalid": True}
+        elif field == "restDiagnostics":
+            context["restDiagnostics"] = {"invalid": True}
+        else:
+            context["unifiedHealth"][field] = {}
+        sibling = replace(
+            result.assessment, assessment_id="assessment:invalid-sibling",
+            policy_digest="synthetic-sibling-policy",
+            coverage=coverage, reproduction_context=context,
+        )
+        assert store._insert_assessment(connection, sibling)
+        bad = _retained_row(connection, sibling.assessment_id)
+        history = _RetainedHistory(connection, NETWORK)
+        assert store._retained_observation(connection, good, history=history) == result.observation
+        with pytest.raises((sqlite3.DatabaseError, ValueError)):
+            store._retained_observation(connection, bad, history=history)
+        assert sibling.assessment_id not in history.admissions
+        assert all(key[0] != sibling.assessment_id for key in history.validated_rows)
+        args = dict(network_id=NETWORK,
+                    witness=result.assessment.reproduction_context["unifiedHealth"]["absenceWitness"],
+                    expected_records=())
+        assert store._unified_absences(connection, **args, history=history) == store._unified_absences(connection, **args)
+        connection.execute(
+            "UPDATE current_assessments SET assessment_id=? WHERE dataset_id='otbr_restapi_unified'",
+            (sibling.assessment_id,),
+        )
+        with pytest.raises((sqlite3.DatabaseError, ValueError)):
+            store._reassess_network(connection, NETWORK)
+
+
+def test_roster_history_registers_before_nested_comparison_and_advances_each_group(tmp_path, monkeypatch):
+    store, results = roster_history_seed(tmp_path, days=3)
+    derive, compare = store._derive_pair, store._auto_compare
+    nested, owners = [], []
+
+    def assert_visible(connection, *, history):
+        if not owners:
+            owners.append(history)
+        assert history is owners[0]
+        for dataset_id in ("otbr_cli_unified", "otbr_restapi_unified"):
+            witness = results[dataset_id].assessment.reproduction_context["unifiedHealth"]["absenceWitness"]
+            for file_mode in (True, False):
+                args = dict(network_id=NETWORK, witness=witness, expected_records=(), file_mode=file_mode)
+                assert store._unified_absences(connection, **args, history=history) == (
+                    store._unified_absences(connection, **args)
+                )
+                assert history.groups[(witness["domain"], file_mode)].offset == len(history.rows)
+
+    def auto(connection, observation, assessment, *, history=None, **kwargs):
+        assert history is not None
+        assert_visible(connection, history=history)
+        assert assessment.assessment_id in {row["assessment_id"] for row in history.rows}
+        return compare(connection, observation, assessment, history=history, **kwargs)
+
+    def pair(connection, before, after, *, history=None):
+        assert history is not None
+        assert_visible(connection, history=history)
+        nested.append(after[1].assessment_id)
+        return derive(connection, before, after, history=history)
+
+    monkeypatch.setattr(SQLiteHealthStore, "_auto_compare", staticmethod(auto))
+    monkeypatch.setattr(SQLiteHealthStore, "_derive_pair", staticmethod(pair))
+    store.upsert_expected_device(NETWORK, MISSING, "new revision", "expected")
+    assert nested
+    assert len({row["assessment_id"] for row in owners[0].rows}) == len(owners[0].rows)
+
+
+def test_roster_history_no_witness_is_lazy_and_query_only(tmp_path):
+    store, results = roster_history_seed(tmp_path, days=1, datasets=("otbr_cli_unified",))
+    with closing(SQLiteHealthStore(store.path, read_only=True)._connect()) as connection:
+        history = _RetainedHistory(connection, NETWORK)
+        with _history_trace(connection) as (counts, statements):
+            assert store._unified_absences(
+                connection, network_id=NETWORK, witness=None, expected_records=(), history=history,
+            ) == ({}, False, frozenset())
+        assert not statements and not counts
+        witness = results["otbr_cli_unified"].assessment.reproduction_context["unifiedHealth"]["absenceWitness"]
+        args = dict(network_id=NETWORK, witness=witness, expected_records=())
+        assert store._unified_absences(connection, **args, history=history) == store._unified_absences(connection, **args)
+        other = _RetainedHistory(connection, "extpan:ffffffffffffffff")
+        assert not other.rows
+        assert all(not other.samples(table, results["otbr_cli_unified"].observation.observation_id)
+                   for table in ("observation_sources", "device_samples", "relationship_samples", "metric_samples"))
+
+
+def test_roster_history_is_local_to_network_and_consecutive_cli_actions(tmp_path, monkeypatch):
+    import test_td_unified_dataset as fixtures
+
+    store, _ = roster_history_seed(tmp_path, days=1, datasets=("otbr_cli_unified",))
+    other_network = "extpan:ffffffffffffffff"
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    save = fixtures._save
+
+    def scoped_save(directory, filename, payload, **kwargs):
+        return save(directory, filename, payload, scope=other_network)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(fixtures, "NETWORK", other_network)
+        scoped.setattr(fixtures, "_save", scoped_save)
+        seed(other_dir, "otbr_cli_unified")
+        other_result = process(other_dir, "otbr_cli_unified", store)
+    assert other_result.observation.network_id == other_network
+
+    def other_rows():
+        with closing(store._connect()) as connection:
+            result = {}
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+                table = row["name"]
+                columns = {item["name"] for item in connection.execute(f'PRAGMA table_info("{table}")')}
+                column, value = (
+                    ("network_id", other_network) if "network_id" in columns
+                    else ("observation_id", other_result.observation.observation_id)
+                )
+                if column in columns:
+                    result[table] = sorted(
+                        (tuple(item) for item in connection.execute(
+                            f'SELECT * FROM "{table}" WHERE {column}=?', (value,),
+                        )), key=repr,
+                    )
+            return result
+
+    before = other_rows()
+    owners = []
+    initialize = _RetainedHistory.__init__
+
+    def capture(history, connection, network_id):
+        initialize(history, connection, network_id)
+        owners.append(history)
+
+    monkeypatch.setattr(_RetainedHistory, "__init__", capture)
+    store.upsert_expected_device(NETWORK, MISSING, "first changed action", "expected")
+    store.upsert_expected_device(NETWORK, MISSING, "second changed action", "expected")
+    assert len(owners) == 2 and owners[0] is not owners[1]
+    assert owners[0].bodies is not owners[1].bodies
+    assert all(row["network_id"] == NETWORK for owner in owners for row in owner.rows)
+    assert other_rows() == before
 
 
 def test_original_and_unified_same_collection_count_once_in_current_and_reassessment(tmp_path):

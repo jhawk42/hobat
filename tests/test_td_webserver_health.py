@@ -54,6 +54,120 @@ def _chunked_content(*chunks):
 
 
 class HealthApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_roster_patch_batch_header_and_prefix_failure_roll_back_every_table(self):
+        import td_health_sqlite
+        from test_td_health_unified import NETWORK, roster_history_seed
+
+        for prefix in (0, 1):
+            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as directory:
+                data_dir = Path(directory)
+                store, results = roster_history_seed(data_dir, days=2)
+                payload = {
+                    "action": "enroll", "requestId": "73b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+                    "expectedRevision": 0,
+                    "contextAssessmentId": results["otbr_cli_unified"].assessment.assessment_id,
+                }
+
+                def request():
+                    return _patch_request(
+                        data_dir, network=NETWORK, device_id="extaddr:0011223344556677",
+                        payload=payload,
+                    )
+
+                def snapshot():
+                    with sqlite3.connect(store.path) as connection:
+                        return {
+                            table: sorted(connection.execute(f'SELECT * FROM "{table}"').fetchall(), key=repr)
+                            for (table,) in connection.execute(
+                                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+                            ).fetchall()
+                        }
+
+                before = snapshot()
+                encode = td_health_sqlite._encode_comparison_items
+                written = []
+
+                def failing_encode(comparison_id, items):
+                    if prefix == 0:
+                        raise sqlite3.DatabaseError("injected after comparison header")
+                    for row in encode(comparison_id, items):
+                        yield row
+                        written.append(row)
+                        raise sqlite3.DatabaseError("injected after nonempty item prefix")
+
+                with patch.object(td_health_sqlite, "_encode_comparison_items", failing_encode):
+                    with self.assertRaises(aiohttp.web.HTTPInternalServerError):
+                        await td_webserver.handle_health_roster_device_patch_api(request())
+                self.assertEqual(len(written), prefix)
+                self.assertEqual(snapshot(), before)
+                response = await td_webserver.handle_health_roster_device_patch_api(request())
+                self.assertEqual(response.status, 201)
+                committed = snapshot()
+                with patch("td_health_sqlite._RetainedHistory",
+                           side_effect=AssertionError("receipt replay must not reassess")):
+                    replay = await td_webserver.handle_health_roster_device_patch_api(request())
+                self.assertEqual(json.loads(response.text), json.loads(replay.text))
+                self.assertEqual(snapshot(), committed)
+
+    async def test_roster_patch_late_comparison_failure_rolls_back_and_retry_is_safe(self) -> None:
+        from test_td_health_unified import NETWORK, roster_history_seed
+
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            store, results = roster_history_seed(data_dir, days=2)
+            assessment_id = results["otbr_cli_unified"].assessment.assessment_id
+            payload = {
+                "action": "enroll", "requestId": "73b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+                "expectedRevision": 0, "contextAssessmentId": assessment_id,
+            }
+
+            def snapshot():
+                with sqlite3.connect(store.path) as connection:
+                    tables = connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+                    ).fetchall()
+                    return {
+                        table: sorted(connection.execute(f'SELECT * FROM "{table}"').fetchall(), key=repr)
+                        for (table,) in tables
+                    }
+
+            before = snapshot()
+            compare = SQLiteHealthStore._auto_compare
+            owners = []
+
+            def fail_late(instance, connection, observation, assessment, *, history=None, **kwargs):
+                owners.append(history)
+                compare(instance, connection, observation, assessment, history=history, **kwargs)
+                if len(owners) == 2:
+                    assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] > len(before["comparisons"])
+                    raise sqlite3.DatabaseError("injected late comparison failure")
+
+            with patch.object(SQLiteHealthStore, "_auto_compare", fail_late):
+                with self.assertRaises(aiohttp.web.HTTPInternalServerError):
+                    await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                        data_dir, network=NETWORK, device_id="extaddr:0011223344556677", payload=payload,
+                    ))
+            self.assertEqual(snapshot(), before)
+            self.assertIs(owners[0], owners[1])
+            self.assertIsNotNone(owners[0])
+
+            def observe(instance, connection, observation, assessment, *, history=None, **kwargs):
+                self.assertIsNot(history, owners[0])
+                return compare(instance, connection, observation, assessment, history=history, **kwargs)
+
+            with patch.object(SQLiteHealthStore, "_auto_compare", observe):
+                response = await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                    data_dir, network=NETWORK, device_id="extaddr:0011223344556677", payload=payload,
+                ))
+            self.assertEqual(response.status, 201)
+            committed = snapshot()
+            with patch("td_health_sqlite._RetainedHistory", side_effect=AssertionError("retry must not reassess")):
+                replay = await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                    data_dir, network=NETWORK, device_id="extaddr:0011223344556677", payload=payload,
+                ))
+            self.assertEqual(json.loads(response.text), json.loads(replay.text))
+            self.assertEqual(snapshot(), committed)
+
     async def test_comparison_detail_route_includes_relationship_type(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)

@@ -40,6 +40,36 @@ from td_health_observation_model import (
 ROLES = {"devices.json": "required", "outcome.json": "optional"}
 
 
+def test_prepared_control_templates_preserve_reset_numeric_types_and_raw_columns():
+    import json
+    from td_health_comparison import ComparisonItem, Compatibility, ResetEvidence
+    from td_health_preparation import _items_payload, _restore_items
+    from td_health_sqlite import _encode_comparison_items
+
+    base = ComparisonItem(
+        "item", "device", "extaddr:0011223344556677", "counter-delta",
+        "parentChanges", "count", None, 1.0, 2.0, 1.0, "higher", "changed", 2,
+        Compatibility(True, "changed", None, None, ()), ("source.json",),
+        "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z",
+    )
+    values = (-0.0, 0.0, 0, 1.0, 1, "epoch")
+    items = tuple(replace(
+        base, item_id=f"item-{index}", before_value=value,
+        reset_evidence=ResetEvidence("same-epoch", "uptime", value, value),
+    ) for index, value in enumerate(values))
+    payload = json.loads(json.dumps(_items_payload((*items, *items))))
+    assert len(payload[0]) == len(values)
+    restored = _restore_items(payload)
+    assert restored == (*items, *items)
+    assert list(_encode_comparison_items("comparison", restored)) == list(
+        _encode_comparison_items("comparison", (*items, *items))
+    )
+    damaged = json.loads(json.dumps(_items_payload(items)))
+    damaged[1][0][0] = -1
+    with pytest.raises(ValueError, match="template slot"):
+        _restore_items(damaged)
+
+
 def test_interval_candidates_use_utc_cutoffs_ties_and_complete_only_policy() -> None:
     candidates = [
         {
@@ -569,6 +599,102 @@ def test_endpoint_derivation_uses_source_times_and_directional_relationships() -
     repeated = replace(second, sources=(replace(second.sources[0], source_observed_at=first.observed_at), second.sources[1]))
     _, reused = derive_comparison((first, before[1]), (repeated, after[1]), source_roles=ROLES)
     assert all(item.change == "unknown" for item in reused)
+
+
+def _dense_comparison_case():
+    endpoints, facts = [], {}
+    for step, (observation, assessment) in enumerate(_endpoints()):
+        devices = tuple(DeviceSample(
+            f"device:{index}", f"{index:016x}", "router" if step else "child", "attached",
+            False, ("devices.json",),
+        ) for index in range(24))
+        links = tuple(RelationshipSample(
+            f"link:{index}:{target}", "router-route" if target == 1 else "parent-child",
+            f"device:{index}", f"device:{(index + target) % 24}",
+            0 if step else 3, 3, -50.0, -51.0, None, None, None, f"device:{index}",
+            ("devices.json",), 0 if step else 2,
+        ) for index in range(24) for target in range(1, 5))
+        metrics = tuple(metric for index in range(24) for metric in (
+            MetricSample(f"device:{index}", "route64Coverage", 1.0, "flag", None, "devices.json"),
+            MetricSample(f"device:{index}", "route64Coverage", 0.0, "flag", None, "devices.json"),
+            MetricSample(f"device:{index}", "parentChanges", float(5 - step), "count", None, "devices.json"),
+            MetricSample(f"device:{index}", "routerRolePercent", float(step), "percent", None, "devices.json"),
+            MetricSample(f"device:{index}", "totalMacErrorRatio", 0.0, "ratio",
+                         0.0 if step and index % 2 else 100.0, "devices.json"),
+        ))
+        observation = replace(
+            observation, devices=(*devices, replace(devices[0], role=None)),
+            relationships=(*links, links[-1]), metrics=metrics,
+            sources=(replace(observation.sources[0], state="valid",
+                             source_observed_at=observation.observed_at), observation.sources[1]),
+        )
+        facts[observation.observation_id] = tuple({
+            "device_id": f"device:{index}", "field_key": "rloc16",
+            "source_file": "devices.json", "source_observed_at": observation.observed_at,
+            "roster_policy_digest": "policy", "conflict_state": "none",
+            "value": f"0x{index + step:04x}",
+        } for index in range(24))
+        facts[observation.observation_id] += (facts[observation.observation_id][0],)
+        endpoints.append((observation, assessment))
+    return endpoints, facts
+
+
+def test_dense_comparison_matches_complete_ordered_baseline():
+    import hashlib
+    import json
+    from dataclasses import asdict
+
+    endpoints, facts = _dense_comparison_case()
+    interval, items = derive_comparison(*endpoints, source_roles=ROLES, endpoint_facts=facts)
+    encoded = json.dumps([asdict(interval), [asdict(item) for item in items]],
+                         sort_keys=True, allow_nan=False).encode()
+    assert hashlib.sha256(encoded).hexdigest() == "1dc2c14bfa6c025c1fa5587a537a9a3466f6a363e3c9dd7df7002e9d8647ed71"
+    routes = [item for item in items if item.relationship_type == "router-route"]
+    assert routes and all("metric-missing" not in item.compatibility.reasons for item in routes)
+    assert not any(item.metric == "parent" for item in items)
+    assert not any(item.metric == "rloc16" and item.subject_id == "device:0" for item in items)
+
+
+def test_comparison_prepares_each_endpoint_and_qualifies_each_source_once(monkeypatch):
+    from collections import Counter
+    import td_health_comparison as comparison
+
+    endpoints, facts = _dense_comparison_case()
+    prepared, times, scans = Counter(), Counter(), Counter()
+    prepare, source_time = comparison._prepare_endpoint, comparison.source_time_for_sample
+
+    class Rows(tuple):
+        def __new__(cls, rows, key):
+            instance = super().__new__(cls, rows)
+            instance.key = key
+            return instance
+
+        def __iter__(self):
+            scans[self.key] += 1
+            return super().__iter__()
+
+    def counted_prepare(observation, rows=()):
+        prepared[observation.observation_id] += 1
+        return prepare(observation, rows)
+
+    def counted_time(observation, filename):
+        times[(observation.observation_id, filename)] += 1
+        return source_time(observation, filename)
+
+    for index, (observation, assessment) in enumerate(endpoints):
+        observation = replace(observation, **{
+            field: Rows(getattr(observation, field), (index, field))
+            for field in ("devices", "relationships", "metrics")
+        })
+        facts[observation.observation_id] = Rows(facts[observation.observation_id], (index, "facts"))
+        endpoints[index] = observation, assessment
+    monkeypatch.setattr(comparison, "_prepare_endpoint", counted_prepare)
+    monkeypatch.setattr(comparison, "source_time_for_sample", counted_time)
+    derive_comparison(*endpoints, source_roles=ROLES, endpoint_facts=facts)
+    assert set(prepared.values()) == {1} and len(prepared) == 2
+    assert set(times.values()) == {1} and len(times) == 4
+    assert all(value <= 2 for value in scans.values())
+    assert scans[(0, "facts")] == scans[(1, "facts")] == 1
 
 
 def test_roster_candidates_use_endpoint_facts_without_creating_samples() -> None:

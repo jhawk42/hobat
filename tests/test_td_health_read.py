@@ -890,7 +890,7 @@ def test_legacy_comparison_without_relationship_type_column_stays_read_only(tmp_
     store.save_processing_result(replace(after, relationships=(link,)), after_assessment)
     with sqlite3.connect(store.path) as connection:
         connection.execute("ALTER TABLE comparison_items DROP COLUMN relationship_type")
-        connection.execute("DELETE FROM schema_migrations WHERE version=9")
+        connection.execute("DELETE FROM schema_migrations WHERE version>=9")
         connection.commit()
     before_read = (tmp_path / HOBAT_DATABASE_FILENAME).read_bytes()
 
