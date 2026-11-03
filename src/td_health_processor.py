@@ -12,6 +12,7 @@ from typing import Any, Mapping
 
 from td_source_authority import source_rank
 from td_const import (
+    EXTADDR_DEVICE_LABEL_MAP_FILENAME,
     OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
@@ -415,6 +416,11 @@ def _register_sample_devices(
                         router_devices[router_id] = None
                     else:
                         router_devices[router_id] = device_id
+    # Label maps enrich names only; they are not presence evidence.
+    devices = {
+        device_id: value for device_id, value in devices.items()
+        if value["sourceFiles"] - {EXTADDR_DEVICE_LABEL_MAP_FILENAME}
+    }
     return _SampleRegistration(
         normalized_by_file,
         devices,

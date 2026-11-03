@@ -606,6 +606,44 @@ def test_unified_builder_upgrade_does_not_count_one_collection_twice(tmp_path, m
     assert missing_finding(upgraded).evidence["consecutiveCompleteAbsences"] == 1
 
 
+def test_label_map_rows_are_not_presence_evidence_for_same_witness_absence(tmp_path):
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    expected(store)
+    collection(tmp_path, "otbr_cli_unified", 1)
+    for item in ("otbr_restapi_unified", "mdns_unified"):
+        _seed(tmp_path, item)
+    _save(tmp_path, "td-static-extaddr-device-label.json", [
+        {"extAddress": MISSING.removeprefix("extaddr:"), "deviceLabel": "labelled only"},
+    ])
+    merged = process(tmp_path, "multi_source_otbr_topology_mdns", store)
+    assert MISSING not in {device.device_id for device in merged.observation.devices}
+    assert missing_finding(merged).rule_id == "device.missing"
+    result = process(tmp_path, "otbr_cli_topology", store)
+    domains = result.assessment.reproduction_context["evaluationInputs"]["domains"]
+    assert domains["absenceHistory"]["state"] == "available"
+
+
+def test_file_mode_roster_change_reassesses_when_absence_history_is_unavailable(tmp_path):
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    expected(store)
+    collection(tmp_path, "otbr_cli_unified", 1)
+    process(tmp_path, "otbr_cli_topology", store)
+    collection(tmp_path, "otbr_cli_unified", 1, variant=True)
+    result = process(tmp_path, "otbr_cli_topology", store)
+    domains = result.assessment.reproduction_context["evaluationInputs"]["domains"]
+    assert domains["absenceHistory"]["state"] == "unavailable"
+    store.upsert_expected_device(NETWORK, MISSING, None, "intentionally-offline")
+    with closing(store._connect()) as connection:
+        row = connection.execute(
+            """SELECT a.network_roster_revision, a.reproduction_context_json
+               FROM current_assessments c JOIN assessments a USING (assessment_id)
+               WHERE c.dataset_id='otbr_cli_topology'""",
+        ).fetchone()
+    assert row["network_roster_revision"] > result.assessment.network_roster_revision
+    records = json.loads(row["reproduction_context_json"])["rosterContext"]["records"]
+    assert {r["deviceId"]: r["rosterState"] for r in records}[MISSING] == "intentionally-offline"
+
+
 def test_ha_roster_reassessment_keeps_absence_unknown(tmp_path):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)

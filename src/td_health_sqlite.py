@@ -2745,13 +2745,13 @@ class SQLiteHealthStore:
             ) = self._reassessment_inputs(
                 connection, pointer["assessment_id"]
             )
+            # Absence history is re-derived below; only a missing roster blocks reassessment.
             if (
                 old_evaluation_inputs.roster.state is EvaluationInputState.UNAVAILABLE
-                or old_evaluation_inputs.absence_history.state
-                is EvaluationInputState.UNAVAILABLE
-            ) and previous.sample_contract_version != "comparison-v1-unified":
+                and previous.sample_contract_version != "comparison-v1-unified"
+            ):
                 raise ReassessmentBaselineUnavailable(
-                    "reassessment-baseline-unavailable: historical roster or absence context is unavailable; refresh health from retained snapshots"
+                    "reassessment-baseline-unavailable: historical roster context is unavailable; refresh health from retained snapshots"
                 )
             witness = (
                 old_context["unifiedHealth"]["absenceWitness"]
