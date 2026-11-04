@@ -830,7 +830,10 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         read_original_evidence,
         read_rest_diagnostic_recovery,
     )
-    from td_health_unified import CONTEXT_VERSION, digest, plain, timestamp, witness_for_sources
+    from td_health_unified import (
+        CONTEXT_VERSION, digest, has_typed_ha_observation, plain, timestamp,
+        witness_for_sources,
+    )
 
     catalog = load_dataset_catalog()
     entry = resolve_dataset(catalog, dataset.dataset_id, source=dataset.datasource_id)
@@ -857,6 +860,23 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
             item.get("sourceObservedAt"),
         ))
     sources.sort(key=lambda source: source.filename)
+    source_time_provenance = []
+    if report.get("builderContract") == "unified-assembly-v11":
+        for item in metadata:
+            declaration = view["declarations"][item["filename"]]
+            if declaration["source"] == "mdns":
+                continue
+            role = item["role"]
+            source_time_provenance.append({
+                "filename": item["filename"],
+                "digest": item.get("sha256") or "",
+                "kind": "final" if role in {"records", "projection"} else role,
+                "state": "valid" if item["status"] == "selected" else item["status"],
+                "sourceObservedAt": item.get("sourceObservedAt"),
+                "timeProvenance": item.get("timeProvenance"),
+                "sourceObservationKind": item.get("sourceObservationKind"),
+            })
+        source_time_provenance.sort(key=lambda item: item["filename"])
     state = report["healthState"]
     if state not in {"complete", "partial", "degraded"}:
         raise HealthProcessingError("Unified health requires one unambiguous observed network")
@@ -871,6 +891,9 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         completeness = Completeness.PARTIAL
         sources = [replace(source, state="provisional") if source.filename in provisional else source
                    for source in sources]
+    source_state_by_filename = {source.filename: source.state for source in sources}
+    for item in source_time_provenance:
+        item["state"] = source_state_by_filename[item["filename"]]
     if completeness is Completeness.PARTIAL and not allow_partial:
         raise HealthProcessingError("Unified evidence is partial; use --allow-partial")
     payloads = dict(view["rows"])
@@ -900,14 +923,18 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
                 provenance.get("outcomeScopeSha256") != rest_outcome_metadata.get("scopeSha256")
                 or provenance.get("diagnosticsScopeSha256") != rest_diagnostic_metadata.get("scopeSha256")
                 or (
-                    (report.get("builderContract") == "unified-assembly-v10"
+                    (report.get("builderContract") in {
+                        "unified-assembly-v10", "unified-assembly-v11",
+                    }
                      or "restDiagnostics" in report["coverage"])
                     and report["coverage"].get("restDiagnostics") != rest_diagnostics
                 )
             ):
                 raise HealthProcessingError("Unified REST recovery evidence changed")
     rest_child_tables = None
-    if dataset.datasource_id == "multi-source" and report.get("builderContract") == "unified-assembly-v10":
+    if dataset.datasource_id == "multi-source" and report.get("builderContract") in {
+        "unified-assembly-v10", "unified-assembly-v11",
+    }:
         coverage = report["coverage"]
         advertised_sources = coverage.get("sources")
         report_reasons = coverage.get("healthReasons")
@@ -1068,6 +1095,22 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         if valid and completeness is Completeness.COMPLETE:
             qualified.append(domain)
     witness = witness_for_sources(report["networkInstance"], sources, qualified[0]) if qualified else None
+    original_evidence = []
+    source_time_by_filename = {
+        item["filename"]: item for item in source_time_provenance
+    }
+    for source in sources:
+        item = dict(
+            filename=source.filename, digest=source.digest, kind=source.kind,
+            state=source.state, sourceObservedAt=source.source_observed_at,
+        )
+        provenance = source_time_by_filename.get(source.filename)
+        if provenance is not None:
+            item.update(
+                timeProvenance=provenance["timeProvenance"],
+                sourceObservationKind=provenance["sourceObservationKind"],
+            )
+        original_evidence.append(item)
     context = {
         "version": CONTEXT_VERSION, "recipe": plain(recipe),
         "recipeContractDigest": digest(recipe),
@@ -1076,19 +1119,21 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
             report["contractVersion"], report.get("builderContract"),
             recipe["recipeDigest"], recipe["authorityDigest"],
         ]),
-        "originalEvidenceFingerprint": digest([
-            dict(filename=s.filename, digest=s.digest, kind=s.kind, state=s.state,
-                 sourceObservedAt=s.source_observed_at) for s in sources
-        ]),
+        "originalEvidenceFingerprint": digest(original_evidence),
         "effectiveCoverage": dict(dataset.health_profile.coverage),
         "absenceWitness": witness,
     }
+    if source_time_provenance:
+        context["sourceTimeProvenance"] = source_time_provenance
+        context["sourceTimeProvenanceDigest"] = digest(source_time_provenance)
     if rest_child_tables:
         context["restChildTableCoverage"] = rest_child_tables
     if unresolved_rest_children:
         context["unresolvedRestChildIdentities"] = True
     if witness is None:
-        if completeness is Completeness.COMPLETE:
+        if completeness is Completeness.COMPLETE and not has_typed_ha_observation(
+            {"unifiedHealth": context}, dataset,
+        ):
             completeness = Completeness.DEGRADED
         context["effectiveCoverage"] = {
             key: "limited" if value == "sufficient" else value
@@ -1156,6 +1201,11 @@ def build_processing_result(
     devices, relationships, metrics, duplicate_relationship_ids, device_ipv6_addresses = _normalize_samples(
         sample_dataset, available_finals, inputs.tables_not_provided, inputs.rest_child_identities
     )
+    controller_snapshot_files = {
+        item["filename"]
+        for item in (inputs.unified_context or {}).get("sourceTimeProvenance", ())
+        if item.get("sourceObservationKind") == "controller-snapshot"
+    }
     roster_facts = tuple(
         fact
         for filename in sample_dataset.files if filename in available_finals
@@ -1163,6 +1213,9 @@ def build_processing_result(
         for fact in extract_roster_facts(record, filename=filename, dataset=dataset,
                                          policy=manifest.roster_policy,
                                          evidence_files=inputs.evidence_files)
+        if not (
+            filename in controller_snapshot_files and fact.value_class == "transient"
+        )
     )
     partition_membership, partition_membership_evidence = (
         _partition_membership_inputs(
@@ -1222,7 +1275,12 @@ def build_processing_result(
         "\0".join(f"{source.filename}:{source.digest}" for source in sorted(sources, key=lambda item: item.filename)).encode("utf-8")
     ).hexdigest()
     if inputs.unified_context:
-        source_set_digest = inputs.unified_context["originalEvidenceFingerprint"]
+        from td_health_unified import digest
+        source_set_digest = digest([
+            dict(filename=source.filename, digest=source.digest, kind=source.kind,
+                 state=source.state, sourceObservedAt=source.source_observed_at)
+            for source in sorted(sources, key=lambda item: item.filename)
+        ])
     observed_ns = max(mtimes, default=0)
     observed_at = datetime.fromtimestamp(observed_ns / 1_000_000_000, timezone.utc).isoformat()
     now = processing_time or datetime.now(timezone.utc)
@@ -1234,6 +1292,8 @@ def build_processing_result(
         # The assembly contract changes completeness and samples for identical evidence.
         observation_parts += ("comparison-v1-unified", inputs.unified_context["recipeContractDigest"],
                               inputs.unified_context["reportContractDigest"])
+        if inputs.unified_context.get("sourceTimeProvenanceDigest"):
+            observation_parts += (inputs.unified_context["sourceTimeProvenanceDigest"],)
         if inputs.rest_diagnostics is not None or inputs.unified_context.get("restChildTableCoverage"):
             from td_health_unified import digest
             observation_parts += (digest({

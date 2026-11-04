@@ -120,6 +120,26 @@ def test_diagnostic_snapshot_uses_canonical_fields_and_excludes_wifi_nodes() -> 
     assert "routerNeighbors" not in golden
 
 
+def test_controller_observation_propagates_through_commissioned_products() -> None:
+    observed_at = "2026-11-04T22:00:00+00:00"
+    records = _records()
+    devices = build_device_snapshot(records, source_observed_at=observed_at)
+    diagnostics = build_diagnostic_snapshot(
+        records, source_observed_at=observed_at
+    )
+    mesh = build_mesh_diagnostic_snapshot(diagnostics)
+    topology = build_topology_snapshot(diagnostics)
+
+    for product in (devices, diagnostics, mesh, topology):
+        assert product
+        assert all(
+            record["sourceObservedAt"] == observed_at
+            and record["sourceObservationKind"] == "controller-snapshot"
+            for record in product
+            if not record.get("relationshipOnly")
+        )
+
+
 def test_diagnostic_snapshot_role_facts_match_device_product_and_omit_unknowns() -> None:
     records = [
         {

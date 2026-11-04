@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,9 @@ from ha_matter_ws_fetch_all import collect_devices, save_collection
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ha_matter_ws_phase2_inventory.json"
+DIAGNOSTIC_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "ha_matter_ws_phase3_diagnostics.json"
+)
 
 
 class FakeWebSocket:
@@ -452,6 +457,20 @@ def test_fetch_snapshot_uses_one_inventory_request_and_applies_events(monkeypatc
     async def scenario() -> None:
         fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
         socket = FakeWebSocket([fixture["serverInfo"]])
+        observed_at = datetime(2026, 11, 4, 22, 0, tzinfo=timezone.utc)
+        clock_calls = []
+        milestones = []
+        reconcile = ha_matter_ws_client.reconcile_nodes
+
+        def track_reconciliation(initial_nodes, events):
+            result = reconcile(initial_nodes, events)
+            milestones.append("reconciled")
+            return result
+
+        def frozen_clock():
+            clock_calls.append(observed_at)
+            milestones.append("clock")
+            return observed_at
 
         async def on_send(message: dict[str, Any]) -> None:
             socket.queue(
@@ -470,14 +489,118 @@ def test_fetch_snapshot_uses_one_inventory_request_and_applies_events(monkeypatc
 
         socket.on_send = on_send
         monkeypatch.setattr(ha_matter_ws_client.websockets, "connect", lambda *args, **kwargs: socket)
+        monkeypatch.setattr(
+            ha_matter_ws_client, "reconcile_nodes", track_reconciliation
+        )
 
-        snapshot = await fetch_node_snapshot(request_timeout=0.2, settle_timeout=0.01)
+        snapshot = await fetch_node_snapshot(
+            request_timeout=0.2,
+            settle_timeout=0.01,
+            clock=frozen_clock,
+        )
 
         assert [message["command"] for message in socket.sent] == ["start_listening"]
         assert [node["node_id"] for node in snapshot.nodes] == [1, 2]
         assert snapshot.nodes[0]["available"] is False
         assert snapshot.nodes[0]["attributes"]["0/40/5"] == "Living Room"
         assert snapshot.nodes[1]["available"] is True
+        assert snapshot.source_observed_at == observed_at.isoformat()
+        assert clock_calls == [observed_at]
+        assert milestones == ["reconciled", "clock"]
+
+    asyncio.run(scenario())
+
+
+def test_failed_inventory_response_does_not_capture_observation_time(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+        clock_calls = []
+
+        async def on_send(message: dict[str, Any]) -> None:
+            socket.queue({"message_id": message["message_id"], "result": {}})
+
+        socket.on_send = on_send
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        with pytest.raises(MatterWsContractError, match="node array"):
+            await fetch_node_snapshot(
+                request_timeout=0.2,
+                clock=lambda: clock_calls.append(True)
+                or datetime(2026, 11, 4, tzinfo=timezone.utc),
+            )
+        assert clock_calls == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("observed_at", [
+    datetime(1970, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 1),
+])
+def test_invalid_controller_clock_rejects_observation(monkeypatch, observed_at) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+
+        async def on_send(message: dict[str, Any]) -> None:
+            socket.queue({"message_id": message["message_id"], "result": []})
+
+        socket.on_send = on_send
+        monkeypatch.setattr(ha_matter_ws_client.websockets, "connect", lambda *args, **kwargs: socket)
+        with pytest.raises(MatterWsContractError, match="positive timezone-aware"):
+            await fetch_node_snapshot(
+                request_timeout=0.2, settle_timeout=0, clock=lambda: observed_at,
+            )
+
+    asyncio.run(scenario())
+
+
+def test_reader_failure_after_reconciliation_does_not_capture_observation_time(
+    monkeypatch,
+) -> None:
+    async def scenario() -> None:
+        fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        socket = FakeWebSocket([fixture["serverInfo"]])
+        milestones = []
+        clock_calls = []
+        reconcile = ha_matter_ws_client.reconcile_nodes
+
+        async def on_send(message: dict[str, Any]) -> None:
+            socket.queue({"message_id": message["message_id"], "result": fixture["nodes"]})
+
+        def track_reconciliation(initial_nodes, events):
+            nodes = reconcile(initial_nodes, events)
+            milestones.append("reconciled")
+            return nodes
+
+        def fail_reader(self):
+            milestones.append("reader-check")
+            raise MatterWsTransportError("reader failed during settle")
+
+        socket.on_send = on_send
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+        monkeypatch.setattr(
+            ha_matter_ws_client, "reconcile_nodes", track_reconciliation
+        )
+        monkeypatch.setattr(
+            HaMatterWsClient, "raise_if_reader_failed", fail_reader
+        )
+
+        with pytest.raises(MatterWsTransportError, match="reader failed"):
+            await fetch_node_snapshot(
+                request_timeout=0.2,
+                settle_timeout=0,
+                clock=lambda: clock_calls.append(True)
+                or datetime(2026, 11, 4, tzinfo=timezone.utc),
+            )
+        assert milestones == ["reconciled", "reader-check"]
+        assert clock_calls == []
 
     asyncio.run(scenario())
 
@@ -524,6 +647,7 @@ def test_device_inventory_decodes_endpoints_identity_and_optional_fields() -> No
 def test_collection_atomically_writes_devices_and_server_info(monkeypatch, tmp_path) -> None:
     async def scenario() -> None:
         fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        observed_at = "2026-11-04T22:00:00+00:00"
 
         async def fake_fetch_node_snapshot(*args, **kwargs):
             return ha_matter_ws_client.NodeSnapshot(
@@ -532,6 +656,7 @@ def test_collection_atomically_writes_devices_and_server_info(monkeypatch, tmp_p
                 frames=(),
                 events=(),
                 nodes=tuple(fixture["nodes"]),
+                source_observed_at=observed_at,
             )
 
         monkeypatch.setattr("ha_matter_ws_fetch_all.fetch_node_snapshot", fake_fetch_node_snapshot)
@@ -546,8 +671,12 @@ def test_collection_atomically_writes_devices_and_server_info(monkeypatch, tmp_p
 
         save_collection(collection, device_output=device_path, server_info_output=server_path)
 
-        assert json.loads(device_path.read_text(encoding="utf-8"))[0]["matter"]["nodeId"] == 1
+        saved_devices = json.loads(device_path.read_text(encoding="utf-8"))
+        assert saved_devices[0]["matter"]["nodeId"] == 1
+        assert saved_devices[0]["sourceObservedAt"] == observed_at
+        assert saved_devices[0]["sourceObservationKind"] == "controller-snapshot"
         assert json.loads(server_path.read_text(encoding="utf-8"))["schema_version"] == 12
+        assert not (tmp_path / "td-ha-matter-ws-collection.outcome.json").exists()
 
     asyncio.run(scenario())
 
@@ -577,5 +706,44 @@ def test_collection_reports_incremental_normalization_progress(monkeypatch) -> N
 
         assert progress == [(1, 2, 1), (2, 2, 2)]
         assert collection.node_count == 2
+
+    asyncio.run(scenario())
+
+
+def test_collector_output_preserves_controller_observation_time(monkeypatch) -> None:
+    async def scenario() -> None:
+        fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        nodes = json.loads(DIAGNOSTIC_FIXTURE.read_text(encoding="utf-8"))["nodes"]
+        observed_at = "2026-11-04T22:00:00+00:00"
+
+        async def fake_fetch_node_snapshot(*args, **kwargs):
+            return SimpleNamespace(
+                uri="ws://fixture/ws",
+                server_info=fixture["serverInfo"],
+                frames=(),
+                events=(),
+                nodes=tuple(nodes),
+                source_observed_at=observed_at,
+            )
+
+        monkeypatch.setattr(
+            "ha_matter_ws_fetch_all.fetch_node_snapshot", fake_fetch_node_snapshot
+        )
+        collection = await collect_devices()
+
+        assert collection.source_observed_at == observed_at
+        for product in (
+            collection.devices,
+            collection.diagnostics,
+            collection.mesh_diagnostics,
+            collection.topology,
+        ):
+            assert product
+            assert all(
+                record["sourceObservedAt"] == observed_at
+                and record["sourceObservationKind"] == "controller-snapshot"
+                for record in product
+                if not record.get("relationshipOnly")
+            )
 
     asyncio.run(scenario())

@@ -25,6 +25,7 @@ from merge_dataset import extract_records, merge_cached_records
 from merge_policy_identity import identities_compatible
 from merge_policy_mdns import is_matter_operational_mdns_record, merge_mdns_records, observed_service_network
 from td_const import (
+    HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
     HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME, HA_MATTER_WS_SERVER_INFO_FILENAME,
     HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME,
     OTBR_CLI_BBR_FILENAME, OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
@@ -52,7 +53,7 @@ from util_data import network_scope_path, resolve_data_dir
 
 
 CONTRACT_VERSION = "unified-v1"
-BUILDER_CONTRACT = "unified-assembly-v10"
+BUILDER_CONTRACT = "unified-assembly-v11"
 _NETWORK = re.compile(r"extpan:[0-9a-f]{16}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -1025,7 +1026,7 @@ def read_generation(data_dir: Path, entry: dict, *, verify_inputs: bool = False,
         if report["builderContract"] not in {
             "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
             "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
-            "unified-assembly-v9",
+            "unified-assembly-v9", "unified-assembly-v10",
             BUILDER_CONTRACT,
         }:
             raise UnifiedDatasetError("Unsupported Unified assembly contract")
@@ -1356,8 +1357,15 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
         missing = composition["missing"]
         health_reasons = composition["health_reasons"]
     ha_payloads: dict[str, Any] = {}
+    ha_collection = None
     if ha_source:
         from ha_matter_ws_unified import is_thread_record, validate_canonical_rows
+        if any(item["file"] == HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME
+               and item["role"] == "outcome" for item in recipe["inputs"]):
+            collection_input = _read_stable(data_dir, HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME)
+            captured.append(collection_input)
+            if collection_input.content is not None:
+                ha_collection = _parse(collection_input.content, collection_input.filename)
     unresolved_native = []
     tables_not_provided: list[dict[str, str]] = []
     child_coverage_payloads: dict[str, list] = {}
@@ -1379,10 +1387,22 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
                 health_reasons.append(f"missing-{item['role']}:{filename}")
             continue
         payload = _parse(cached.content, filename)
-        observed_at, time_provenance = _source_time(payload, cached, now, extractor=item["extractor"])
+        controller_time = None
+        if ha_source and item["extractor"] in {"ha-inventory", "raw-array", "ha-projection"}:
+            from ha_matter_ws_unified import controller_observation_time
+            controller_time = controller_observation_time(
+                payload, filename=filename, content_digest=cached.digest,
+                outcome=ha_collection, now=now,
+            )
+        observed_at, time_provenance = (
+            controller_time if controller_time is not None
+            else _source_time(payload, cached, now, extractor=item["extractor"])
+        )
         file_scope, scope_state = _scope(sidecar, cached)
         metadata.update({"status": "selected", "sourceObservedAt": observed_at,
                          "timeProvenance": time_provenance, "scopeState": scope_state})
+        if time_provenance == "controller-snapshot":
+            metadata["sourceObservationKind"] = "controller-snapshot"
         if ha_source:
             ha_payloads[filename] = payload
             metadata["observedNetwork"] = file_scope

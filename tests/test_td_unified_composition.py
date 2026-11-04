@@ -19,7 +19,7 @@ from td_health_manifest import HealthManifestError
 from td_source_capabilities import SourceCapabilityService
 from test_td_unified_dataset import (
     DATASET_IDS, NETWORK, OTHER_NETWORK, _artifacts, _entry, _router_table_row,
-    _save, _seed, _seed_meshdiag_tables,
+    _save, _seed, _seed_ha_controller, _seed_meshdiag_tables,
 )
 
 
@@ -34,6 +34,23 @@ def _seed_all(directory):
 
 def _rows(directory, entry):
     return json.loads((directory / entry["files"][0]).read_text())
+
+
+def test_controller_observation_lineage_does_not_hide_unrelated_degradation(tmp_path):
+    entry = _seed_all(tmp_path)
+    _seed_ha_controller(tmp_path)
+    outcome = "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+    _save(tmp_path, outcome, {"deviceResults": [{"status": "failed"}],
+                             "completedAt": "2026-01-01T00:00:00+00:00"})
+    result = unified.build_unified_dataset(tmp_path, TARGET)
+    assert result["healthState"] == "degraded"
+    assert result["coverage"]["healthReasons"] == [f"otbr-restapi:incomplete-outcome:{outcome}"]
+    report = unified.read_generation(tmp_path, entry)
+    controller = [item for item in report["rawInputs"]
+                  if item.get("sourceObservationKind") == "controller-snapshot"]
+    assert len(controller) == 5
+    assert all(item["timeProvenance"] == "controller-snapshot" for item in controller)
+    assert all(item["sourceObservedAt"] == "2026-01-01T00:00:00+00:00" for item in controller)
 
 
 def _seed_rest_child_coverage(directory, *, child_table=(), offset=0, completed=False):

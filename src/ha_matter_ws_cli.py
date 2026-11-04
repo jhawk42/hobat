@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import sys
@@ -38,6 +39,7 @@ from ha_matter_ws_snapshots import (
     DASHBOARD_SCHEMA_VERSION,
     NATIVE_SNAPSHOT_SCHEMA_VERSION,
     MatterSnapshotSecurityError,
+    SOURCE_OBSERVATION_KIND,
 )
 from ha_matter_ws_snapshots import assert_snapshot_safe
 from ha_matter_ws_thread import (
@@ -312,14 +314,16 @@ def _device_inventory(devices: Sequence[dict[str, Any]]) -> list[dict[str, Any]]
     for device in devices:
         matter = device.get("matter")
         node_id = matter.get("nodeId") if isinstance(matter, Mapping) else None
-        inventory.append(
-            {
-                "nodeId": node_id,
-                "deviceLabel": device.get("deviceLabel"),
-                "available": device.get("available"),
-                "isBridge": device.get("isBridge"),
-            }
-        )
+        item = {
+            "nodeId": node_id,
+            "deviceLabel": device.get("deviceLabel"),
+            "available": device.get("available"),
+            "isBridge": device.get("isBridge"),
+        }
+        for field in ("sourceObservedAt", "sourceObservationKind"):
+            if field in device:
+                item[field] = device[field]
+        inventory.append(item)
     return inventory
 
 
@@ -346,13 +350,21 @@ def _payload(collection: MatterCollection, path: tuple[str, ...], node_id: str |
 
 
 def build_dashboard_snapshot(collection: MatterCollection) -> dict[str, Any]:
-    return {
+    snapshot = {
         "schemaVersion": DASHBOARD_SCHEMA_VERSION,
         "devices": list(collection.devices),
         "diagnostics": list(collection.diagnostics),
         "meshDiagnostics": list(collection.mesh_diagnostics),
         "topology": list(collection.topology),
     }
+    if collection.source_observed_at is not None:
+        snapshot.update(
+            {
+                "sourceObservedAt": collection.source_observed_at,
+                "sourceObservationKind": SOURCE_OBSERVATION_KIND,
+            }
+        )
+    return snapshot
 
 
 def make_checkpoint_callback(
@@ -384,6 +396,13 @@ def make_checkpoint_callback(
                     "total": total,
                     "records": list(getattr(collection, name)),
                 }
+                if collection.source_observed_at is not None:
+                    payload.update(
+                        {
+                            "sourceObservedAt": collection.source_observed_at,
+                            "sourceObservationKind": SOURCE_OBSERVATION_KIND,
+                        }
+                    )
             try:
                 save_checkpoint_json(
                     payload,
@@ -439,6 +458,7 @@ def _outcome(
     *,
     started_at: str,
     final_paths: Sequence[Path],
+    artifact_observations: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     warnings = []
     errors = []
@@ -450,7 +470,7 @@ def _outcome(
                 {"nodeId": diagnostic.get("nodeId"), "readErrors": dict(read_errors)}
             )
     thread_count = sum(device.get("type") == "threadDevice" for device in collection.devices)
-    return {
+    outcome = {
         "source": "ha-matter-ws",
         "uri": collection.uri,
         "startedAt": started_at,
@@ -472,6 +492,33 @@ def _outcome(
             )
         },
         "finalFiles": [path.name for path in final_paths],
+    }
+    if collection.source_observed_at is not None:
+        outcome.update(
+            {
+                "sourceObservedAt": collection.source_observed_at,
+                "sourceObservationKind": SOURCE_OBSERVATION_KIND,
+            }
+        )
+        if artifact_observations is not None:
+            outcome["artifactObservations"] = dict(artifact_observations)
+    return outcome
+
+
+def _artifact_observation(
+    payload: Any, path: Path, *, source_observed_at: str
+) -> dict[str, Any]:
+    if isinstance(payload, list):
+        record_count = len(payload)
+    elif isinstance(payload, Mapping) and isinstance(payload.get("devices"), list):
+        record_count = len(payload["devices"])
+    else:
+        raise ValueError(f"HA artifact has no commissioned-node records: {path.name}")
+    return {
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "recordCount": record_count,
+        "sourceObservedAt": source_observed_at,
+        "sourceObservationKind": SOURCE_OBSERVATION_KIND,
     }
 
 
@@ -1340,6 +1387,16 @@ def _run(args: argparse.Namespace) -> int:
                 add_trailing_newline=True,
                 writer=save_json_atomic,
             )
+        artifact_observations = None
+        if collection.source_observed_at is not None:
+            artifact_observations = {
+                output_path.name: _artifact_observation(
+                    payload,
+                    output_path,
+                    source_observed_at=collection.source_observed_at,
+                )
+                for payload, output_path in outputs[1:]
+            }
         outcome_path = resolve_data_file_path(
             HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME, data_dir
         )
@@ -1348,6 +1405,7 @@ def _run(args: argparse.Namespace) -> int:
                 collection,
                 started_at=started_at,
                 final_paths=[output_path for _, output_path in outputs],
+                artifact_observations=artifact_observations,
             ),
             outcome_path,
             add_trailing_newline=True,

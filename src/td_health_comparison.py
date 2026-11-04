@@ -159,7 +159,11 @@ def derive_numeric_item(
         _finite_nonnegative(after_denominator) and after_denominator > 0
     ):
         reasons.add("denominator-mismatch")
-    if kind == "counter-delta" and sample_count == 2 and _finite_nonnegative(before_value) and _finite_nonnegative(after_value) and after_value < before_value:
+    if (kind == "counter-delta"
+            and (reset_evidence is None or reset_evidence.state != "unknown")
+            and sample_count == 2
+            and _finite_nonnegative(before_value) and _finite_nonnegative(after_value)
+            and after_value < before_value):
         reasons.add("reset-detected")
     compatibility = _compatibility(reasons)
     delta = None
@@ -288,6 +292,7 @@ class _EndpointIndex:
     facts: dict[tuple[object, object], list[Mapping[str, object]]]
     source_times: dict[str, str | None]
     source_instants: dict[str, datetime]
+    controller_snapshot_files: frozenset[str]
     route64_coverage: set[tuple[str, str]]
 
 
@@ -311,8 +316,37 @@ def _prepare_endpoint(
         {(item.device_id, item.metric, item.source_file): item for item in observation.metrics},
         parents, by_field, times,
         {filename: _utc_timestamp(value) for filename, value in times.items() if value is not None},
+        frozenset(),
         {(item.device_id, item.source_file) for item in observation.metrics
          if item.metric == "route64Coverage" and item.unit == "flag" and item.value == 1.0},
+    )
+
+
+def _apply_controller_time_provenance(
+    index: _EndpointIndex, observation: Observation, assessment: Assessment,
+) -> _EndpointIndex:
+    unified = assessment.reproduction_context.get("unifiedHealth", {})
+    controller_files = frozenset(
+        item["filename"]
+        for item in unified.get("sourceTimeProvenance", ())
+        if isinstance(item, Mapping)
+        and item.get("sourceObservationKind") == "controller-snapshot"
+    )
+    if not controller_files:
+        return index
+    times = dict(index.source_times)
+    for filename in controller_files:
+        times[filename] = source_time_for_sample(
+            observation, filename, controller_snapshot_files=controller_files,
+        )
+    return replace(
+        index,
+        source_times=times,
+        source_instants={
+            filename: _utc_timestamp(value)
+            for filename, value in times.items() if value is not None
+        },
+        controller_snapshot_files=controller_files,
     )
 
 
@@ -470,8 +504,19 @@ def _derive_metric_comparison_items(
             continue
         kind, unit, denominator_kind, preference = METRIC_CATALOG[metric_name]
         old, new = old_metrics.get(key), new_metrics.get(key)
+        before_source_time = before.source_instants.get(filename)
+        after_source_time = after.source_instants.get(filename)
+        source_advanced = (
+            before_source_time is not None
+            and after_source_time is not None
+            and after_source_time > before_source_time
+        )
         reset = (
-            classify_reset(
+            ResetEvidence("unknown", None, None, None)
+            if filename in before.controller_snapshot_files
+            or filename in after.controller_snapshot_files
+            or not source_advanced
+            else classify_reset(
                 elapsed_seconds=interval.elapsed_seconds,
                 before_counter=old.value if old else None,
                 after_counter=new.value if new else None,
@@ -577,16 +622,28 @@ def derive_comparison(
     """Derive only endpoint evidence; roster IDs select candidates, never samples."""
     before_obs, before_assessment = before
     after_obs, after_assessment = after
-    interval = compare_interval(
-        before, after, before_assessment_id=before_assessment.assessment_id,
-        after_assessment_id=after_assessment.assessment_id, source_roles=source_roles, policy=policy,
-    )
     old_index = _prepare_endpoint(
         before_obs, endpoint_facts.get(before_obs.observation_id, ()) if endpoint_facts else (),
     )
     new_index = _prepare_endpoint(
         after_obs, endpoint_facts.get(after_obs.observation_id, ()) if endpoint_facts else (),
     )
+    old_index = _apply_controller_time_provenance(old_index, before_obs, before_assessment)
+    new_index = _apply_controller_time_provenance(new_index, after_obs, after_assessment)
+    interval = compare_interval(
+        before, after, before_assessment_id=before_assessment.assessment_id,
+        after_assessment_id=after_assessment.assessment_id, source_roles=source_roles, policy=policy,
+    )
+    if (
+        _controller_only_sample_interval(old_index)
+        and _controller_only_sample_interval(new_index)
+    ):
+        reasons = set(interval.compatibility.reasons)
+        reasons.add("source-not-newer")
+        interval = replace(
+            interval, elapsed_seconds=None, gap_state="unknown",
+            compatibility=_compatibility(reasons),
+        )
     if static_items is None:
         static_items = (
             *_derive_metric_comparison_items(old_index, new_index, interval, policy),
@@ -660,7 +717,12 @@ def classify_reset(
     return ResetEvidence("unknown", None, None, None)
 
 
-def source_time_for_sample(observation: Observation, filename: str) -> str | None:
+def source_time_for_sample(
+    observation: Observation, filename: str, *,
+    controller_snapshot_files: frozenset[str] = frozenset(),
+) -> str | None:
+    if filename in controller_snapshot_files:
+        return None
     sources = [source for source in observation.sources if source.filename == filename]
     if len(sources) != 1 or sources[0].kind != "final" or sources[0].state != "valid":
         return None
@@ -674,6 +736,18 @@ def source_time_for_sample(observation: Observation, filename: str) -> str | Non
     except ValueError:
         return None
     return timestamp
+
+
+def _controller_only_sample_interval(index: _EndpointIndex) -> bool:
+    sample_files = {
+        metric.source_file for metric in index.metrics.values()
+    } | {
+        filename for relationship in index.relationships.values()
+        for filename in relationship.source_files
+    }
+    return bool(sample_files & index.controller_snapshot_files) and (
+        sample_files <= index.controller_snapshot_files
+    )
 
 
 def project_baseline_availability(
@@ -853,7 +927,7 @@ def compare_interval(
                     and (
                         before_assessment.evaluator_version == "snapshot-v16"
                         or (
-                            before_assessment.evaluator_version == "snapshot-v17"
+                            before_assessment.evaluator_version in {"snapshot-v17", "snapshot-v18"}
                             and old_context.get("reportContractDigest")
                             and old_context["reportContractDigest"] == new_context.get("reportContractDigest")
                         )

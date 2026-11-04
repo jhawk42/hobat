@@ -3063,11 +3063,23 @@ class SQLiteHealthStore:
         sources = observation.sources
         if dataset.unified_recipe is not None:
             from td_health_unified import digest, safe_sources, validate_context
+            unified_health = context.get("unifiedHealth", {}) if context else {}
+            source_time_provenance = {
+                item["filename"]: item
+                for item in unified_health.get("sourceTimeProvenance", ())
+            }
             originals = [
                 dict(filename=s.filename, digest=s.digest, kind=s.kind, state=s.state,
                      sourceObservedAt=s.source_observed_at)
                 for s in sources if s.filename in safe_sources(dataset)
             ]
+            if source_time_provenance:
+                for item in originals:
+                    provenance = source_time_provenance[item["filename"]]
+                    item.update(
+                        timeProvenance=provenance["timeProvenance"],
+                        sourceObservationKind=provenance["sourceObservationKind"],
+                    )
             if context is None or digest(originals) != context["unifiedHealth"]["originalEvidenceFingerprint"]:
                 raise sqlite3.DatabaseError("Invalid retained Unified original evidence")
         try:
@@ -3099,8 +3111,8 @@ class SQLiteHealthStore:
         history: _RetainedHistory | None = None,
     ) -> tuple[Observation, Assessment, object, object, dict, EvaluationInputs]:
         from td_health_evaluator import (
-            evaluator_version_for_dataset,
             evaluation_inputs_from_payload,
+            supports_retained_evaluator_version,
         )
         from td_health_manifest import HealthProfile
         from td_health_policy import HealthPolicy
@@ -3126,8 +3138,6 @@ class SQLiteHealthStore:
         if (
             not isinstance(context, dict)
             or context.get("schemaVersion") != 2
-            or context.get("evaluatorVersion") != evaluator_version_for_dataset(
-                row["dataset_id"], row["sample_contract_version"])
             or row["evaluator_version"] != context.get("evaluatorVersion")
         ):
             raise ReassessmentBaselineUnavailable(
@@ -3194,6 +3204,14 @@ class SQLiteHealthStore:
             )
 
         observation = SQLiteHealthStore._retained_observation(connection, row, history=history)
+        if not supports_retained_evaluator_version(
+            row["dataset_id"], row["sample_contract_version"],
+            context.get("evaluatorVersion"),
+            unified_health=context.get("unifiedHealth"),
+        ):
+            raise ReassessmentBaselineUnavailable(
+                "reassessment-baseline-unavailable: refresh health from retained snapshots before changing the roster"
+            )
         original = Assessment(
             assessment_id=row["assessment_id"],
             observation_id=row["observation_id"],

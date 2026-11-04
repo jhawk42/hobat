@@ -30,8 +30,12 @@ from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
 EVALUATOR_VERSION = "snapshot-v14"
-UNIFIED_EVALUATOR_VERSION = "snapshot-v17"
+UNIFIED_EVALUATOR_VERSION = "snapshot-v18"
+RETAINED_UNIFIED_EVALUATOR_VERSION = "snapshot-v17"
 REST_RECOVERY_EVALUATOR_VERSION = "snapshot-v17"
+RETAINED_UNIFIED_EVALUATOR_VERSIONS = frozenset({
+    RETAINED_UNIFIED_EVALUATOR_VERSION, UNIFIED_EVALUATOR_VERSION,
+})
 REST_RECOVERY_DATASETS = frozenset({
     "otbr_restapi_devices_diagnostics_fetch",
     "otbr_restapi_topology",
@@ -46,10 +50,42 @@ ROSTER_REASSESSMENT_RULE_IDS = frozenset({
 
 def evaluator_version_for_dataset(dataset_id: str, sample_contract_version: str) -> str:
     if sample_contract_version == "comparison-v1-unified":
-        return UNIFIED_EVALUATOR_VERSION
+        return RETAINED_UNIFIED_EVALUATOR_VERSION
     if dataset_id in REST_RECOVERY_DATASETS:
         return REST_RECOVERY_EVALUATOR_VERSION
     return EVALUATOR_VERSION
+
+
+def evaluator_version_for_unified_context(unified_health: Mapping[str, Any] | None) -> str:
+    source_times = (
+        unified_health.get("sourceTimeProvenance", ())
+        if isinstance(unified_health, Mapping) else ()
+    )
+    if isinstance(unified_health, Mapping) and (
+        unified_health.get("sourceTimeProvenanceDigest")
+        and any(
+            isinstance(item, Mapping)
+            and item.get("sourceObservationKind") == "controller-snapshot"
+            and item.get("timeProvenance") == "controller-snapshot"
+            for item in source_times
+        )
+    ):
+        return UNIFIED_EVALUATOR_VERSION
+    return RETAINED_UNIFIED_EVALUATOR_VERSION
+
+
+def supports_retained_evaluator_version(
+    dataset_id: str, sample_contract_version: str, evaluator_version: str,
+    *, unified_health: Mapping[str, Any] | None = None,
+) -> bool:
+    if sample_contract_version == "comparison-v1-unified":
+        return (
+            evaluator_version in RETAINED_UNIFIED_EVALUATOR_VERSIONS
+            and evaluator_version == evaluator_version_for_unified_context(unified_health)
+        )
+    return evaluator_version == evaluator_version_for_dataset(
+        dataset_id, sample_contract_version,
+    )
 
 _DIRECT_THRESHOLD_COUNT_METRICS = frozenset(
     {"parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"}
@@ -1793,6 +1829,14 @@ def evaluate_observation(
         from td_health_manifest import load_health_manifest
         dataset = load_health_manifest().dataset(observation.dataset_id)
         validate_context({"unifiedHealth": unified_health}, dataset, observation)
+        evaluator_version = evaluator_version_for_unified_context(unified_health)
+        if retained_assessment is not None:
+            if not supports_retained_evaluator_version(
+                observation.dataset_id, sample_contract_version,
+                retained_assessment.evaluator_version, unified_health=unified_health,
+            ):
+                raise ValueError("Retained Unified evaluator does not match its provenance contract")
+            evaluator_version = retained_assessment.evaluator_version
         profile = replace(
             profile, coverage=unified_health["effectiveCoverage"],
             topology_authority=bool(unified_health["absenceWitness"]),
@@ -1988,6 +2032,11 @@ def evaluate_observation(
     sufficient_pillars = sum(
         pillar["state"] == "sufficient" for pillar in observed_pillars.values()
     )
+    source_observation_kinds = {
+        item["filename"]: item["sourceObservationKind"]
+        for item in (unified_health or {}).get("sourceTimeProvenance", ())
+        if item.get("sourceObservationKind") is not None
+    }
     coverage = {
         "completeness": observation.completeness.value,
         "pillars": dict(profile.coverage),
@@ -2020,6 +2069,8 @@ def evaluate_observation(
            if sample_contract_version == "comparison-v1-unified" else {}),
         **({"restChildTableCoverage": unified_health["restChildTableCoverage"]}
            if unified_health and "restChildTableCoverage" in unified_health else {}),
+        **({"sourceObservationKinds": source_observation_kinds}
+           if source_observation_kinds else {}),
         **({"restDiagnostics": dict(rest_diagnostics)} if rest_diagnostics is not None else {}),
         "evaluationInputs": {
             name: {

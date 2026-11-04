@@ -335,6 +335,16 @@ Thread telemetry. This source complements OTBR network-wide collection rather
 than replacing it. The dashboard serializes Matter refreshes and serves cached
 snapshots until they are stale or explicitly refreshed.
 
+New commissioned-node snapshots record `sourceObservedAt` with
+`sourceObservationKind: controller-snapshot`: when Hobat received and
+reconciled HA's cached state, not when each device attribute was measured.
+Native topology and Border Router data retain their upstream collection/last-seen
+times. Cache-only rebuilding cannot repair old HA files that lack trustworthy
+times. The `all` outcome binds empty derived arrays to the exact saved bytes;
+an empty leaf result without that binding remains time-unavailable.
+These observations do not establish fresh counter intervals or whole-mesh
+device absence. See [HA observation times](doc/thread_network_health.md#ha-controller-observation-times).
+
 Matter device details show reported reboot count, uptime, operational hours,
 boot reason, active fault lists, endpoint-scoped bridged identity, and cached
 Power Source values when available. Battery percentage is derived from the

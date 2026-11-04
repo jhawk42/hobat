@@ -6,7 +6,7 @@ import hashlib
 import ipaddress
 import json
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from ha_matter_ws_contract import MatterWsContractError
@@ -29,10 +29,13 @@ from td_const import (
     HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
     HA_MATTER_WS_DASHBOARD_FILENAME,
     HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME,
+    HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
     HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
     HA_MATTER_WS_NETWORK_TOPOLOGY_OUTCOME_FILENAME,
     HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
     HA_MATTER_WS_THREAD_BORDER_ROUTERS_OUTCOME_FILENAME,
+    HA_MATTER_WS_TOPOLOGY_FILENAME,
 )
 from td_network_identity import canonical_ext_pan_id
 from td_record_merge import append_merge_conflict
@@ -271,6 +274,76 @@ def native_observation_epoch(extractor: str, payload: Any) -> float | None:
     return min(values) / 1000
 
 
+def controller_observation_time(
+    payload: Any, *, filename: str, content_digest: str | None,
+    outcome: Any, now: datetime,
+) -> tuple[str | None, str] | None:
+    """Validate controller receipt evidence without making it a measurement time."""
+    records = payload if isinstance(payload, list) else [payload]
+    if isinstance(payload, dict) and "devices" in payload:
+        records = [payload]
+        for field in ("devices", "diagnostics", "meshDiagnostics", "topology"):
+            values = payload.get(field)
+            if not isinstance(values, list):
+                raise MatterWsContractError(f"Invalid cached HA dashboard {field}")
+            records.extend(values)
+    timed = [record for record in records
+             if isinstance(record, dict) and record.get("relationshipOnly") is not True]
+    bindings = outcome.get("artifactObservations") if isinstance(outcome, dict) else None
+    binding = bindings.get(filename) if isinstance(bindings, dict) else None
+    explicit = any("sourceObservationKind" in record for record in timed)
+    if not explicit and binding is None:
+        legacy_keys = {"sourceObservedAt", "observedAt", "capturedAt", "completedAt",
+                       "capturedAtEpoch", "captured_at_epoch"}
+        if any(legacy_keys.intersection(record) for record in timed) and not all(
+            legacy_keys.intersection(record) for record in timed
+        ):
+            return None, "invalid-source-time"
+        return None
+
+    def instant(record: dict) -> datetime:
+        if record.get("sourceObservationKind") != "controller-snapshot":
+            raise ValueError("Invalid controller observation kind")
+        value = record.get("sourceObservedAt")
+        if not isinstance(value, str):
+            raise ValueError("Missing controller observation time")
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or not 0 < parsed.timestamp() <= now.timestamp():
+            raise ValueError("Invalid controller observation time")
+        return parsed.astimezone(timezone.utc)
+
+    try:
+        times = [instant(record) for record in timed]
+        if binding is not None:
+            if (not isinstance(binding, dict)
+                    or set(binding) != {"sha256", "recordCount", "sourceObservedAt",
+                                        "sourceObservationKind"}
+                    or binding["sha256"] != content_digest
+                    or type(binding["recordCount"]) is not int
+                    or binding["recordCount"] != len(
+                        payload if isinstance(payload, list) else payload["devices"])
+                    or not isinstance(outcome, dict)
+                    or outcome.get("source") != "ha-matter-ws"
+                    or outcome.get("status") not in {"success", "success-with-node-errors"}
+                    or filename not in outcome.get("finalFiles", [])):
+                raise ValueError("Unbound controller observation")
+            observed = instant(binding)
+            started = datetime.fromisoformat(outcome["startedAt"].replace("Z", "+00:00"))
+            completed = datetime.fromisoformat(outcome["completedAt"].replace("Z", "+00:00"))
+            if (started.tzinfo is None or completed.tzinfo is None
+                    or not 0 < started.timestamp() <= observed.timestamp()
+                    <= completed.timestamp() <= now.timestamp()):
+                raise ValueError("Invalid controller collection interval")
+            if "sourceObservationKind" in outcome and instant(outcome) != observed:
+                raise ValueError("Conflicting controller outcome observation")
+            times.append(observed)
+        if not times or len(set(times)) != 1:
+            raise ValueError("Missing or conflicting controller observations")
+        return times[0].isoformat(), "controller-snapshot"
+    except (ValueError, KeyError, TypeError, AttributeError, OverflowError, OSError):
+        return None, "invalid-source-time"
+
+
 def validate_cached_outcome(filename: str, payload: Any) -> bool:
     """Validate original HA outcomes independently of display materialization."""
     if not isinstance(payload, dict) or payload.get("source") != "ha-matter-ws":
@@ -287,6 +360,26 @@ def validate_cached_outcome(filename: str, payload: Any) -> bool:
                 or any(type(payload.get(key)) is not int or payload[key] < 0
                        for key in ("nodeCount", "normalizedNodeCount"))):
             raise MatterWsContractError("Invalid cached HA inventory outcome")
+        if "artifactObservations" in payload:
+            observations = payload["artifactObservations"]
+            allowed = {
+                HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME, HA_MATTER_WS_TOPOLOGY_FILENAME,
+                HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
+                HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME, HA_MATTER_WS_DASHBOARD_FILENAME,
+            }
+            if (not isinstance(observations, dict) or not observations
+                    or not set(observations) <= allowed.intersection(files)
+                    or any(not isinstance(item, dict)
+                           or set(item) != {"sha256", "recordCount", "sourceObservedAt",
+                                            "sourceObservationKind"}
+                           or not isinstance(item["sha256"], str)
+                           or len(item["sha256"]) != 64
+                           or any(char not in "0123456789abcdef" for char in item["sha256"])
+                           or type(item["recordCount"]) is not int or item["recordCount"] < 0
+                           or not isinstance(item["sourceObservedAt"], str)
+                           or item["sourceObservationKind"] != "controller-snapshot"
+                           for item in observations.values())):
+                raise MatterWsContractError("Invalid cached HA artifact observations")
         return (payload["status"] == "success" and not errors
                 and payload["nodeCount"] == payload["normalizedNodeCount"]
                 and HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME in files)
@@ -318,6 +411,12 @@ def assess_cached_outcomes(payloads: dict[str, Any], inputs: list[dict]) -> list
     if collection is not None and inventory is not None:
         if collection["normalizedNodeCount"] != len(inventory):
             reasons.append("outcome-count-mismatch:" + HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME)
+        collection_scope = metadata[HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME].get("observedNetwork")
+        if collection_scope is not None and any(
+            metadata.get(filename, {}).get("observedNetwork") not in {None, collection_scope}
+            for filename in collection.get("artifactObservations", {})
+        ):
+            reasons.append("outcome-scope-mismatch:" + HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME)
     native = (
         (HA_MATTER_WS_THREAD_BORDER_ROUTERS_OUTCOME_FILENAME,
          HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME, "borderRouters", "itemCount"),

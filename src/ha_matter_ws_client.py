@@ -9,6 +9,7 @@ import logging
 
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 import websockets
@@ -45,6 +46,7 @@ class NodeSnapshot:
     frames: tuple[dict[str, Any], ...]
     events: tuple[dict[str, Any], ...]
     nodes: tuple[dict[str, Any], ...]
+    source_observed_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -422,6 +424,7 @@ async def fetch_node_snapshot(
     settle_timeout: float = 0.25,
     max_frame_size: int = 4 * 1024 * 1024,
     max_frames: int = 500,
+    clock: Callable[[], datetime] | None = None,
 ) -> NodeSnapshot:
     """Fetch one bounded inventory and reconcile events without a second request."""
 
@@ -436,12 +439,27 @@ async def fetch_node_snapshot(
         if not isinstance(result, list):
             raise MatterWsContractError("start_listening result must be a node array")
         await client.wait_for_event_settle(settle_timeout)
+        nodes = reconcile_nodes(result, client.events)
+        client.raise_if_reader_failed()
+        observed_at = (
+            clock() if clock is not None else datetime.now(timezone.utc)
+        )
+        if (
+            not isinstance(observed_at, datetime)
+            or observed_at.tzinfo is None
+            or observed_at.utcoffset() is None
+            or observed_at.timestamp() <= 0
+        ):
+            raise MatterWsContractError(
+                "controller observation clock must return a positive timezone-aware datetime"
+            )
         return NodeSnapshot(
             uri=client.uri,
             server_info=client.server_info,
             frames=client.frames,
             events=client.events,
-            nodes=reconcile_nodes(result, client.events),
+            nodes=nodes,
+            source_observed_at=observed_at.astimezone(timezone.utc).isoformat(),
         )
 
 

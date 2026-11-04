@@ -328,6 +328,19 @@ inventory transaction and writes every fixed snapshot plus the collection
 outcome. `dashboard` writes the dashboard data bundle. `--output` applies only
 to leaf commands.
 
+Commissioned-node records and dashboard envelopes retain one `sourceObservedAt`
+and `sourceObservationKind: controller-snapshot` per successful inventory
+transaction. This is the time Hobat received/reconciled the controller cache,
+not the measurement time of every cached attribute. Normalization, checkpoints,
+final saves, and cache-only processing do not refresh it. The `all` outcome's
+`artifactObservations` binds each derived array/dashboard to its exact saved
+SHA-256, record count (dashboard device count), and observation time. An empty
+leaf array cannot carry its own time and remains time-unavailable without a
+matching composite binding. Leaf collection never overwrites that composite
+outcome; stale bindings remain explicit rather than blessing replacement data.
+Native upstream times remain separate. Existing legacy caches stay usable but
+retain their original timing limitations; reprocessing cannot invent provenance.
+
 `device ping` is a separate active diagnostic against one commissioned Matter
 node; it is not run as part of snapshot collection:
 

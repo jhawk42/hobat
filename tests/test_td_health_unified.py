@@ -1,5 +1,6 @@
 """Original-evidence qualification and retained Unified health regressions."""
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -17,7 +18,9 @@ from td_health_processor import HealthProcessingError, build_processing_result, 
 from td_health_read import TDHealthReadService
 from td_health_sqlite import SQLiteHealthStore, _RetainedHistory
 from td_unified_dataset import build_unified_dataset, read_original_evidence
-from test_td_unified_dataset import NETWORK, SOURCE_TIME, _entry, _save, _seed, _seed_ha
+from test_td_unified_dataset import (
+    NETWORK, SOURCE_TIME, _entry, _save, _seed, _seed_ha, _seed_ha_controller,
+)
 
 
 IDS = ("otbr_cli_unified", "otbr_restapi_unified", "ha_matter_ws_unified", "multi_source_unified")
@@ -43,7 +46,7 @@ def process(directory, dataset_id, store=None, **kwargs):
 @pytest.mark.parametrize("builder_contract", [
     "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
     "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
-    "unified-assembly-v9",
+    "unified-assembly-v9", "unified-assembly-v10",
 ])
 def test_original_samples_are_scoped_stable_and_reopenable(
     tmp_path, dataset_id, builder_contract, monkeypatch,
@@ -114,6 +117,302 @@ def test_qualification_profiles_and_no_ha_negative_authority(tmp_path, dataset_i
             "otbr-restapi" if dataset_id == "otbr_restapi_unified" else "otbr-cli")
 
 
+def test_typed_controller_health_is_complete_without_absence_authority(tmp_path):
+    from td_health_unified import digest
+
+    entry = _seed_ha_controller(tmp_path)
+    report = build_unified_dataset(tmp_path, entry["value"])
+    assert report["healthState"] == "complete"
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    first = process(tmp_path, "ha_matter_ws_unified", store)
+    context = first.assessment.reproduction_context["unifiedHealth"]
+    source_times = context["sourceTimeProvenance"]
+    controller = [item for item in source_times
+                  if item["sourceObservationKind"] == "controller-snapshot"]
+    assert len(controller) == 5
+    assert all(item["timeProvenance"] == "controller-snapshot" for item in controller)
+    assert context["sourceTimeProvenanceDigest"] == digest(source_times)
+    assert context["absenceWitness"] is None
+    assert first.observation.completeness.value == "complete"
+    assert first.assessment.evaluator_version == "snapshot-v18"
+    assert not first.assessment.coverage["offlineEligible"]
+    assert not first.assessment.coverage["topologyAuthority"]
+    assert first.assessment.coverage["sourceObservationKinds"] == {
+        item["filename"]: "controller-snapshot" for item in controller
+    }
+    controller_files = {item["filename"] for item in controller}
+    assert not any(
+        fact.source_file in controller_files and fact.value_class == "transient"
+        for fact in first.roster_facts
+    )
+    assert any(
+        fact.field_key == "extAddress" and fact.value_class == "identity"
+        and fact.source_file == "td-ha-matter-ws-devices-fetch-all.json"
+        for fact in first.roster_facts
+    )
+
+    second = process(tmp_path, "ha_matter_ws_unified", store)
+    assert second.observation.observation_id == first.observation.observation_id
+    assert second.assessment.assessment_id == first.assessment.assessment_id
+    assert second.observation_created is False
+    reopened = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    with closing(reopened._connect()) as connection:
+        retained = reopened._endpoint(connection, first.assessment.assessment_id)
+    assert retained[0] == first.observation
+    assert retained[1].reproduction_context["unifiedHealth"]["sourceTimeProvenance"] == source_times
+
+
+def test_typed_controller_metrics_have_no_measurement_interval(tmp_path):
+    from td_health_comparison import derive_comparison, source_roles_for_dataset
+    from td_health_observation_model import MetricSample
+
+    entry = _seed_ha_controller(tmp_path)
+    build_unified_dataset(tmp_path, entry["value"])
+    result = process(tmp_path, "ha_matter_ws_unified")
+    source_file = next(
+        item["filename"] for item in result.assessment.reproduction_context[
+            "unifiedHealth"
+        ]["sourceTimeProvenance"]
+        if item["sourceObservationKind"] == "controller-snapshot"
+    )
+    before_observation = replace(result.observation, metrics=(MetricSample(
+        "extaddr:0011223344556677", "parentChanges", 8.0, "count", None, source_file,
+    ),))
+    after_time = "2026-01-02T00:00:00+00:00"
+    after_observation = replace(
+        before_observation, observation_id="observation:later-controller-read",
+        observed_at=after_time, ingested_at=after_time,
+        metrics=(MetricSample(
+            "extaddr:0011223344556677", "parentChanges", 2.0, "count", None, source_file,
+        ),),
+    )
+    before_assessment = replace(
+        result.assessment, assessment_id="assessment:before-controller-read",
+        observation_id=before_observation.observation_id,
+    )
+    after_assessment = replace(
+        result.assessment, assessment_id="assessment:after-controller-read",
+        observation_id=after_observation.observation_id, assessed_at=after_time,
+    )
+    interval, items = derive_comparison(
+        (before_observation, before_assessment),
+        (after_observation, after_assessment),
+        source_roles=source_roles_for_dataset(
+            load_health_manifest().dataset("ha_matter_ws_unified"),
+        ),
+    )
+    counter = next(item for item in items if item.kind == "counter-delta")
+    assert interval.elapsed_seconds is None
+    assert not interval.compatibility.comparable
+    assert counter.delta is None
+    assert counter.change == "unknown"
+    assert "reset-unknown" in counter.compatibility.reasons
+    assert "reset-detected" not in counter.compatibility.reasons
+
+
+def test_typed_controller_checkpoint_stays_partial_when_allowed(tmp_path):
+    entry = _seed_ha_controller(tmp_path)
+    build_unified_dataset(tmp_path, entry["value"])
+    filename = "td-ha-matter-ws-devices-fetch-all.json"
+    final = tmp_path / filename
+    checkpoint = tmp_path / filename.replace(".json", ".partial.json")
+    checkpoint.write_text("[]")
+    newer = final.stat().st_mtime + 2
+    os.utime(checkpoint, (newer, newer))
+
+    result = process(tmp_path, "ha_matter_ws_unified", allow_partial=True)
+    provenance = {
+        item["filename"]: item
+        for item in result.assessment.reproduction_context["unifiedHealth"][
+            "sourceTimeProvenance"
+        ]
+    }
+    assert result.observation.completeness.value == "partial"
+    assert provenance[filename]["state"] == "provisional"
+    assert provenance[filename]["sourceObservationKind"] == "controller-snapshot"
+
+
+def test_missing_optional_controller_inputs_do_not_downgrade_complete_ha(tmp_path):
+    entry = _seed_ha_controller(tmp_path)
+    optional_controller_files = [
+        item["file"] for item in entry["unified"]["inputs"]
+        if not item["required"] and item["extractor"] in {
+            "ha-inventory", "raw-array", "ha-projection",
+        }
+    ]
+    assert optional_controller_files
+    for filename in optional_controller_files:
+        (tmp_path / filename).unlink()
+
+    report = build_unified_dataset(tmp_path, entry["value"])
+    assert report["healthState"] == "complete"
+    result = process(tmp_path, "ha_matter_ws_unified")
+    assert result.observation.completeness.value == "complete"
+    assert result.assessment.reproduction_context["unifiedHealth"]["absenceWitness"] is None
+
+
+def test_source_time_provenance_requires_v11_builder_context(tmp_path):
+    from td_health_manifest import HealthManifestError
+    from td_health_unified import digest, plain, validate_context
+
+    entry = _seed_ha_controller(tmp_path)
+    build_unified_dataset(tmp_path, entry["value"])
+    result = process(tmp_path, "ha_matter_ws_unified")
+    dataset = load_health_manifest().dataset("ha_matter_ws_unified")
+    context = plain(result.assessment.reproduction_context)
+    context["unifiedHealth"]["reportContractDigest"] = digest([
+        "unified-v1", "unified-assembly-v10",
+        dataset.unified_recipe["recipeDigest"], dataset.unified_recipe["authorityDigest"],
+    ])
+    with pytest.raises(HealthManifestError, match="Source-time provenance requires the v11"):
+        validate_context(context, dataset, result.observation)
+
+
+def test_malformed_typed_source_time_provenance_is_not_silently_downgraded(tmp_path):
+    from td_health_manifest import HealthManifestError
+    from td_health_unified import has_typed_ha_observation, plain
+
+    entry = _seed_ha_controller(tmp_path)
+    build_unified_dataset(tmp_path, entry["value"])
+    result = process(tmp_path, "ha_matter_ws_unified")
+    dataset = load_health_manifest().dataset("ha_matter_ws_unified")
+    context = plain(result.assessment.reproduction_context)
+    context["unifiedHealth"]["sourceTimeProvenance"][0]["timeProvenance"] = {}
+    with pytest.raises(HealthManifestError, match="Invalid retained Unified source-time provenance"):
+        has_typed_ha_observation(context, dataset)
+
+
+@pytest.mark.parametrize(
+    ("typed_controller", "forged_evaluator"),
+    [(False, "snapshot-v18"), (True, "snapshot-v17")],
+)
+def test_retained_unified_evaluator_must_match_typed_provenance(
+    tmp_path, typed_controller, forged_evaluator,
+):
+    from td_health_sqlite import ReassessmentBaselineUnavailable
+
+    if typed_controller:
+        _seed_ha_controller(tmp_path)
+    else:
+        _seed_ha(tmp_path)
+    build_unified_dataset(tmp_path, "ha_matter_ws_unified")
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    result = process(tmp_path, "ha_matter_ws_unified", store)
+    with closing(store._connect()) as connection, connection:
+        row = connection.execute(
+            "SELECT reproduction_context_json FROM assessments WHERE assessment_id=?",
+            (result.assessment.assessment_id,),
+        ).fetchone()
+        context = json.loads(row["reproduction_context_json"])
+        context["evaluatorVersion"] = forged_evaluator
+        connection.execute(
+            """UPDATE assessments SET evaluator_version=?, reproduction_context_json=?
+               WHERE assessment_id=?""",
+            (forged_evaluator, json.dumps(context), result.assessment.assessment_id),
+        )
+    with closing(store._connect()) as connection:
+        with pytest.raises(
+            ReassessmentBaselineUnavailable,
+            match="refresh health from retained snapshots",
+        ):
+            store._reassessment_inputs(connection, result.assessment.assessment_id)
+
+
+def test_multisource_controller_reread_does_not_advance_original_witness_or_sources(tmp_path):
+    from td_health_comparison import derive_comparison, source_roles_for_dataset
+    from td_health_observation_model import MetricSample
+
+    seed(tmp_path, "multi_source_unified")
+    _seed_ha_controller(tmp_path)
+    build_unified_dataset(tmp_path, "multi_source_unified")
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    first = process(tmp_path, "multi_source_unified", store)
+    first_context = first.assessment.reproduction_context["unifiedHealth"]
+    first_witness = first_context["absenceWitness"]
+    assert first_witness["domain"] in {"otbr-cli", "otbr-restapi"}
+    first_sources = {
+        item["filename"]: item for item in first_context["sourceTimeProvenance"]
+    }
+    first_cli_rest = {
+        name: (item["digest"], item["sourceObservedAt"])
+        for name, item in first_sources.items()
+        if name.startswith(("td-otbr-cli-", "td-otbr-restapi-"))
+    }
+
+    later = "2026-02-01T00:00:00+00:00"
+    controller_files = (
+        "td-ha-matter-ws-devices-fetch-all.json",
+        "td-ha-matter-ws-topology.json",
+        "td-ha-matter-ws-diagnostics-fetch-all.json",
+        "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
+        "td-ha-matter-ws-dashboard.json",
+    )
+
+    def retime(value):
+        if isinstance(value, dict):
+            if value.get("sourceObservationKind") == "controller-snapshot":
+                value["sourceObservedAt"] = later
+            for child in value.values():
+                retime(child)
+        elif isinstance(value, list):
+            for child in value:
+                retime(child)
+
+    bindings = {}
+    for filename in controller_files:
+        payload = json.loads((tmp_path / filename).read_text())
+        retime(payload)
+        path = _save(tmp_path, filename, payload)
+        bindings[filename] = {
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "recordCount": len(payload if isinstance(payload, list) else payload["devices"]),
+            "sourceObservedAt": later,
+            "sourceObservationKind": "controller-snapshot",
+        }
+    outcome_file = "td-ha-matter-ws-collection.outcome.json"
+    outcome = json.loads((tmp_path / outcome_file).read_text())
+    outcome["sourceObservedAt"] = later
+    outcome["completedAt"] = later
+    outcome["artifactObservations"] = bindings
+    _save(tmp_path, outcome_file, outcome)
+    build_unified_dataset(tmp_path, "multi_source_unified")
+    second = process(tmp_path, "multi_source_unified", store)
+    second_context = second.assessment.reproduction_context["unifiedHealth"]
+    second_sources = {
+        item["filename"]: item for item in second_context["sourceTimeProvenance"]
+    }
+    second_cli_rest = {
+        name: (item["digest"], item["sourceObservedAt"])
+        for name, item in second_sources.items()
+        if name.startswith(("td-otbr-cli-", "td-otbr-restapi-"))
+    }
+    assert second.observation.observed_at > first.observation.observed_at
+    assert second_cli_rest == first_cli_rest
+    assert second_context["absenceWitness"] == first_witness
+    assert second_context["absenceWitness"]["domain"] in {"otbr-cli", "otbr-restapi"}
+    counter_file = "td-otbr-cli-networkdiag-fetch-all.json"
+    assert any(source.filename == counter_file for source in first.observation.sources)
+    before_observation = replace(first.observation, metrics=(MetricSample(
+        "extaddr:0011223344556677", "parentChanges", 8.0, "count", None, counter_file,
+    ),))
+    after_observation = replace(second.observation, metrics=(MetricSample(
+        "extaddr:0011223344556677", "parentChanges", 2.0, "count", None, counter_file,
+    ),))
+    interval, items = derive_comparison(
+        (before_observation, first.assessment),
+        (after_observation, second.assessment),
+        source_roles=source_roles_for_dataset(
+            load_health_manifest().dataset("multi_source_unified"),
+        ),
+    )
+    counter = next(item for item in items if item.kind == "counter-delta")
+    assert interval.elapsed_seconds is not None
+    assert counter.delta is None
+    assert counter.change == "unknown"
+    assert counter.reset_evidence.state == "unknown"
+    assert "source-not-newer" in counter.compatibility.reasons
+
+
 @pytest.mark.parametrize("case", ["recovered", "missing-binding", "mesh-partial"])
 def test_rest_unified_revalidates_recovery_and_preserves_other_gates(tmp_path, case):
     from test_td_restapi_diagnostic_recovery import _fixture
@@ -148,9 +447,13 @@ def test_rest_unified_revalidates_recovery_and_preserves_other_gates(tmp_path, c
 
 
 @pytest.mark.parametrize("child_table", [[], [{"childId": 42}]])
-def test_rest_child_table_coverage_uses_only_independent_rest_absence_authority(tmp_path, child_table):
+@pytest.mark.parametrize("builder_contract", ["unified-assembly-v10", "unified-assembly-v11"])
+def test_rest_child_table_coverage_uses_only_independent_rest_absence_authority(
+    tmp_path, child_table, builder_contract, monkeypatch,
+):
     from test_td_unified_composition import _seed_rest_child_coverage
 
+    monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", builder_contract)
     _seed_rest_child_coverage(tmp_path, child_table=child_table, completed=True)
     report = build_unified_dataset(tmp_path, "multi_source_unified")
     assert report["healthState"] == "complete"
@@ -1640,6 +1943,37 @@ def test_assembly_contract_upgrade_creates_a_distinct_observation(tmp_path, monk
             assert observation.observation_id == result.observation.observation_id
 
 
+def test_v17_unified_assessment_reassesses_from_retained_observation_after_upgrade(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", "unified-assembly-v10")
+    _seed(tmp_path, "otbr_cli_unified")
+    build_unified_dataset(tmp_path, "otbr_cli_unified")
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    monkeypatch.setattr("td_health_evaluator.UNIFIED_EVALUATOR_VERSION", "snapshot-v17")
+    legacy = process(tmp_path, "otbr_cli_unified", store)
+    assert legacy.assessment.evaluator_version == "snapshot-v17"
+    monkeypatch.setattr("td_health_evaluator.UNIFIED_EVALUATOR_VERSION", "snapshot-v18")
+    monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", "unified-assembly-v11")
+
+    for path in tmp_path.glob("*.json"):
+        path.unlink()
+    reopened = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    reopened.upsert_expected_device(
+        NETWORK, "extaddr:2222222222222222", "retained", "expected",
+    )
+    with closing(reopened._connect()) as connection:
+        row = connection.execute(
+            """SELECT assessment_id FROM current_assessments
+               WHERE dataset_id='otbr_cli_unified' AND network_id=?""",
+            (NETWORK,),
+        ).fetchone()
+        retained = reopened._endpoint(connection, row["assessment_id"])
+    assert retained[1].evaluator_version == "snapshot-v17"
+    assert retained[1].reproduction_context["evaluatorVersion"] == "snapshot-v17"
+    assert retained[1].reproduction_context["unifiedHealth"]["absenceWitness"] is not None
+
+
 def test_unified_comparison_requires_matching_current_evaluator(tmp_path):
     from td_health_comparison import derive_comparison, source_roles_for_dataset
     collection(tmp_path, "otbr_cli_unified", 1, positive=True)
@@ -1654,6 +1988,8 @@ def test_unified_comparison_requires_matching_current_evaluator(tmp_path):
         ("snapshot-v16", "snapshot-v16", True),
         ("snapshot-v16", "snapshot-v17", False),
         ("snapshot-v17", "snapshot-v17", True),
+        ("snapshot-v18", "snapshot-v18", True),
+        ("snapshot-v17", "snapshot-v18", False),
     ):
         legacy = replace(before.assessment, evaluator_version=old_version)
         after_assessment = replace(after.assessment, evaluator_version=new_version)

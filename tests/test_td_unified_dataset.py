@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import fcntl
+import hashlib
 import json
 import os
 import subprocess
@@ -871,7 +872,7 @@ def test_ping_reachable_router_without_tables_is_expected_and_complete(tmp_path)
         {"file": "td-otbr-cli-meshdiag-router-childtables.json", "rloc16": "0x4400"},
         {"file": "td-otbr-cli-meshdiag-router-neighbortables.json", "rloc16": "0x4400"},
     ]
-    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v10"
+    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v11"
 
 
 @pytest.mark.parametrize(("kwargs", "reason"), [
@@ -1233,6 +1234,213 @@ def _seed_ha(directory, *, empty=False):
                 payload["connectionCount"] = 0 if empty else 1
         _save(directory, item["file"], {**payload, "startedAt": SOURCE_TIME, "completedAt": SOURCE_TIME})
     return entry
+
+
+def _seed_ha_controller(directory, *, empty=False):
+    entry = _seed_ha(directory, empty=empty)
+    device_file = "td-ha-matter-ws-devices-fetch-all.json"
+    devices = json.loads((directory / device_file).read_text())
+    topology = json.loads((directory / "td-ha-matter-ws-topology.json").read_text())
+    metadata = {"sourceObservedAt": SOURCE_TIME, "sourceObservationKind": "controller-snapshot"}
+    for record in [*devices, *topology]:
+        record.update(metadata)
+    payloads = {
+        device_file: devices,
+        "td-ha-matter-ws-topology.json": topology,
+        "td-ha-matter-ws-diagnostics-fetch-all.json": copy.deepcopy(topology),
+        "td-ha-matter-ws-mesh-diagnostics-fetch-all.json": copy.deepcopy(topology),
+        "td-ha-matter-ws-dashboard.json": {
+            "schemaVersion": "1.0.0", **metadata, "devices": devices,
+            "diagnostics": topology, "meshDiagnostics": topology, "topology": topology,
+        },
+    }
+    bindings = {}
+    for filename, payload in payloads.items():
+        path = _save(directory, filename, payload)
+        bindings[filename] = {
+            **metadata, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "recordCount": len(payload if isinstance(payload, list) else payload["devices"]),
+        }
+    outcome_file = "td-ha-matter-ws-collection.outcome.json"
+    outcome = json.loads((directory / outcome_file).read_text())
+    outcome.update(**metadata, artifactObservations=bindings, finalFiles=list(payloads))
+    _save(directory, outcome_file, outcome)
+    return entry
+
+
+def test_ha_controller_observation_is_typed_original_evidence(tmp_path):
+    entry = _seed_ha_controller(tmp_path)
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert result["healthState"] == "complete"
+    report = unified.read_generation(tmp_path, entry)
+    controller = [item for item in report["inputs"]
+                  if item["role"] in {"records", "projection"}
+                  and item["filename"] not in {
+                      "td-ha-matter-ws-thread-border-routers.json",
+                      "td-ha-matter-ws-network-topology.json",
+                  }]
+    assert len(controller) == 5
+    assert all(item.get("sourceObservationKind") == "controller-snapshot" for item in controller)
+    assert all(item["timeProvenance"] == "controller-snapshot" for item in controller)
+    assert all(item["sourceObservedAt"] == SOURCE_TIME for item in controller)
+    for item in controller:
+        path = tmp_path / item["filename"]
+        os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1_000_000_000))
+    assert unified.read_generation(tmp_path, entry) == report
+    assert unified.build_unified_dataset(tmp_path, entry["value"])["noOp"] is True
+
+
+@pytest.mark.parametrize("case", [
+    "missing-row-time", "wrong-kind", "future", "naive", "stale-binding",
+    "conflicting-time", "missing-kind", "nonpositive", "boolean",
+])
+def test_ha_invalid_controller_observation_never_falls_back_to_mtime(tmp_path, case):
+    entry = _seed_ha_controller(tmp_path)
+    filename = "td-ha-matter-ws-devices-fetch-all.json"
+    rows = json.loads((tmp_path / filename).read_text())
+    if case == "missing-row-time":
+        rows[-1].pop("sourceObservedAt")
+    elif case == "wrong-kind":
+        rows[0]["sourceObservationKind"] = "measurement"
+    elif case == "future":
+        rows[0]["sourceObservedAt"] = "2999-01-01T00:00:00Z"
+    elif case == "naive":
+        rows[0]["sourceObservedAt"] = "2026-01-01T00:00:00"
+    elif case == "conflicting-time":
+        rows[0]["sourceObservedAt"] = "2025-12-31T23:59:59Z"
+    elif case == "missing-kind":
+        rows[0].pop("sourceObservationKind")
+    elif case == "nonpositive":
+        rows[0]["sourceObservedAt"] = "1970-01-01T00:00:00Z"
+    elif case == "boolean":
+        rows[0]["sourceObservedAt"] = True
+    else:
+        rows[0]["deviceLabel"] = "changed after publication"
+    _save(tmp_path, filename, rows)
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    report = unified.read_generation(tmp_path, entry)
+    item = next(item for item in report["inputs"] if item["filename"] == filename)
+    assert result["healthState"] != "complete"
+    assert item["sourceObservedAt"] is None
+    assert item["timeProvenance"] == "invalid-source-time"
+    assert f"unavailable-source-time:{filename}" in result["coverage"]["healthReasons"]
+
+
+def test_ha_empty_controller_array_needs_exact_outcome_binding(tmp_path):
+    entry = _seed_ha_controller(tmp_path)
+    filename = "td-ha-matter-ws-diagnostics-fetch-all.json"
+    path = _save(tmp_path, filename, [])
+    outcome_file = "td-ha-matter-ws-collection.outcome.json"
+    outcome = json.loads((tmp_path / outcome_file).read_text())
+    binding = outcome["artifactObservations"][filename]
+    binding.update(sha256=hashlib.sha256(path.read_bytes()).hexdigest(), recordCount=0)
+    _save(tmp_path, outcome_file, outcome)
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    report = unified.read_generation(tmp_path, entry)
+    item = next(item for item in report["inputs"] if item["filename"] == filename)
+    assert result["healthState"] == "complete"
+    assert item["sourceObservedAt"] == SOURCE_TIME
+    assert item["timeProvenance"] == "controller-snapshot"
+    del outcome["artifactObservations"][filename]
+    _save(tmp_path, outcome_file, outcome)
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert result["healthState"] == "degraded"
+
+
+@pytest.mark.parametrize("case", ["digest", "count", "interval", "capture-time"])
+def test_ha_controller_artifact_binding_is_not_count_or_clock_inference(tmp_path, case):
+    entry = _seed_ha_controller(tmp_path)
+    filename = "td-ha-matter-ws-devices-fetch-all.json"
+    outcome_file = "td-ha-matter-ws-collection.outcome.json"
+    outcome = json.loads((tmp_path / outcome_file).read_text())
+    binding = outcome["artifactObservations"][filename]
+    if case == "digest":
+        binding["sha256"] = "0" * 64
+    elif case == "count":
+        binding["recordCount"] += 1
+    elif case == "interval":
+        outcome["startedAt"] = "2026-01-02T00:00:00+00:00"
+    else:
+        binding["sourceObservedAt"] = "2025-12-31T23:59:59+00:00"
+    _save(tmp_path, outcome_file, outcome)
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    item = next(item for item in unified.read_generation(tmp_path, entry)["inputs"]
+                if item["filename"] == filename)
+    assert result["healthState"] == "degraded"
+    assert item["sourceObservedAt"] is None
+    assert item["timeProvenance"] == "invalid-source-time"
+
+
+def test_ha_nonempty_leaf_can_supply_its_own_typed_observation(tmp_path):
+    entry = _seed_ha_controller(tmp_path)
+    filename = "td-ha-matter-ws-diagnostics-fetch-all.json"
+    outcome_file = "td-ha-matter-ws-collection.outcome.json"
+    outcome = json.loads((tmp_path / outcome_file).read_text())
+    del outcome["artifactObservations"][filename]
+    _save(tmp_path, outcome_file, outcome)
+    unified.build_unified_dataset(tmp_path, entry["value"])
+    item = next(item for item in unified.read_generation(tmp_path, entry)["inputs"]
+                if item["filename"] == filename)
+    assert item["sourceObservedAt"] == SOURCE_TIME
+    assert item["timeProvenance"] == "controller-snapshot"
+
+
+def test_ha_dashboard_envelope_does_not_hide_untrusted_nested_records(tmp_path):
+    entry = _seed_ha_controller(tmp_path)
+    filename = "td-ha-matter-ws-dashboard.json"
+    dashboard = json.loads((tmp_path / filename).read_text())
+    dashboard["diagnostics"][0].pop("sourceObservationKind")
+    _save(tmp_path, filename, dashboard)
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    item = next(item for item in unified.read_generation(tmp_path, entry)["inputs"]
+                if item["filename"] == filename)
+    assert result["healthState"] == "degraded"
+    assert item["sourceObservedAt"] is None
+
+
+def test_ha_mixed_legacy_record_times_do_not_refresh_untimed_rows(tmp_path):
+    entry = _seed_ha(tmp_path)
+    filename = "td-ha-matter-ws-devices-fetch-all.json"
+    rows = json.loads((tmp_path / filename).read_text())
+    rows[-1].pop("sourceObservedAt")
+    _save(tmp_path, filename, rows)
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert f"unavailable-source-time:{filename}" in result["coverage"]["healthReasons"]
+
+
+def test_ha_controller_outcome_cannot_contradict_bound_artifact_scope(tmp_path):
+    entry = _seed_ha_controller(tmp_path)
+    filename = "td-ha-matter-ws-collection.outcome.json"
+    outcome = json.loads((tmp_path / filename).read_text())
+    _save(tmp_path, filename, outcome, scope=OTHER_NETWORK)
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert result["healthState"] == "degraded"
+    assert f"outcome-scope-mismatch:{filename}" in result["coverage"]["healthReasons"]
+
+
+@pytest.mark.parametrize("case", ["map-type", "undeclared-file", "negative-count", "boolean-count", "kind"])
+def test_ha_malformed_artifact_observation_contract_rejects_publication(tmp_path, case):
+    entry = _seed_ha_controller(tmp_path)
+    unified.build_unified_dataset(tmp_path, entry["value"])
+    before = _artifacts(tmp_path, entry)
+    filename = "td-ha-matter-ws-collection.outcome.json"
+    outcome = json.loads((tmp_path / filename).read_text())
+    observations = outcome["artifactObservations"]
+    binding = observations["td-ha-matter-ws-devices-fetch-all.json"]
+    if case == "map-type":
+        outcome["artifactObservations"] = []
+    elif case == "undeclared-file":
+        observations["td-otbr-cli-foreign.json"] = binding
+    elif case == "negative-count":
+        binding["recordCount"] = -1
+    elif case == "boolean-count":
+        binding["recordCount"] = True
+    else:
+        binding["sourceObservationKind"] = "measurement"
+    _save(tmp_path, filename, outcome)
+    with pytest.raises(unified.UnifiedDatasetError, match="artifact observations"):
+        unified.build_unified_dataset(tmp_path, entry["value"])
+    assert _artifacts(tmp_path, entry) == before
 
 
 def test_ha_inventory_preserves_non_thread_members_and_all_safe_device_fields():

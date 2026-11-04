@@ -443,15 +443,17 @@ for all five and have no whole-network topology/BR absence authority.
 Original completeness, outcomes and unavailable inputs can only reduce these
 maxima.
 
-New Unified assessments use `snapshot-v17` and the distinct
+Unified assessments containing typed controller-observation evidence use
+`snapshot-v18`; legacy/other Unified evidence retains `snapshot-v17`. Both use the distinct
 `comparison-v1-unified` sample contract. Assessment coverage reports
 `meshdiagTablesNotProvided`, the number of routers that did not provide meshdiag
 tables; it adds no rule or finding. The REST diagnostics, REST topology,
 REST topology with mDNS, and merged OTBR topology with mDNS file-mode profiles
 also use `snapshot-v17`; unrelated file-mode profiles remain on `snapshot-v14`.
 Comparison requires matching evaluator versions and compatible sample/manifest
-contracts: retained v14-to-v14 and v16-to-v16 comparisons remain supported,
-but v14/v17 and v16/v17 pairs are unsupported. Legacy `snapshot-v15` Unified
+contracts: retained v14-to-v14, v16-to-v16 and v17-to-v17 comparisons remain
+supported; v18 requires matching assembly contracts. Cross-version pairs are
+unsupported. Legacy `snapshot-v15` Unified
 comparisons remain unsupported.
 Original profiles default to `inputMode: files`. An immutable `unifiedRecipe`
 uses the builder's `unified-v1` contract and retains the validated transitive raw closure;
@@ -459,6 +461,36 @@ versioned assessment `unifiedHealth` retains recipe/authority contract digests,
 the original-evidence fingerprint, effective coverage and absence witness.
 Observation identity excludes build/report timestamps. Rebuilding identical
 evidence cannot create a fresh collection or advance Offline.
+
+### HA controller observation times
+
+Assembly-v11 retains `sourceObservationKind: controller-snapshot` alongside
+the original `sourceObservedAt` for commissioned-node products. This is when
+Hobat received and reconciled the controller's cached inventory, not when every
+cached diagnostic was measured. The original observation flows through
+normalization, checkpoints, publication, Unified generation identity,
+Multi-source raw lineage, and retained health context without being replaced
+by build time, outcome completion, or file modification time.
+
+The composite HA `all` outcome binds derived arrays and dashboard to exact
+saved-byte digests, record counts, and observation times within the collection
+interval. This permits a trustworthy time for an empty composite array.
+An empty leaf array without that binding remains time-unavailable. Conflicting
+times, stale bindings, untrusted records, and future or timezone-less times
+remain explicit errors/degradation. Legacy HA snapshots retain their timing
+limitations: copying, touching or rebuilding them does not create missing
+observation evidence. Native topology uses upstream `collected_at`; nonempty
+Border Router inventories retain the conservative upstream `lastSeen`.
+
+Controller-scoped evidence may be complete without authorizing full-mesh
+absence. HA-only Offline/absence remains Unknown, coverage maxima remain
+limited, and controller receipt cannot establish counter continuity or renew
+transient last-known telemetry. A later receipt of the same cached values is
+not an independent device measurement. CLI/REST negative witnesses retain their
+own original digests, times and domains; HA rereads do not advance them.
+Fixing HA time provenance removes only its validated timing reasons, not
+unrelated source failures or actual unhealthy findings. Historical observations
+and assessments keep their original interpretation.
 
 For new Unified absence assessments, a qualified complete CLI domain wins;
 otherwise a complete qualified REST domain may supply the witness. The key is

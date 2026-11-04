@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 import ha_matter_ws_cli
+import ha_matter_ws_fetch_all
 import td_cli
+import td_unified_dataset as unified
 
 from ha_matter_ws_cli import (
     DASHBOARD_SCHEMA_VERSION,
@@ -26,6 +31,7 @@ from ha_matter_ws_cli import (
     main,
 )
 from ha_matter_ws_client import (
+    NodeSnapshot,
     MatterWsCommandError,
     MatterWsContractError,
     MatterWsRequestTimeoutError,
@@ -35,6 +41,7 @@ from ha_matter_ws_contract import MatterWsSchemaCompatibilityError
 from ha_matter_ws_contract import MatterWsCommandUnsupportedError
 from ha_matter_ws_extractor import MatterExtractionError
 from ha_matter_ws_fetch_all import MatterCollection
+from test_td_unified_dataset import NETWORK, SOURCE_TIME, _seed_ha
 from td_const import (
     HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
     HA_MATTER_WS_DASHBOARD_FILENAME,
@@ -51,6 +58,7 @@ from td_const import (
     HA_MATTER_WS_THREAD_DIAGNOSTICS_PARTIAL_FILENAME,
     HA_MATTER_WS_TOPOLOGY_FILENAME,
 )
+from util_data import read_network_scope
 
 
 FINAL_FILENAMES = [
@@ -62,9 +70,12 @@ FINAL_FILENAMES = [
     HA_MATTER_WS_DASHBOARD_FILENAME,
     HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
 ]
+DIAGNOSTIC_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "ha_matter_ws_phase3_diagnostics.json"
+)
 
 
-def _collection() -> MatterCollection:
+def _collection(*, source_observed_at: str | None = None) -> MatterCollection:
     coverage = {
         "threadNetworkDiagnostics": {
             "cluster": "populated",
@@ -115,6 +126,13 @@ def _collection() -> MatterCollection:
         "diagnosticCoverage": coverage,
         "diagnosticsDetail": {"readErrors": {}},
     }
+    if source_observed_at is not None:
+        observation = {
+            "sourceObservedAt": source_observed_at,
+            "sourceObservationKind": "controller-snapshot",
+        }
+        device.update(observation)
+        diagnostic.update(observation)
     mesh = {**diagnostic, "children": [], "routerNeighbors": [], "route": {"routeData": []}}
     return MatterCollection(
         uri="ws://fixture/ws",
@@ -129,6 +147,7 @@ def _collection() -> MatterCollection:
         diagnostics=(diagnostic,),
         mesh_diagnostics=(mesh,),
         topology=(mesh,),
+        source_observed_at=source_observed_at,
     )
 
 
@@ -769,6 +788,21 @@ def test_dashboard_snapshot_preserves_table_and_topology_projections() -> None:
     }
 
 
+def test_dashboard_envelope_and_real_records_share_controller_observation() -> None:
+    observed_at = "2026-11-04T22:00:00+00:00"
+    payload = build_dashboard_snapshot(_collection(source_observed_at=observed_at))
+
+    assert payload["sourceObservedAt"] == observed_at
+    assert payload["sourceObservationKind"] == "controller-snapshot"
+    for key in ("devices", "diagnostics", "meshDiagnostics", "topology"):
+        assert all(
+            record["sourceObservedAt"] == observed_at
+            and record["sourceObservationKind"] == "controller-snapshot"
+            for record in payload[key]
+            if not record.get("relationshipOnly")
+        )
+
+
 def test_all_collects_once_and_writes_outcome_last(monkeypatch, tmp_path) -> None:
     calls = []
 
@@ -788,6 +822,251 @@ def test_all_collects_once_and_writes_outcome_last(monkeypatch, tmp_path) -> Non
     assert rc == 0
     assert len([call for call in calls if isinstance(call, tuple)]) == 1
     assert [call for call in calls if isinstance(call, str)] == FINAL_FILENAMES
+
+
+def test_all_binds_written_bytes_to_one_controller_observation(
+    monkeypatch, tmp_path
+) -> None:
+    started_at = datetime(2026, 11, 4, 22, 0, tzinfo=timezone.utc)
+    observed_at = datetime(2026, 11, 4, 22, 1, tzinfo=timezone.utc)
+    completed_at = datetime(2026, 11, 4, 22, 2, tzinfo=timezone.utc)
+    clock_values = iter((started_at, completed_at))
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = next(clock_values)
+            return value if tz is None else value.astimezone(tz)
+
+    monkeypatch.setattr(ha_matter_ws_cli, "datetime", FrozenDateTime)
+    collection = _collection(source_observed_at=observed_at.isoformat())
+
+    async def fake_collect_devices(*args, **kwargs):
+        return collection
+
+    monkeypatch.setattr(ha_matter_ws_cli, "collect_devices", fake_collect_devices)
+    real_writer = ha_matter_ws_cli.save_json_atomic
+    writes = []
+
+    def tracked_writer(payload, path, **kwargs):
+        real_writer(payload, path, **kwargs)
+        writes.append(Path(path).name)
+
+    monkeypatch.setattr(ha_matter_ws_cli, "save_json_atomic", tracked_writer)
+
+    assert main(["--datadir", str(tmp_path), "--no-progress", "all"]) == 0
+    assert writes == FINAL_FILENAMES
+
+    outcome = json.loads(
+        (tmp_path / HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert outcome["sourceObservedAt"] == observed_at.isoformat()
+    assert outcome["sourceObservationKind"] == "controller-snapshot"
+    assert started_at.isoformat() <= outcome["sourceObservedAt"] <= outcome["completedAt"]
+    expected_artifacts = FINAL_FILENAMES[1:-1]
+    assert list(outcome["artifactObservations"]) == expected_artifacts
+    for filename in expected_artifacts:
+        path = tmp_path / filename
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        binding = outcome["artifactObservations"][filename]
+        assert binding == {
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "recordCount": len(payload)
+            if isinstance(payload, list)
+            else len(payload["devices"]),
+            "sourceObservedAt": observed_at.isoformat(),
+            "sourceObservationKind": "controller-snapshot",
+        }
+
+
+def test_actual_collector_publication_resolves_through_unified(
+    monkeypatch, tmp_path
+) -> None:
+    entry = _seed_ha(tmp_path)
+    nodes = json.loads(DIAGNOSTIC_FIXTURE.read_text(encoding="utf-8"))["nodes"]
+    thread_node = next(
+        node for node in nodes if "0/53/4" in node.get("attributes", {})
+    )
+    thread_node["attributes"]["0/53/4"] = int(NETWORK[7:], 16)
+
+    now = datetime.now(timezone.utc)
+    started_at = now - timedelta(seconds=2)
+    observed_at = now - timedelta(seconds=1)
+    completed_at = now
+    clock_values = iter((started_at, completed_at))
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = next(clock_values)
+            return value if tz is None else value.astimezone(tz)
+
+    snapshot = NodeSnapshot(
+        uri="ws://fixture/ws",
+        server_info={
+            "fabric_id": 4660,
+            "compressed_fabric_id": 3281868928683057420,
+            "fabric_index": 1,
+            "schema_version": 12,
+            "min_supported_schema_version": 11,
+            "sdk_version": "fixture",
+        },
+        frames=(),
+        events=(),
+        nodes=tuple(nodes),
+        source_observed_at=observed_at.isoformat(),
+    )
+    fetches = []
+
+    async def fake_fetch_node_snapshot(*args, **kwargs):
+        fetches.append((args, kwargs))
+        return snapshot
+
+    monkeypatch.setattr(ha_matter_ws_cli, "datetime", FrozenDateTime)
+    monkeypatch.setattr(
+        ha_matter_ws_fetch_all,
+        "fetch_node_snapshot",
+        fake_fetch_node_snapshot,
+    )
+    native_files = (
+        HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
+        HA_MATTER_WS_THREAD_BORDER_ROUTERS_OUTCOME_FILENAME,
+        HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
+        HA_MATTER_WS_NETWORK_TOPOLOGY_OUTCOME_FILENAME,
+    )
+    native_bytes = {
+        filename: (tmp_path / filename).read_bytes() for filename in native_files
+    }
+    (tmp_path / "td-ha-matter-ws-collection.outcome.network.json").unlink()
+
+    assert main(["--datadir", str(tmp_path), "--no-progress", "all"]) == 0
+    assert len(fetches) == 1
+
+    devices = json.loads(
+        (tmp_path / HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [
+        device["matter"]["nodeId"] for device in devices
+    ] == [node["node_id"] for node in nodes]
+
+    derived_files = FINAL_FILENAMES[1:-1]
+    for filename in derived_files:
+        payload = json.loads((tmp_path / filename).read_text(encoding="utf-8"))
+        records = (
+            payload
+            if isinstance(payload, list)
+            else [
+                payload,
+                *payload["devices"],
+                *payload["diagnostics"],
+                *payload["meshDiagnostics"],
+                *payload["topology"],
+            ]
+        )
+        if isinstance(payload, dict):
+            assert payload["sourceObservedAt"] == observed_at.isoformat()
+            assert payload["sourceObservationKind"] == "controller-snapshot"
+        assert any(not item.get("relationshipOnly") for item in records)
+        assert all(
+            item.get("sourceObservedAt") == observed_at.isoformat()
+            and item.get("sourceObservationKind") == "controller-snapshot"
+            for item in records
+            if not item.get("relationshipOnly")
+        )
+        scope, error = read_network_scope(tmp_path / filename)
+        assert error is None
+        assert scope["extPanId"] == NETWORK[7:]
+
+    assert {
+        filename: (tmp_path / filename).read_bytes() for filename in native_files
+    } == native_bytes
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    report = unified.read_generation(tmp_path, entry)
+    derived_inputs = [
+        item
+        for item in report["inputs"]
+        if item.get("filename") in derived_files
+        and item.get("role") in {"records", "projection"}
+    ]
+    assert {item["filename"] for item in derived_inputs} == set(derived_files)
+    assert all(
+        item["sourceObservedAt"] == observed_at.isoformat()
+        and item["sourceObservationKind"] == "controller-snapshot"
+        and item["timeProvenance"] == "controller-snapshot"
+        for item in derived_inputs
+    )
+    assert not any(
+        reason.startswith("raw-file-mtime-only:")
+        for reason in result["coverage"]["healthReasons"]
+    )
+    native_inputs = [
+        item
+        for item in report["inputs"]
+        if item.get("filename")
+        in {
+            HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
+            HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
+        }
+    ]
+    assert {item["filename"] for item in native_inputs} == {
+        HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
+        HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
+    }
+    assert all(item["sourceObservedAt"] == SOURCE_TIME for item in native_inputs)
+
+
+def test_all_binds_empty_commissioned_arrays(monkeypatch, tmp_path) -> None:
+    started_at = datetime(2026, 11, 4, 22, 0, tzinfo=timezone.utc)
+    observed_at = datetime(2026, 11, 4, 22, 1, tzinfo=timezone.utc)
+    completed_at = datetime(2026, 11, 4, 22, 2, tzinfo=timezone.utc)
+    clock_values = iter((started_at, completed_at))
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = next(clock_values)
+            return value if tz is None else value.astimezone(tz)
+
+    monkeypatch.setattr(ha_matter_ws_cli, "datetime", FrozenDateTime)
+    collection = replace(
+        _collection(source_observed_at=observed_at.isoformat()),
+        node_count=0,
+        devices=(),
+        diagnostics=(),
+        mesh_diagnostics=(),
+        topology=(),
+    )
+
+    async def fake_collect_devices(*args, **kwargs):
+        return collection
+
+    monkeypatch.setattr(ha_matter_ws_cli, "collect_devices", fake_collect_devices)
+    monkeypatch.setattr(
+        ha_matter_ws_cli,
+        "save_json_atomic",
+        lambda payload, path, **kwargs: Path(path).write_text(
+            json.dumps(payload, indent=4) + "\n", encoding="utf-8"
+        ),
+    )
+
+    assert main(["--datadir", str(tmp_path), "--no-progress", "all"]) == 0
+    outcome = json.loads(
+        (tmp_path / HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    expected_artifacts = FINAL_FILENAMES[1:-1]
+    assert list(outcome["artifactObservations"]) == expected_artifacts
+    for filename in expected_artifacts:
+        path = tmp_path / filename
+        binding = outcome["artifactObservations"][filename]
+        assert binding["recordCount"] == 0
+        assert binding["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+        assert binding["sourceObservedAt"] == observed_at.isoformat()
 
 
 def test_leaf_explicit_output_resolves_under_datadir(monkeypatch, tmp_path) -> None:
@@ -820,7 +1099,7 @@ def test_leaf_explicit_output_resolves_under_datadir(monkeypatch, tmp_path) -> N
 
 def test_list_and_get_emit_concise_or_selected_json(monkeypatch, capsys) -> None:
     async def fake_collect_devices(*args, **kwargs):
-        return _collection()
+        return _collection(source_observed_at="2026-11-04T22:00:00+00:00")
 
     monkeypatch.setattr(ha_matter_ws_cli, "collect_devices", fake_collect_devices)
 
@@ -832,6 +1111,8 @@ def test_list_and_get_emit_concise_or_selected_json(monkeypatch, capsys) -> None
             "deviceLabel": "Fixture",
             "available": True,
             "isBridge": None,
+            "sourceObservedAt": "2026-11-04T22:00:00+00:00",
+            "sourceObservationKind": "controller-snapshot",
         }
     ]
     assert main(["diagnostics", "get", "--node-id", "1"]) == 0
@@ -949,14 +1230,17 @@ def test_checkpoint_payload_identifies_partial_completeness(monkeypatch, tmp_pat
         show_progress=False,
     )
 
-    callback(1, 2, _collection())
-    callback(2, 2, _collection())
+    observed_at = "2026-11-04T22:00:00+00:00"
+    callback(1, 2, _collection(source_observed_at=observed_at))
+    callback(2, 2, _collection(source_observed_at=observed_at))
 
     assert len(writes) == 1
     payload, path = writes[0]
     assert payload["partial"] is True
     assert payload["completed"] == 1
     assert payload["total"] == 2
+    assert payload["sourceObservedAt"] == observed_at
+    assert payload["sourceObservationKind"] == "controller-snapshot"
     assert path.name == "td-ha-matter-ws-devices-fetch-all.partial.json"
 
 
@@ -985,7 +1269,8 @@ def test_fetch_all_wires_collection_progress_to_checkpoint(monkeypatch, tmp_path
 def test_dashboard_and_checkpoints_preserve_matter_operational_products(
     monkeypatch, tmp_path
 ) -> None:
-    collection = _collection()
+    observed_at = "2026-11-04T22:00:00+00:00"
+    collection = _collection(source_observed_at=observed_at)
     writes = {}
 
     monkeypatch.setattr(
@@ -1018,6 +1303,11 @@ def test_dashboard_and_checkpoints_preserve_matter_operational_products(
     assert writes["dashboard.partial.json"]["meshDiagnostics"] == dashboard[
         "meshDiagnostics"
     ]
+    assert writes["dashboard.partial.json"]["sourceObservedAt"] == observed_at
+    for name in ("devices", "diagnostics", "mesh_diagnostics", "topology"):
+        checkpoint = writes[f"{name}.partial.json"]
+        assert checkpoint["sourceObservedAt"] == observed_at
+        assert checkpoint["sourceObservationKind"] == "controller-snapshot"
 
 
 def test_outcome_counts_extractor_coverage_states() -> None:

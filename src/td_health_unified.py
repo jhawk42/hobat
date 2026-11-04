@@ -137,9 +137,128 @@ def _prepare_contract(dataset: HealthDataset) -> _PreparedContract:
         for builder_contract in (
             "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
             "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
-            "unified-assembly-v9", "unified-assembly-v10",
+            "unified-assembly-v9", "unified-assembly-v10", "unified-assembly-v11",
         )
     ))
+
+
+def _source_time_provenance(value, observation=None, *, required=False):
+    from td_health_manifest import HealthManifestError
+
+    entries = value.get("sourceTimeProvenance")
+    if entries is None:
+        if required:
+            raise HealthManifestError("Missing retained Unified source-time provenance")
+        return ()
+    if not isinstance(entries, (list, tuple)):
+        raise HealthManifestError("Invalid retained Unified source-time provenance")
+    expected_sources = {
+        source.filename: source for source in observation.sources
+    } if observation is not None else None
+    seen = set()
+    normalized = []
+    allowed_provenance = {
+        None, "controller-snapshot", "embedded", "raw-file-mtime",
+        "invalid-source-time", "unavailable-source-time", "original-evidence",
+    }
+    for item in entries:
+        keys = {
+            "filename", "digest", "kind", "state", "sourceObservedAt",
+            "timeProvenance", "sourceObservationKind",
+        }
+        if not isinstance(item, Mapping) or set(item) != keys:
+            raise HealthManifestError("Invalid retained Unified source-time provenance")
+        filename = item["filename"]
+        if not isinstance(filename, str) or filename in seen:
+            raise HealthManifestError("Invalid retained Unified source-time provenance")
+        seen.add(filename)
+        if (
+            not isinstance(item["digest"], str)
+            or not isinstance(item["kind"], str)
+            or item["kind"] not in {"final", "identity", "scope", "outcome"}
+            or not isinstance(item["state"], str)
+            or item["state"] not in {"valid", "missing", "invalid", "provisional", "excluded"}
+            or item["timeProvenance"] is not None
+            and not isinstance(item["timeProvenance"], str)
+            or item["timeProvenance"] not in allowed_provenance
+            or item["sourceObservationKind"] is not None
+            and not isinstance(item["sourceObservationKind"], str)
+            or item["sourceObservationKind"] not in {None, "controller-snapshot"}
+            or item["sourceObservedAt"] is not None and not isinstance(item["sourceObservedAt"], str)
+        ):
+            raise HealthManifestError("Invalid retained Unified source-time provenance")
+        typed = item["sourceObservationKind"] == "controller-snapshot"
+        if typed != (item["timeProvenance"] == "controller-snapshot"):
+            raise HealthManifestError("Invalid retained Unified controller provenance")
+        if typed:
+            if (
+                item["kind"] != "final"
+                or item["state"] not in {"valid", "provisional"}
+                or not item["sourceObservedAt"]
+            ):
+                raise HealthManifestError("Invalid retained Unified controller provenance")
+            try:
+                timestamp(item["sourceObservedAt"])
+            except (TypeError, AttributeError, ValueError, OverflowError) as exc:
+                raise HealthManifestError("Invalid retained Unified controller provenance") from exc
+        if item["sourceObservedAt"] is not None:
+            try:
+                timestamp(item["sourceObservedAt"])
+            except (TypeError, AttributeError, ValueError, OverflowError) as exc:
+                raise HealthManifestError("Invalid retained Unified source time") from exc
+        if expected_sources is not None:
+            source = expected_sources.get(filename)
+            if source is None or (
+                source.digest, source.kind, source.state, source.source_observed_at
+            ) != (
+                item["digest"], item["kind"], item["state"], item["sourceObservedAt"]
+            ):
+                raise HealthManifestError("Retained Unified source-time provenance differs from evidence")
+        normalized.append(dict(item))
+    if normalized != sorted(normalized, key=lambda item: item["filename"]):
+        raise HealthManifestError("Invalid retained Unified source-time provenance order")
+    if value.get("sourceTimeProvenanceDigest") != digest(normalized):
+        raise HealthManifestError("Invalid retained Unified source-time provenance digest")
+    if observation is not None and set(seen) != set(expected_sources):
+        raise HealthManifestError("Retained Unified source-time provenance is incomplete")
+    return tuple(normalized)
+
+
+def has_typed_ha_observation(context, dataset):
+    """Return whether a retained v11 HA contract binds every controller-derived input."""
+    value = context.get("unifiedHealth") if isinstance(context, Mapping) else None
+    if not isinstance(value, Mapping) or dataset.datasource_id != "ha-matter-ws":
+        return False
+    builder_digest = digest([
+        "unified-v1", "unified-assembly-v11",
+        dataset.unified_recipe["recipeDigest"], dataset.unified_recipe["authorityDigest"],
+    ])
+    if value.get("reportContractDigest") != builder_digest:
+        return False
+    entries = _source_time_provenance(value, required=True)
+    by_name = {item["filename"]: item for item in entries}
+    controller_inputs = [
+        item for item in dataset.unified_recipe["rawInputs"]
+        if item["source"] == "ha-matter-ws"
+        and item["extractor"] in {"ha-inventory", "raw-array", "ha-projection"}
+    ]
+    required_inputs = [item for item in controller_inputs if item["required"]]
+    if not required_inputs:
+        return False
+    for declaration in controller_inputs:
+        entry = by_name.get(declaration["file"])
+        if entry is None or entry["state"] in {"missing", "excluded"}:
+            if declaration["required"]:
+                return False
+            continue
+        if (
+            entry["state"] != "valid"
+            or entry["timeProvenance"] != "controller-snapshot"
+            or entry["sourceObservationKind"] != "controller-snapshot"
+            or not entry["sourceObservedAt"]
+        ):
+            return False
+    return True
 
 
 def validate_context(context, dataset, observation=None, *, prepared: _PreparedContract | None = None):
@@ -158,6 +277,54 @@ def validate_context(context, dataset, observation=None, *, prepared: _PreparedC
             or not _DIGEST.fullmatch(value["originalEvidenceFingerprint"])
             or not isinstance(value.get("effectiveCoverage"), Mapping)):
         raise HealthManifestError("Invalid retained unifiedHealth context")
+    v11_digest = digest([
+        "unified-v1", "unified-assembly-v11",
+        dataset.unified_recipe["recipeDigest"], dataset.unified_recipe["authorityDigest"],
+    ])
+    has_source_time_provenance = (
+        "sourceTimeProvenance" in value or "sourceTimeProvenanceDigest" in value
+    )
+    if has_source_time_provenance and (
+        value.get("reportContractDigest") != v11_digest
+        or "sourceTimeProvenance" not in value
+        or "sourceTimeProvenanceDigest" not in value
+    ):
+        raise HealthManifestError("Source-time provenance requires the v11 Unified contract")
+    retained_source_times = _source_time_provenance(
+        value, observation,
+        required=value.get("reportContractDigest") == v11_digest,
+    )
+    typed_files = {
+        item["filename"] for item in retained_source_times
+        if item["sourceObservationKind"] == "controller-snapshot"
+    }
+    if typed_files:
+        controller_input_files = {
+            item["file"] for item in dataset.unified_recipe["rawInputs"]
+            if item["source"] == "ha-matter-ws"
+            and item["extractor"] in {"ha-inventory", "raw-array", "ha-projection"}
+        }
+        if (
+            dataset.datasource_id not in {"ha-matter-ws", "multi-source"}
+            or not typed_files <= controller_input_files
+        ):
+            raise HealthManifestError("Controller provenance is outside the HA input contract")
+    if observation is not None and retained_source_times:
+        by_name = {item["filename"]: item for item in retained_source_times}
+        fingerprint = []
+        for source in observation.sources:
+            item = dict(
+                filename=source.filename, digest=source.digest, kind=source.kind,
+                state=source.state, sourceObservedAt=source.source_observed_at,
+            )
+            provenance = by_name[source.filename]
+            item.update(
+                timeProvenance=provenance["timeProvenance"],
+                sourceObservationKind=provenance["sourceObservationKind"],
+            )
+            fingerprint.append(item)
+        if digest(fingerprint) != value["originalEvidenceFingerprint"]:
+            raise HealthManifestError("Invalid retained Unified original evidence fingerprint")
     maxima = dataset.health_profile.coverage
     ordering = {"missing": 0, "limited": 1, "sufficient": 2}
     if (set(value["effectiveCoverage"]) != set(maxima)
@@ -188,13 +355,16 @@ def validate_context(context, dataset, observation=None, *, prepared: _PreparedC
         from otbr_cli_util import canonical_router_rloc16
         from td_unified_dataset import REST_CHILD_TABLE_COVERAGE_VERSION
 
-        builder_digest = digest([
-            "unified-v1", "unified-assembly-v10", dataset.unified_recipe["recipeDigest"],
-            dataset.unified_recipe["authorityDigest"],
-        ])
+        builder_digests = {
+            digest([
+                "unified-v1", builder_contract, dataset.unified_recipe["recipeDigest"],
+                dataset.unified_recipe["authorityDigest"],
+            ])
+            for builder_contract in ("unified-assembly-v10", "unified-assembly-v11")
+        }
         if (
             dataset.datasource_id != "multi-source"
-            or value["reportContractDigest"] != builder_digest
+            or value["reportContractDigest"] not in builder_digests
             or not isinstance(child_coverage, Mapping)
             or set(child_coverage) != {"contractVersion", "networkInstance", "routers"}
             or child_coverage.get("contractVersion") != REST_CHILD_TABLE_COVERAGE_VERSION
@@ -278,11 +448,12 @@ def validate_context(context, dataset, observation=None, *, prepared: _PreparedC
                 ):
                     raise HealthManifestError("REST child-table coverage does not bind original evidence")
     if observation is not None:
-        originals = [dict(filename=s.filename, digest=s.digest, kind=s.kind, state=s.state,
-                          sourceObservedAt=s.source_observed_at) for s in observation.sources
-                     if s.filename in safe_sources(dataset)]
-        if digest(originals) != value["originalEvidenceFingerprint"]:
-            raise HealthManifestError("Unified original evidence fingerprint mismatch")
+        if not retained_source_times:
+            originals = [dict(filename=s.filename, digest=s.digest, kind=s.kind, state=s.state,
+                              sourceObservedAt=s.source_observed_at) for s in observation.sources
+                         if s.filename in safe_sources(dataset)]
+            if digest(originals) != value["originalEvidenceFingerprint"]:
+                raise HealthManifestError("Unified original evidence fingerprint mismatch")
         if witness is not None and witness != witness_for_sources(
                 observation.network_id, observation.sources, witness["domain"]):
             raise HealthManifestError("Unified absence witness does not bind original evidence")

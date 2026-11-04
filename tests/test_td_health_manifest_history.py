@@ -214,6 +214,19 @@ def test_dataset_aware_evaluator_target_vectors(resolver, dataset_id, sample, ve
     ) == expected
 
 
+@pytest.mark.parametrize(("dataset_id", "expected"), [
+    ("otbr_cli_unified", "700429cda30fb822e8bbbfda4c582072c014aabdcdc9c1a9717f70146dcf186e"),
+    ("otbr_restapi_unified", "60a5de7141e4229e7a01dc0797cd76f3bbe698f112bc0b100da2ea36993298ef"),
+    ("ha_matter_ws_unified", "e4702e6ee3eb9d35858a215da92636bc986204114d05537a8dd5276744a07f4f"),
+    ("multi_source_unified", "69ec167196d456a0f7fc1be9d94c1f046a77c9ad1733ad6d945971972581067d"),
+])
+def test_controller_observation_v18_target_vectors(resolver, dataset_id, expected):
+    assert target_contract_digest(
+        resolver.current_target(dataset_id), "comparison-v1-unified",
+        **{**POLICY_ARGS, "evaluator_version": "snapshot-v18"},
+    ) == expected
+
+
 def test_source_label_change_preserves_displaced_manifest_and_exact_contracts(resolver):
     prior = resolver.revisions[-2]
     presentation = json.loads(canonical_json(prior.manifest))

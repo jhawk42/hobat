@@ -114,6 +114,16 @@ Matter fabrics remain separate. A missing inventory stays partial even with a
 dashboard projection. Native upstream time and outcome capture/count/scope
 association are checked independently; mtime-only evidence is explicitly
 degraded, not proof of one complete observation.
+New commissioned-node collections capture one typed `controller-snapshot`
+observation after bounded event reconciliation, before normalization. Records,
+dashboard and checkpoints retain that time; `all` publishes exact-byte
+`artifactObservations` bindings in its outcome after its finals. Assembly-v11
+resolves these original HA times without file-mtime dependence and retains
+their kind through Multi-source raw lineage. Native graph/discovery time is
+never refreshed from the wrapper or controller receipt. Legacy caches are not
+backfilled, and empty leaf arrays without a matching binding remain explicit.
+Controller receipt is not a measurement interval or mesh absence authority;
+health keeps these semantics in retained reproduction context.
 Live native collection keeps strict endpoint validation. These are processing
 contracts, not a claim that the Unified products are normally selectable.
 

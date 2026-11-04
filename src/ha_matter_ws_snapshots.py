@@ -14,6 +14,7 @@ from td_device_fields import normalize_input_record
 
 DASHBOARD_SCHEMA_VERSION = "1.0.0"
 NATIVE_SNAPSHOT_SCHEMA_VERSION = "1.0.0"
+SOURCE_OBSERVATION_KIND = "controller-snapshot"
 
 
 class MatterSnapshotSecurityError(ValueError):
@@ -61,7 +62,20 @@ def assert_snapshot_safe(value: Any) -> None:
             assert_snapshot_safe(child)
 
 
-def build_device_snapshot(records: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _observation_fields(source_observed_at: str | None) -> dict[str, str]:
+    if source_observed_at is None:
+        return {}
+    return {
+        "sourceObservedAt": source_observed_at,
+        "sourceObservationKind": SOURCE_OBSERVATION_KIND,
+    }
+
+
+def build_device_snapshot(
+    records: Iterable[Mapping[str, Any]],
+    *,
+    source_observed_at: str | None = None,
+) -> list[dict[str, Any]]:
     """Build a stable, credential-free device snapshot."""
 
     snapshot: list[dict[str, Any]] = []
@@ -120,6 +134,7 @@ def build_device_snapshot(records: Iterable[Mapping[str, Any]]) -> list[dict[str
                 normalized.pop(field, None)
         if "_merge_conflicts" in normalized_roles:
             normalized["_merge_conflicts"] = normalized_roles["_merge_conflicts"]
+        normalized.update(_observation_fields(source_observed_at))
         snapshot.append(normalized)
     snapshot.sort(key=lambda record: record.get("matter", {}).get("nodeId", -1))
     assert_snapshot_safe(snapshot)
@@ -128,6 +143,8 @@ def build_device_snapshot(records: Iterable[Mapping[str, Any]]) -> list[dict[str
 
 def build_diagnostic_snapshot(
     records: Iterable[Mapping[str, Any]],
+    *,
+    source_observed_at: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build canonical scalar/table diagnostics without topology derivation."""
 
@@ -187,6 +204,7 @@ def build_diagnostic_snapshot(
             "routeTable": thread.get("routeTable", []),
             "diagnosticsDetail": thread.get("diagnosticsDetail", {}),
             "diagnosticCoverage": record.get("diagnosticCoverage", {}),
+            **_observation_fields(source_observed_at),
         }
         role_source = {**thread, **record, **diagnostic}
         normalized_roles = normalize_ha_matter_roles(

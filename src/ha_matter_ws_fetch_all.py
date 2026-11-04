@@ -26,6 +26,7 @@ class MatterCollection:
     diagnostics: tuple[dict[str, Any], ...]
     mesh_diagnostics: tuple[dict[str, Any], ...]
     topology: tuple[dict[str, Any], ...]
+    source_observed_at: str | None = None
 
 
 CollectionProgressCallback = Callable[[int, int, MatterCollection], None]
@@ -37,8 +38,13 @@ def _build_collection(
     *,
     node_count: int,
 ) -> MatterCollection:
-    devices = build_device_snapshot(records)
-    diagnostics = build_diagnostic_snapshot(records)
+    source_observed_at = getattr(snapshot, "source_observed_at", None)
+    devices = build_device_snapshot(
+        records, source_observed_at=source_observed_at
+    )
+    diagnostics = build_diagnostic_snapshot(
+        records, source_observed_at=source_observed_at
+    )
     mesh_diagnostics = build_mesh_diagnostic_snapshot(diagnostics)
     topology = build_topology_snapshot(diagnostics)
     return MatterCollection(
@@ -50,6 +56,7 @@ def _build_collection(
         diagnostics=tuple(diagnostics),
         mesh_diagnostics=tuple(mesh_diagnostics),
         topology=tuple(topology),
+        source_observed_at=source_observed_at,
     )
 
 

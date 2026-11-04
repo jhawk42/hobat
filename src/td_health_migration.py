@@ -24,6 +24,7 @@ from td_health_evaluator import (
     EVALUATOR_VERSION,
     UNIFIED_EVALUATOR_VERSION,
     evaluator_version_for_dataset,
+    evaluator_version_for_unified_context,
     evaluate_observation,
     evaluation_inputs_from_payload,
 )
@@ -57,7 +58,7 @@ from td_health_sqlite import (
 
 
 _SUPPORTED_EVALUATORS = frozenset({
-    "snapshot-v10", "snapshot-v11", "snapshot-v15", "snapshot-v16",
+    "snapshot-v10", "snapshot-v11", "snapshot-v15", "snapshot-v16", "snapshot-v17",
     EVALUATOR_VERSION, UNIFIED_EVALUATOR_VERSION,
 })
 _DEVICE_ID_PREFIX = "extaddr:"
@@ -824,11 +825,18 @@ def inventory_health_history(
                     raise LookupError(target.reason or "no-current-health-target")
                 dataset = target.dataset
                 adapter_id = target.adapter_id
+                retained_context = json.loads(source["reproduction_context_json"])
+                unified_health = retained_context.get("unifiedHealth")
+                target_evaluator_version = (
+                    evaluator_version_for_unified_context(unified_health)
+                    if source["sample_contract_version"] == "comparison-v1-unified"
+                    else evaluator_version_for_dataset(
+                        dataset.dataset_id, source["sample_contract_version"]
+                    )
+                )
                 item_target_digest = target_contract_digest(
                     dataset, source["sample_contract_version"],
-                    evaluator_version=evaluator_version_for_dataset(
-                        dataset.dataset_id, source["sample_contract_version"]
-                    ),
+                    evaluator_version=target_evaluator_version,
                     policy_version=target_policy.version,
                     policy_digest=target_policy.digest,
                 )
@@ -840,8 +848,8 @@ def inventory_health_history(
                     sample_contract_version=source["sample_contract_version"],
                     network_roster_revision=source["network_roster_revision"],
                     assessed_at=source["assessed_at"],
-                    unified_health=json.loads(source["reproduction_context_json"]).get("unifiedHealth"),
-                    rest_diagnostics=json.loads(source["reproduction_context_json"]).get("restDiagnostics"),
+                    unified_health=unified_health,
+                    rest_diagnostics=retained_context.get("restDiagnostics"),
                 )
                 if inputs.evaluation_context_complete and inputs.verdict_context_complete:
                     classification = HistoryMigrationEligibility.REPLAYABLE
