@@ -427,6 +427,11 @@ def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
     health_commands.add_parser(
         "purge-by-device", help="Delete one device's health records", add_help=False
     )
+    health_commands.add_parser(
+        "purge-retired-results",
+        help="Delete only the seven retired datasets' health findings and comparisons",
+        add_help=False,
+    )
 
 
 # type: ignore[type-arg]
@@ -617,7 +622,7 @@ def build_parser() -> argparse.ArgumentParser:
         usage: td_cli process-eve [-h] ...
 
     health
-        usage: td_cli health [-h] {process-dataset,purge,purge-all,purge-by-device} ...
+        usage: td_cli health [-h] {process-dataset,purge,purge-all,purge-by-device,purge-retired-results} ...
 
     system
         usage: td_cli system [-h] backups {create,restore} ...

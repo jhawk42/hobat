@@ -230,6 +230,7 @@ def _add_completed_rest_child(directory, *, ambiguous=False):
 
 @pytest.mark.parametrize("dataset_id", ["otbr_restapi_unified", "otbr_restapi_devices_diagnostics_fetch"])
 @pytest.mark.parametrize("matched", [False, True])
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_rest_health_child_table_needs_bound_identity_for_presence_and_absence(tmp_path, dataset_id, matched):
     from test_td_unified_composition import _seed_rest_child_coverage
 
@@ -782,6 +783,7 @@ def test_preparation_skips_orphan_pairs_and_detects_changed_pair_inventory(tmp_p
     assert report["nextCursor"] is None
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_roster_reassessment_only_inserts_assessments_not_sample_history(tmp_path):
     store, results = roster_history_seed(tmp_path)
     with closing(store._connect()) as connection:
@@ -803,6 +805,7 @@ def test_roster_reassessment_only_inserts_assessments_not_sample_history(tmp_pat
 
 
 @pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_roster_reassessment_matches_full_evaluator_for_every_current_dataset(
     tmp_path, monkeypatch, reverse,
 ):
@@ -906,6 +909,7 @@ def _retained_row(connection, assessment_id):
     ).fetchone()
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_roster_history_reuses_bodies_and_bounds_shared_queries(tmp_path, monkeypatch):
     store, results = roster_history_seed(tmp_path)
     store.upsert_expected_device(NETWORK, MISSING, "duplicate assessments", "expected")
@@ -1060,6 +1064,7 @@ def test_roster_history_admissions_decode_once_and_prepare_once(tmp_path, monkey
         assert set(history.admissions) == {row["assessment_id"] for row in rows}
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_roster_history_resolves_each_full_contract_once_per_invocation(tmp_path, monkeypatch):
     from td_health_manifest_history import ManifestHistoryResolver
 
@@ -1148,6 +1153,7 @@ def test_roster_history_does_not_hide_invalid_assessment_context(tmp_path, field
             store._reassess_network(connection, NETWORK)
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_roster_history_registers_before_nested_comparison_and_advances_each_group(tmp_path, monkeypatch):
     store, results = roster_history_seed(tmp_path, days=3)
     derive, compare = store._derive_pair, store._auto_compare
@@ -1257,6 +1263,7 @@ def test_roster_history_is_local_to_network_and_consecutive_cli_actions(tmp_path
     assert other_rows() == before
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_original_and_unified_same_collection_count_once_in_current_and_reassessment(tmp_path):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)
@@ -1286,6 +1293,7 @@ def test_original_and_unified_same_collection_count_once_in_current_and_reassess
     assert context["unifiedHealth"]["absenceWitness"]["domain"] == "otbr-cli"
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_same_witness_positive_projection_overrides_current_negative(tmp_path):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)
@@ -1324,6 +1332,7 @@ def test_never_stitch_cli_and_rest_absence_domains(tmp_path):
     assert missing_finding(result).evidence["consecutiveCompleteAbsences"] == 1
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_file_mode_deduplicates_reclassified_collection_and_counts_later_one(tmp_path):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)
@@ -1349,6 +1358,7 @@ def test_file_mode_deduplicates_reclassified_collection_and_counts_later_one(tmp
     assert missing_finding(later).rule_id == "device.offline"
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_file_mode_never_stitches_cli_and_rest_absence_domains(tmp_path):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)
@@ -1374,6 +1384,7 @@ def test_unified_builder_upgrade_does_not_count_one_collection_twice(tmp_path, m
     assert missing_finding(upgraded).evidence["consecutiveCompleteAbsences"] == 1
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_label_map_rows_are_not_presence_evidence_for_same_witness_absence(tmp_path):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)
@@ -1391,6 +1402,7 @@ def test_label_map_rows_are_not_presence_evidence_for_same_witness_absence(tmp_p
     assert domains["absenceHistory"]["state"] == "available"
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_file_mode_roster_change_reassesses_when_absence_history_is_unavailable(tmp_path):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)
@@ -1597,6 +1609,7 @@ def test_ping_reachable_router_without_tables_is_expected_not_a_timeout(tmp_path
     assert uncovered.assessment.coverage["diagnosticTimeoutDeviceCount"] == 1
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_non_unified_datasets_keep_meshdiag_timeouts():
     from td_health_processor import _normalize_samples
     dataset = load_health_manifest().dataset("otbr_cli_topology")
@@ -1749,6 +1762,7 @@ def test_optional_newer_evidence_cannot_move_negative_witness_past_expected_sinc
     assert MISSING not in result.assessment.reproduction_context["expectedDeviceIds"]
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_unsupported_retained_original_contract_never_supplies_negative_opportunities(tmp_path):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)
@@ -1763,6 +1777,7 @@ def test_unsupported_retained_original_contract_never_supplies_negative_opportun
 
 
 @pytest.mark.parametrize("history", ["file", "unified", "unsupported"])
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_file_mode_history_does_not_require_manifest_archive(tmp_path, monkeypatch, history):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)
@@ -1783,6 +1798,7 @@ def test_file_mode_history_does_not_require_manifest_archive(tmp_path, monkeypat
     )
 
 
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_retained_comparison_rechecks_late_same_witness_positive_projection(tmp_path):
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     expected(store)

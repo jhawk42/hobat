@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("archived_health_catalog")
+
 from td_health_observation_model import (
     Assessment,
     Completeness,

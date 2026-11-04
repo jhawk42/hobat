@@ -128,6 +128,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--apply", action="store_true", help="Apply supported schema migrations."
     )
     schema_migrate.add_argument("--json", action="store_true", dest="json_output")
+    retired = commands.add_parser(
+        "purge-retired-results",
+        description="Purge findings and comparisons for the seven retired health datasets only.",
+    )
+    retired.add_argument("--dry-run", action="store_true")
+    retired.add_argument("--yes", action="store_true")
+    retired.add_argument("--json", action="store_true", dest="json_output")
+    retired.add_argument("--backup-output", type=Path)
     for name, help_text in (
         (
             "purge",
@@ -458,6 +466,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.health_command == "migrate-history":
         return _run_history_migration(args, parser, data_dir)
+    if args.health_command == "purge-retired-results":
+        from td_system_backups import BackupError, create_backup
+
+        database_path = data_dir / HOBAT_DATABASE_FILENAME
+        if not database_path.is_file():
+            parser.error("Health store is not available")
+        if args.dry_run and args.backup_output is not None:
+            parser.error("--dry-run cannot be combined with --backup-output")
+        if not args.dry_run and args.backup_output is None:
+            parser.error("--backup-output is required before destructive purging")
+        if not _confirm_purge(args):
+            print("Purge cancelled.")
+            return 0
+        try:
+            store = SQLiteHealthStore(database_path, read_only=True)
+            if not args.dry_run:
+                create_backup(data_dir, args.backup_output)
+            report = store.purge_retired_results(dry_run=args.dry_run)
+        except (BackupError, OSError, ValueError, sqlite3.DatabaseError) as exc:
+            parser.error(str(exc))
+        report["backupOutput"] = str(args.backup_output) if args.backup_output else None
+        print(json.dumps(report, sort_keys=True) if args.json_output else (
+            f"Retired health results: {report['deleted']}"
+        ))
+        return 0
     if args.health_command in {"purge", "purge-all", "purge-by-device"}:
         return _run_purge(args, data_dir)
     if args.health_command == "compare":

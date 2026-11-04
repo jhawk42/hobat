@@ -12,13 +12,6 @@ from td_health_manifest import MANIFEST_PATH, HealthManifestError, load_health_m
 
 
 EXPECTED_DATASETS = {
-    "otbr_cli_diagnostics_fetch",
-    "otbr_cli_topology",
-    "otbr_cli_topology_mdns",
-    "otbr_restapi_devices_diagnostics_fetch",
-    "otbr_restapi_topology",
-    "otbr_restapi_topology_mdns",
-    "multi_source_otbr_topology_mdns",
     "otbr_cli_unified",
     "otbr_restapi_unified",
     "ha_matter_ws_unified",
@@ -32,27 +25,27 @@ def test_manifest_contains_only_approved_datasets() -> None:
     assert manifest.schema_version == 2
     assert manifest.roster_policy.digest == "bbf7b5290a3c95de4c70b033b13d1bc5ef01455807fd9ddeaa30bfb0e323b21b"
     assert set(manifest.datasets) == EXPECTED_DATASETS
-    assert manifest.dataset("otbr_cli_diagnostics_fetch").files == (
+    from td_health_manifest import RETIRED_HEALTH_RESULT_DATASET_IDS
+    from td_health_manifest_history import load_manifest_history
+    retired = load_manifest_history().revisions[-1].datasets
+    for dataset_id in RETIRED_HEALTH_RESULT_DATASET_IDS:
+        with pytest.raises(HealthManifestError, match="not health eligible"):
+            manifest.dataset(dataset_id)
+    assert retired["otbr_cli_diagnostics_fetch"].files == (
         "td-otbr-cli-networkdiag-fetch-all.json",
     )
-    networkdiag_profile = manifest.dataset("otbr_cli_diagnostics_fetch").health_profile
+    networkdiag_profile = retired["otbr_cli_diagnostics_fetch"].health_profile
     assert networkdiag_profile.coverage["resilience"] == "limited"
     assert not networkdiag_profile.topology_authority
     assert networkdiag_profile.border_router_authority
-    assert manifest.dataset(
-        "otbr_cli_topology"
-    ).health_profile.border_router_authority
-    assert manifest.dataset(
-        "otbr_restapi_devices_diagnostics_fetch"
-    ).health_profile.border_router_authority
-    assert manifest.dataset(
-        "otbr_restapi_topology"
-    ).health_profile.border_router_authority
-    assert manifest.dataset("otbr_restapi_topology_mdns").health_profile.required_outcomes == (
+    assert retired["otbr_cli_topology"].health_profile.border_router_authority
+    assert retired["otbr_restapi_devices_diagnostics_fetch"].health_profile.border_router_authority
+    assert retired["otbr_restapi_topology"].health_profile.border_router_authority
+    assert retired["otbr_restapi_topology_mdns"].health_profile.required_outcomes == (
         "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
         "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
     )
-    merged_profile = manifest.dataset("multi_source_otbr_topology_mdns").health_profile
+    merged_profile = retired["multi_source_otbr_topology_mdns"].health_profile
     assert merged_profile.identity_file == "td-otbr-cli-thread-network-info.json"
     assert merged_profile.profile_id == "merged-otbr-topology-diagnostics-mdns-v1"
     matter_topology = manifest.ineligible_datasets["ha_matter_ws_topology_merge"]
@@ -152,8 +145,8 @@ def test_reviewed_current_manifest_projection_and_archive_agree() -> None:
     resolver = load_manifest_history()
     current = load_health_manifest()
     assert resolver.current.datasets == current.datasets
-    assert resolver.current.manifest_digest == "8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81"
-    assert resolver.current.health_contract_digest == "1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09"
+    assert resolver.current.manifest_digest == "40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f"
+    assert resolver.current.health_contract_digest == "bef3b4accb98e9c60d9ef7bcc75232caa3f20fa06ed1dbbc77e1e8ec2852a0b7"
     assert canonical_digest(health_projection(resolver.current.manifest)) == resolver.current.health_contract_digest
     assert resolver.current.revision_id not in {revision.revision_id for revision in resolver.revisions}
     assert resolver.current.manifest["rosterPolicy"]["version"] == current.roster_policy.version
@@ -162,8 +155,8 @@ def test_reviewed_current_manifest_projection_and_archive_agree() -> None:
 
 
 def test_approved_health_input_modes_preserve_legacy_omitted_projection():
-    from td_health_manifest_history import _profile, profile_declaration
-    legacy = load_health_manifest().dataset("otbr_cli_diagnostics_fetch").health_profile
+    from td_health_manifest_history import _profile, profile_declaration, load_manifest_history
+    legacy = load_manifest_history().revisions[-1].datasets["otbr_cli_diagnostics_fetch"].health_profile
     assert legacy.input_mode == "files"
     assert legacy.evidence_report is None
     declaration = profile_declaration(legacy)

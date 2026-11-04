@@ -17,7 +17,7 @@ from td_health_comparison import (
     COMPARISON_VERSION, ComparisonPolicy, ComparisonItem, comparison_id, ordered_reasons,
 )
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
-from td_health_manifest import ROSTER_FIELDS, load_health_manifest
+from td_health_manifest import ROSTER_FIELDS, RETIRED_HEALTH_RESULT_DATASET_IDS, load_health_manifest
 from td_dataset_catalog import RETIRED_HEALTH_DATASET_IDS
 from td_health_observation_store import (
     HOBAT_DATABASE_FILENAME, HealthStoreMigrationError,
@@ -68,6 +68,11 @@ _LEGACY_EVIDENCE_KIND_MAP = {
 
 
 def _validate_read_dataset(dataset_id: str) -> None:
+    if (dataset_id in RETIRED_HEALTH_RESULT_DATASET_IDS
+            and dataset_id not in load_health_manifest().datasets):
+        raise HealthEndpointUnavailableError(
+            f"Health results retired; purged history is unavailable: {dataset_id}"
+        )
     if dataset_id in RETIRED_HEALTH_DATASET_IDS:
         from td_health_manifest_history import load_manifest_history
 
@@ -860,6 +865,7 @@ class TDHealthReadService:
         )
         if row is None:
             return None
+        _validate_read_dataset(row["dataset_id"])
         labels = self._labels()
         findings = [
             self._finding(
@@ -1282,6 +1288,7 @@ class TDHealthReadService:
         if record is None:
             return None
         row, item_rows = record
+        _validate_read_dataset(row["dataset_id"])
         return self._comparison_detail_projection(
             origin="stored", row=row, item_rows=item_rows, limit=limit,
             offset=offset, scope=scope, result=result, q=q, sort=sort,

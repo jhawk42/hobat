@@ -12,6 +12,15 @@ from typing import Mapping
 
 MANIFEST_PATH = Path(__file__).with_name("td-dataset-manifest.json")
 SUPPORTED_SCHEMA_VERSION = 2
+RETIRED_HEALTH_RESULT_DATASET_IDS = frozenset({
+    "otbr_cli_diagnostics_fetch",
+    "otbr_cli_topology",
+    "otbr_cli_topology_mdns",
+    "otbr_restapi_devices_diagnostics_fetch",
+    "otbr_restapi_topology",
+    "otbr_restapi_topology_mdns",
+    "multi_source_otbr_topology_mdns",
+})
 ALLOWED_MERGE_STRATEGIES = frozenset({"none", "by-identity", "by-rloc16"})
 COVERAGE_PILLARS = (
     "availability",

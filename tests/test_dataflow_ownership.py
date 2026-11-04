@@ -19,7 +19,7 @@ from td_dataset_catalog import (
     resolve_dataset,
     validate_dataset_catalog,
 )
-from td_health_manifest import HealthManifestError
+from td_health_manifest import HealthManifestError, RETIRED_HEALTH_RESULT_DATASET_IDS
 from td_webserver import TD_CATALOG_APP_KEY, handle_catalog_api
 
 
@@ -73,6 +73,9 @@ def test_canonical_catalog_aliases_and_preserved_recipes():
         assert old["files"] == new["files"]
         for field in ("healthEligible", "healthProfile", "mergeStrategy", "rowExtractor", "adaptor",
                       "mergeInputs", "mergeGroups"):
+            if field == "healthEligible" and new["value"] in RETIRED_HEALTH_RESULT_DATASET_IDS:
+                assert old.get(field) is True and new.get(field) is False
+                continue
             assert old.get(field) == new.get(field)
         if old["value"] != new["value"] and not old["healthEligible"]:
             expected_aliases[old["value"]] = new["value"]

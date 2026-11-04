@@ -12,6 +12,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("archived_health_catalog")
+
 from td_device_fields import normalize_input_record
 from td_health_evaluator import evaluate_observation, evaluation_inputs_from_payload
 from td_health_observation_model import Completeness, HealthStatus

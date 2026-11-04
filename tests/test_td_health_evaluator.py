@@ -8,6 +8,8 @@ from types import MappingProxyType
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("archived_health_catalog")
+
 from td_health_evaluator import (
     EVALUATOR_VERSION,
     ROSTER_REASSESSMENT_RULE_IDS,
@@ -28,12 +30,11 @@ from td_health_observation_model import (
 )
 from td_health_policy import load_health_policy
 from td_health_manifest import load_health_manifest
+from td_health_manifest_history import load_manifest_history
 from td_health_rules import HealthRuleCatalogError
 
 
-PROFILE = load_health_manifest().dataset(
-    "otbr_cli_topology_mdns"
-).health_profile
+PROFILE = load_manifest_history().revisions[-1].datasets["otbr_cli_topology_mdns"].health_profile
 
 
 def _observation(relationship: RelationshipSample) -> Observation:

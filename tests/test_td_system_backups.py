@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("archived_health_catalog")
+
 import td_system_backups
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_sqlite import SQLiteHealthStore

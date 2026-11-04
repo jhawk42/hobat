@@ -11,21 +11,21 @@ Preview an assessment without creating the database:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_diagnostics_fetch --dry-run
+  --dataset otbr_cli_unified --dry-run
 ```
 
 Store it atomically and emit one JSON document:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_diagnostics_fetch --json
+  --dataset otbr_cli_unified --json
 ```
 
 Write a non-authoritative support export after the database commit:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_diagnostics_fetch --export-latest
+  --dataset otbr_cli_unified --export-latest
 ```
 
 `--export-latest FILE` accepts only a leaf filename under the data directory.
@@ -40,6 +40,8 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
 
 For `--dataset all`, JSON output is an array of result documents. Roster
 operations and `--export-latest` require one concrete dataset ID.
+Unified processing requires a previously committed cache-only Unified build;
+health assessment does not build or collect inputs implicitly.
 
 ## Migrating Health Store Schema
 
@@ -209,14 +211,14 @@ alongside the reviewed inventory and operator documentation.
 
 The archive also retains the committed manifest from `65fb5c6`
 (`c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011`).
-Its replacement changes only the displayed source label from `Multi-source`
-to `multi-source`; the current full-manifest digest is
+Its replacement changed only the displayed source label from `Multi-source`
+to `multi-source`; that displaced full-manifest digest is
 `8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81`.
 Both retain health projection
 `1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09`
 and identical replay/target contracts. The displaced snapshot's explicitly
 reviewed sample support is preserved, not inferred from archive membership.
-All thirteen earlier archive entries remain immutable. No sample versions,
+All earlier archive entries remain immutable. No sample versions,
 coverage, authority, backup/rollback or rerun guarantees change.
 
 After migration, refresh a native assessment from cached snapshots before
@@ -239,6 +241,20 @@ The shared manifest currently permits these dataset IDs:
 
 | Source | Dataset ID | Health profile |
 |---|---|---|
+| OTBR CLI | `otbr_cli_unified` | `otbr-cli-unified-v1` |
+| OTBR REST | `otbr_restapi_unified` | `otbr-restapi-unified-v1` |
+| HA Matter WS | `ha_matter_ws_unified` | `ha-matter-ws-unified-v1` |
+| Multi-source | `multi_source_unified` | `multi-source-unified-v1` |
+
+mDNS Unified remains enrichment-only and is still included in Multi-source
+composition. Focused dataset selectors, collectors and cache files are unchanged.
+
+### Four-Unified health cutover (2026-11-04)
+
+The following seven datasets are no longer health-eligible:
+
+| Source | Retired dataset ID | Archived health profile |
+|---|---|---|
 | OTBR CLI | `otbr_cli_diagnostics_fetch` | `otbr-cli-networkdiag-v1` |
 | OTBR CLI | `otbr_cli_topology` | `otbr-cli-topology-diagnostics-v1` |
 | OTBR CLI | `otbr_cli_topology_mdns` | `otbr-cli-topology-diagnostics-mdns-v1` |
@@ -247,9 +263,51 @@ The shared manifest currently permits these dataset IDs:
 | OTBR REST | `otbr_restapi_topology_mdns` | `otbr-restapi-topology-diagnostics-mdns-v1` |
 | Multi-source | `multi_source_otbr_topology_mdns` | `merged-otbr-topology-diagnostics-mdns-v1` |
 
-### Dataset identifier cutover (2026-10-27)
+Only their findings, comparisons and dependent comparison items are purged.
+Their current-assessment pointers are removed to prevent roster reassessment
+from recreating results. Assessments, observations, source samples, roster,
+lifecycle and last-known facts remain unchanged, as does all four Unified
+products' health history. Retired health reads (including assessment-ID reads)
+report explicit retired/purged-history unavailability, not an empty healthy
+result. Retired comparison requests are rejected. Refresh the dashboard after
+deploying the cutover; old exports are non-authoritative and must not be used
+as current results.
 
-The current seven health recipes use the compact IDs above. Their previous IDs
+Preview the exact seven-ID scope without committing changes:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge-retired-results \
+  --dry-run --json
+```
+
+After validating on a scratch copy, apply with a new backup directory:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge-retired-results \
+  --yes --backup-output /absolute/path/to/new-cutover-backup --json
+```
+
+The command creates a verified complete backup through the existing system
+backup workflow, then deletes transactionally with foreign-key checks and exact
+per-dataset counts. Reruns delete zero rows; they still require a new backup
+directory. No schema change or observation/assessment deletion occurs. To roll
+back, stop writers, restore the complete backup using
+[system backup/restore workflow](../src/td_system_backups.py), and deploy the
+matching pre-cutover code/catalog before restarting.
+
+The exact displaced eleven-product manifest is archived as
+`8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81`.
+The four-product manifest digest is
+`40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f`;
+its health projection is
+`bef3b4accb98e9c60d9ef7bcc75232caa3f20fa06ed1dbbc77e1e8ec2852a0b7`.
+The four retained replay/target contracts are unchanged. Archived retired
+recipes have no current health target and cannot recreate purged results through
+history migration. Archive membership does not broaden producer support.
+
+### Historical dataset identifier cutover (2026-10-27)
+
+The seven now-retired health recipes adopted the compact IDs above. Their previous IDs
 are intentionally unsupported for new processing requests: update scripts and
 API clients rather than relying on aliases. The profiles, evidence files, fast
 defaults, and collector commands have not changed. The synthetic source is now
@@ -498,7 +556,7 @@ entries from the static label map explicitly:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_diagnostics_fetch --init-roster-from-label-map
+  --dataset otbr_cli_unified --init-roster-from-label-map
 ```
 
 An expected device absent from one complete observation remains missing with
@@ -514,9 +572,9 @@ List or update one network's roster from the CLI:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_diagnostics_fetch --roster-list
+  --dataset otbr_cli_unified --roster-list
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_diagnostics_fetch --roster-device 0011223344556677 \
+  --dataset otbr_cli_unified --roster-device 0011223344556677 \
   --roster-label "Office Router" --roster-state expected
 ```
 

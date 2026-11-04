@@ -8,6 +8,10 @@ import sqlite3
 from contextlib import closing, redirect_stdout
 from unittest.mock import Mock, patch
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("archived_health_catalog")
+
 import td_cli
 import td_system_cli
 import td_system_ping

@@ -35,7 +35,9 @@ from td_health_comparison import (
     comparison_id, compare_interval, derive_comparison, resolve_interval_candidate, source_roles_for_dataset,
     source_signature,
 )
-from td_health_manifest import HealthDataset, HealthManifest, load_health_manifest
+from td_health_manifest import (
+    HealthDataset, HealthManifest, RETIRED_HEALTH_RESULT_DATASET_IDS, load_health_manifest,
+)
 from td_dataset_catalog import RETIRED_HEALTH_DATASET_IDS
 from td_health_observation_model import (
     Assessment, Completeness, Confidence, DeviceSample, HealthStatus, MetricSample,
@@ -917,6 +919,9 @@ class SQLiteHealthStore:
     ) -> StoreResult:
         if assessment.observation_id != observation.observation_id:
             raise ValueError("Assessment and observation IDs do not match")
+        if (observation.dataset_id in RETIRED_HEALTH_RESULT_DATASET_IDS
+                and observation.dataset_id not in load_health_manifest().datasets):
+            raise ValueError(f"Health results retired: {observation.dataset_id}")
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -1226,7 +1231,7 @@ class SQLiteHealthStore:
                      ) -> tuple[ComparisonInterval, tuple[ComparisonItem, ...]]:
         dataset = (
             history.manifest.dataset(after[0].dataset_id)
-            if history is not None and after[0].dataset_id not in RETIRED_HEALTH_DATASET_IDS
+            if history is not None and after[0].dataset_id in history.manifest.datasets
             else SQLiteHealthStore._retained_dataset(
                 after[0].dataset_id, after[0].datasource_id,
                 after[1].profile_id, after[1].sample_contract_version,
@@ -1324,6 +1329,10 @@ class SQLiteHealthStore:
             after = self._endpoint(connection, after_assessment_id)
             if before is None or after is None:
                 raise KeyError("Assessment endpoint not found")
+            for observation, _ in (before, after):
+                if (observation.dataset_id in RETIRED_HEALTH_RESULT_DATASET_IDS
+                        and observation.dataset_id not in load_health_manifest().datasets):
+                    raise ValueError(f"Health results retired: {observation.dataset_id}")
             interval, items = self._derive_pair(connection, before, after)
             if "endpoint-order-invalid" in interval.compatibility.reasons:
                 raise ValueError("Before assessment must precede after assessment")
@@ -2705,8 +2714,9 @@ class SQLiteHealthStore:
     def _retained_dataset(
         dataset_id: str, datasource_id: str, profile_id: str, sample_contract: str,
     ) -> HealthDataset:
-        if dataset_id not in RETIRED_HEALTH_DATASET_IDS:
-            return load_health_manifest().dataset(dataset_id)
+        manifest = load_health_manifest()
+        if dataset_id in manifest.datasets:
+            return manifest.dataset(dataset_id)
         from td_health_manifest_history import load_manifest_history
 
         source = load_manifest_history().resolve_source(
@@ -2781,7 +2791,7 @@ class SQLiteHealthStore:
                 assessment_row["dataset_id"], assessment_row["datasource_id"],
                 assessment_row["profile_id"], assessment_row["sample_contract_version"],
             )
-        elif assessment_row["dataset_id"] not in RETIRED_HEALTH_DATASET_IDS:
+        elif assessment_row["dataset_id"] in history.manifest.datasets:
             dataset = history.manifest.dataset(assessment_row["dataset_id"])
         else:
             source = history.resolver.resolve_source(
@@ -3221,6 +3231,8 @@ class SQLiteHealthStore:
                 (network_id,),
             )
         ]
+        active_datasets = load_health_manifest().datasets
+        pointers = [pointer for pointer in pointers if pointer["dataset_id"] in active_datasets]
         current_revision_row = connection.execute(
             "SELECT revision FROM network_roster_revisions WHERE network_id=?",
             (network_id,),
@@ -3651,8 +3663,10 @@ class SQLiteHealthStore:
     def _set_current_assessment(
         connection: sqlite3.Connection, network_id: str, dataset_id: str
     ) -> None:
-        assessment_id = SQLiteHealthStore._latest_assessment_id(
-            connection, network_id, dataset_id
+        assessment_id = (
+            None if dataset_id in RETIRED_HEALTH_RESULT_DATASET_IDS
+            and dataset_id not in load_health_manifest().datasets
+            else SQLiteHealthStore._latest_assessment_id(connection, network_id, dataset_id)
         )
         if assessment_id is None:
             connection.execute(
@@ -3717,6 +3731,62 @@ class SQLiteHealthStore:
                    SELECT 1 FROM expected_devices e WHERE e.device_id=devices.device_id
                )"""
         )
+
+    def purge_retired_results(self, *, dry_run: bool = False) -> dict:
+        dataset_ids = tuple(sorted(RETIRED_HEALTH_RESULT_DATASET_IDS))
+        if any(dataset_id in load_health_manifest().datasets for dataset_id in dataset_ids):
+            raise ValueError("Retired-result purge requires the four-Unified eligibility cutover")
+        placeholders = ", ".join("?" for _ in dataset_ids)
+        connection = self._connect_existing_write()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                raise sqlite3.DatabaseError("Health store has foreign key violations")
+            counts = {}
+            for dataset_id in dataset_ids:
+                counts[dataset_id] = {
+                    "findings": connection.execute(
+                        """SELECT COUNT(*) FROM findings f
+                           JOIN assessments a USING(assessment_id)
+                           JOIN observations o USING(observation_id) WHERE o.dataset_id=?""",
+                        (dataset_id,),
+                    ).fetchone()[0],
+                    "comparisons": connection.execute(
+                        "SELECT COUNT(*) FROM comparisons WHERE dataset_id=?", (dataset_id,),
+                    ).fetchone()[0],
+                    "comparison_items": connection.execute(
+                        """SELECT COUNT(*) FROM comparison_items i
+                           JOIN comparisons c USING(comparison_id) WHERE c.dataset_id=?""",
+                        (dataset_id,),
+                    ).fetchone()[0],
+                    "current_assessments": connection.execute(
+                        "SELECT COUNT(*) FROM current_assessments WHERE dataset_id=?", (dataset_id,),
+                    ).fetchone()[0],
+                }
+            connection.execute(
+                f"""DELETE FROM findings WHERE assessment_id IN (
+                    SELECT a.assessment_id FROM assessments a
+                    JOIN observations o USING(observation_id)
+                    WHERE o.dataset_id IN ({placeholders}))""", dataset_ids,
+            )
+            connection.execute(
+                f"DELETE FROM comparisons WHERE dataset_id IN ({placeholders})", dataset_ids,
+            )
+            connection.execute(
+                f"DELETE FROM current_assessments WHERE dataset_id IN ({placeholders})", dataset_ids,
+            )
+            if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                raise sqlite3.DatabaseError("Retired-result purge violated referential integrity")
+            if dry_run:
+                connection.rollback()
+            else:
+                connection.commit()
+            return {"datasetIds": list(dataset_ids), "deleted": counts, "dryRun": dry_run}
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def purge_before(self, cutoff: datetime, *, dry_run: bool = False) -> PurgeResult:
         if cutoff.tzinfo is None:

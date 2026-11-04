@@ -74,6 +74,9 @@ EXPECTED = (
     ("65fb5c69690040bddc0af3fbeb10618c8a1760c2",
      "c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011",
      "1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09"),
+    (None,
+     "8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81",
+     "1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09"),
 )
 DATASET_ID = "otbr_cli_networkdiag_fetch_all"
 CURRENT_DATASET_ID = "otbr_cli_diagnostics_fetch"
@@ -113,8 +116,8 @@ def _resolve(resolver, dataset_id=DATASET_ID, **kwargs):
     return resolver.resolve_source(dataset_id, "otbr-cli", PROFILE_ID, SAMPLE_CONTRACT, **kwargs)
 
 
-def test_all_fourteen_exact_snapshots_and_original_policy_metadata(resolver):
-    assert len(resolver.revisions) == 14
+def test_all_fifteen_exact_snapshots_and_original_policy_metadata(resolver):
+    assert len(resolver.revisions) == 15
     assert len(resolver.declared_dataset_ids) == 23
     for revision, (commit, snapshot, projection) in zip(resolver.revisions, EXPECTED, strict=True):
         assert revision.commit == commit
@@ -141,6 +144,7 @@ def test_all_fourteen_exact_snapshots_and_original_policy_metadata(resolver):
         assert captured.captured_at
     assert all(revision.capture_kind is None for revision in resolver.revisions[:8])
     assert resolver.revisions[13].capture_kind is None
+    assert resolver.revisions[14].capture_kind == "worktree"
     assert resolver.revisions[3].manifest_digest != resolver.revisions[4].manifest_digest
     assert resolver.revisions[3].health_contract_digest == resolver.revisions[4].health_contract_digest
     assert resolver.current.is_current
@@ -169,6 +173,7 @@ def test_unified_exact_current_support_and_independent_vectors(resolver, dataset
     assert resolution.dataset == dataset
     assert resolution.source_revision_ids == (
         resolver.current.revision_id,
+        "manifest-sha256:8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81",
         "manifest-sha256:c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011",
         "manifest-sha256:d369ccc7cca9e30cd2016ac33213039343ef94d9d224ea73d2ffd2dbcb548dd6",
     )
@@ -203,19 +208,19 @@ def test_dataset_aware_evaluator_target_vectors(resolver, dataset_id, sample, ve
     from td_health_evaluator import evaluator_version_for_dataset
 
     assert evaluator_version_for_dataset(dataset_id, sample) == version
-    dataset = resolver.current_target(dataset_id)
+    dataset = resolver.current_target(dataset_id) or resolver.revisions[-1].datasets[dataset_id]
     assert target_contract_digest(
         dataset, sample, **{**POLICY_ARGS, "evaluator_version": version},
     ) == expected
 
 
 def test_source_label_change_preserves_displaced_manifest_and_exact_contracts(resolver):
-    prior = resolver.revisions[-1]
+    prior = resolver.revisions[-2]
     presentation = json.loads(canonical_json(prior.manifest))
     assert presentation["datasources"][5]["label"] == "Multi-source"
     presentation["datasources"][5]["label"] = "multi-source"
-    assert presentation == json.loads(canonical_json(resolver.current.manifest))
-    assert prior.health_contract_digest == resolver.current.health_contract_digest
+    assert presentation == json.loads(canonical_json(resolver.revisions[-1].manifest))
+    assert prior.health_contract_digest == resolver.revisions[-1].health_contract_digest
     for dataset_id, dataset in prior.datasets.items():
         sample = "comparison-v1-unified" if dataset_id.endswith("_unified") else (
             "comparison-v1-route64" if dataset_id == CURRENT_DATASET_ID else "comparison-v1"
@@ -227,7 +232,9 @@ def test_source_label_change_preserves_displaced_manifest_and_exact_contracts(re
         assert source.status == "historical-contract"
         assert source.source_revision_ids == (prior.revision_id,)
         current = resolver.current_target(dataset_id)
-        assert current is not None
+        if current is None:
+            assert resolver.resolve_target(source, sample).reason == "no-current-health-target"
+            continue
         assert source.source_contract_digest == retained_replay_digest(current, sample)
         assert target_contract_digest(dataset, sample, **POLICY_ARGS) == target_contract_digest(
             current, sample, **POLICY_ARGS,
@@ -321,15 +328,15 @@ def test_exact_golden_replay_and_target_vectors(resolver):
 
 
 def test_identifier_cutover_has_distinct_current_vectors_and_no_cross_id_replay(resolver):
-    current = resolver.current_target(CURRENT_DATASET_ID)
+    current = resolver.revisions[-1].datasets[CURRENT_DATASET_ID]
     assert retained_replay_digest(current, SAMPLE_CONTRACT) == (
         "d6fb43cc5e83abb0f026c71f207d183fad2bf2486ef6535118bfeb40991337e4")
     assert target_contract_digest(current, SAMPLE_CONTRACT, **POLICY_ARGS) == (
         "0293a718d4c504994ccdc6ef9cacce1771f51f307326aac6953dfa6333252e05")
-    source = _resolve(resolver, dataset_id=CURRENT_DATASET_ID, revision_id=resolver.current.revision_id)
-    assert source.status == "current-contract"
-    assert source.source_revision_ids == (resolver.current.revision_id,)
-    assert resolver.resolve_target(source, SAMPLE_CONTRACT).adapter_id == "retained-equivalent-v1"
+    source = _resolve(resolver, dataset_id=CURRENT_DATASET_ID, revision_id=resolver.revisions[-1].revision_id)
+    assert source.status == "historical-contract"
+    assert source.source_revision_ids == (resolver.revisions[-1].revision_id,)
+    assert resolver.resolve_target(source, SAMPLE_CONTRACT).reason == "no-current-health-target"
     historical = _resolve(resolver)
     assert historical.source_contract_digest == REPLAY_DIGEST
     assert resolver.resolve_target(historical, SAMPLE_CONTRACT).reason == "no-current-health-target"
@@ -360,7 +367,7 @@ def test_retained_store_resolves_original_recipes_without_aliases(resolver):
     "datasource_id", "dataset_id", "files", "merge_strategy", "row_extractor", "adaptor", "health_profile",
 ])
 def test_null_required_dataset_fields_cannot_be_fingerprinted(resolver, field):
-    dataset = replace(resolver.current_target(CURRENT_DATASET_ID), **{field: None})
+    dataset = replace(resolver.revisions[-1].datasets[CURRENT_DATASET_ID], **{field: None})
     with pytest.raises(ManifestHistoryError):
         retained_replay_contract(dataset, SAMPLE_CONTRACT)
 
@@ -369,7 +376,7 @@ def test_null_required_dataset_fields_cannot_be_fingerprinted(resolver, field):
     "profile_id", "identity_file", "required_outcomes", "coverage", "topology_authority", "border_router_authority",
 ])
 def test_null_required_profile_fields_cannot_be_fingerprinted(resolver, field):
-    dataset = resolver.current_target(CURRENT_DATASET_ID)
+    dataset = resolver.revisions[-1].datasets[CURRENT_DATASET_ID]
     changed = replace(dataset, health_profile=replace(dataset.health_profile, **{field: None}))
     with pytest.raises(ManifestHistoryError):
         retained_replay_contract(changed, SAMPLE_CONTRACT)
@@ -378,12 +385,12 @@ def test_null_required_profile_fields_cannot_be_fingerprinted(resolver, field):
 @pytest.mark.parametrize("field", ["evaluator_version", "policy_version", "policy_digest"])
 def test_null_target_identity_fields_are_invalid(resolver, field):
     with pytest.raises(ManifestHistoryError):
-        target_contract_digest(resolver.current_target(CURRENT_DATASET_ID), SAMPLE_CONTRACT,
+        target_contract_digest(resolver.revisions[-1].datasets[CURRENT_DATASET_ID], SAMPLE_CONTRACT,
                                **{**POLICY_ARGS, field: None})
 
 
 def test_target_policy_identity_preserves_existing_opaque_digest_contract(resolver):
-    dataset = resolver.current_target(CURRENT_DATASET_ID)
+    dataset = resolver.revisions[-1].datasets[CURRENT_DATASET_ID]
     contract = target_contract(dataset, SAMPLE_CONTRACT,
                                **{**POLICY_ARGS, "policy_digest": "test-policy-p2"})
     assert contract["policyDigest"] == "test-policy-p2"
@@ -395,7 +402,7 @@ def test_target_policy_identity_preserves_existing_opaque_digest_contract(resolv
 @pytest.mark.parametrize("value", [None, "", False])
 def test_sample_contract_is_never_synthesized(resolver, value):
     with pytest.raises(ManifestHistoryError):
-        retained_replay_contract(resolver.current_target(CURRENT_DATASET_ID), value)
+        retained_replay_contract(resolver.revisions[-1].datasets[CURRENT_DATASET_ID], value)
 
 
 def test_producer_allowlist_excludes_all_old_profiles_before_ambiguity(resolver):
@@ -423,7 +430,7 @@ def test_producer_allowlist_excludes_all_old_profiles_before_ambiguity(resolver)
 
 def test_health_projection_changes_for_authority_not_presentation(resolver):
     raw = json.loads(MANIFEST_PATH.read_text())
-    raw["healthProfiles"][PROFILE_ID]["borderRouterAuthority"] = False
+    raw["healthProfiles"]["otbr-cli-unified-v1"]["borderRouterAuthority"] = False
     assert canonical_digest(health_projection(raw)) != resolver.current.health_contract_digest
 
 
@@ -434,10 +441,10 @@ def test_explicit_old_revision_cannot_fall_back_to_new_producer(resolver, index)
     assert caught.value.reason == "unsupported-sample-contract"
 
 
-@pytest.mark.parametrize("revision_index,status", [(None, "current-contract"), (5, "historical-contract")])
+@pytest.mark.parametrize("revision_index,status", [(-1, "historical-contract"), (5, "historical-contract")])
 def test_exact_revision_identity_and_profile_mapping(resolver, revision_index, status):
     revision = resolver.current if revision_index is None else resolver.revisions[revision_index]
-    dataset_id = CURRENT_DATASET_ID if revision_index is None else DATASET_ID
+    dataset_id = CURRENT_DATASET_ID if revision_index == -1 else DATASET_ID
     source = _resolve(resolver, dataset_id=dataset_id, revision_id=revision.revision_id,
                       source_profile=profile_declaration(revision.datasets[dataset_id].health_profile))
     assert source.status == status
@@ -467,7 +474,7 @@ def test_unknown_revision_and_legacy_contract_remain_explicit(resolver):
 
 def test_saved_historical_capabilities_do_not_upgrade_to_current(resolver):
     old = resolver.revisions[0].datasets[DATASET_ID]
-    assert old.health_profile != resolver.current.datasets[CURRENT_DATASET_ID].health_profile
+    assert old.health_profile != resolver.revisions[-1].datasets[CURRENT_DATASET_ID].health_profile
     source = _resolve(resolver, source_profile=old.health_profile)
     assert source.status == "unresolved"
     assert source.reason == "unsupported-profile"
@@ -479,7 +486,7 @@ def test_saved_historical_capabilities_do_not_upgrade_to_current(resolver):
 
 def test_removed_and_renamed_ids_remain_declared_without_current_targets(resolver):
     removed = set(resolver.declared_dataset_ids) - set(resolver.current.datasets)
-    assert len(removed) == 12
+    assert len(removed) == 19
     for dataset_id in removed:
         assert resolver.current_target(dataset_id) is None
     original = next(iter(resolver.revisions[0].datasets.values()))
@@ -572,8 +579,8 @@ def test_exact_worktree_capture_retains_current_ids_without_cross_id_replay(reso
     source = _resolve(resolver, dataset_id=CURRENT_DATASET_ID, revision_id=captured.revision_id)
     assert source.status == "historical-contract"
     assert source.source_contract_digest == retained_replay_digest(
-        resolver.current_target(CURRENT_DATASET_ID), SAMPLE_CONTRACT)
-    assert resolver.resolve_target(source, SAMPLE_CONTRACT).adapter_id == "retained-equivalent-v1"
+        resolver.revisions[-1].datasets[CURRENT_DATASET_ID], SAMPLE_CONTRACT)
+    assert resolver.resolve_target(source, SAMPLE_CONTRACT).reason == "no-current-health-target"
     assert resolver.resolve_target(_resolve(resolver), SAMPLE_CONTRACT).reason == "no-current-health-target"
 
 

@@ -6,6 +6,8 @@ from dataclasses import replace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("archived_health_catalog")
+
 from td_health_comparison import (
     COMPARISON_VERSION,
     COMPARISON_INTERVALS,

@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("archived_health_catalog")
+
 from td_health_evaluator import evaluate_observation
 from td_health_manifest import load_health_manifest
 from td_health_observation_model import (

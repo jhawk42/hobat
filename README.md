@@ -252,7 +252,7 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data ha-matter-ws all
 PYTHONPATH=src python3 -m td_cli --datadir ./data mdns thread
 PYTHONPATH=src python3 -m td_cli --datadir ./data process-eve
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
-  --dataset otbr_cli_diagnostics_fetch --dry-run
+  --dataset otbr_cli_unified --dry-run
 PYTHONPATH=src python3 -m td_cli --datadir ./data health migrate-history \
   --dataset all --policy-config-dir /absolute/path/to/server/config --dry-run --json
 PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset
@@ -313,6 +313,12 @@ expired pairs whose observations were already deleted. Preview counts include
 both comparison tables; physical compaction remains a separate
 `system database repack` command. See the
 [purge and backup workflow](doc/thread_network_health.md#purge-and-backup).
+Health is eligible only for CLI, REST, HA Matter and Multi-source Unified.
+Focused datasets keep their selectors and cached diagnostics but no independent
+health result. The backup-first `health purge-retired-results` command removes
+only the seven retired datasets' findings/comparisons and current pointers;
+Unified history, observations and the network roster remain intact. See the
+[four-Unified cutover](doc/thread_network_health.md#four-unified-health-cutover-2026-11-04).
 `system backups create` uses SQLite's backup API and writes
 a checksummed full-data-directory backup outside the active data directory.
 Stop the web server and all writers before `system backups restore`; restore

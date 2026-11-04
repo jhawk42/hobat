@@ -12,7 +12,10 @@ from unittest.mock import patch
 from unittest.mock import MagicMock
 
 import aiohttp.web
+import pytest
 from aiohttp.test_utils import TestClient, TestServer
+
+pytestmark = pytest.mark.usefixtures("archived_health_catalog")
 
 import td_webserver
 from td_health_observation_model import RelationshipSample, SourceEvidence

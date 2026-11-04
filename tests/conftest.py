@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -10,6 +11,30 @@ from node_test_support import run_node_json as execute_node_json
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def archived_health_catalog(tmp_path_factory, monkeypatch):
+	"""Exercise retained file-input behavior against its exact pre-cutover catalog."""
+	import td_health_manifest
+	import td_health_manifest_history
+
+	archive = json.loads(td_health_manifest_history.HISTORY_PATH.read_text())
+	prior = archive["revisions"].pop()
+	assert prior["manifestDigest"] == "8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81"
+	contract_dir = tmp_path_factory.mktemp("retained-health-contract")
+	manifest_path = contract_dir / "retained-manifest.json"
+	history_path = contract_dir / "retained-manifest-history.json"
+	manifest_path.write_text(json.dumps(prior["manifest"]))
+	history_path.write_text(json.dumps(archive))
+	monkeypatch.setattr(td_health_manifest.load_health_manifest, "__defaults__", (manifest_path,))
+	monkeypatch.setattr(td_health_manifest_history.load_manifest_history, "__defaults__",
+	                    (manifest_path, history_path))
+	for module in tuple(sys.modules.values()):
+		if module is not None and getattr(module, "__name__", "").startswith("test_td_health"):
+			if hasattr(module, "MANIFEST_PATH"):
+				monkeypatch.setattr(module, "MANIFEST_PATH", manifest_path)
+	yield manifest_path, history_path
 REQUIRED_JSON_FIXTURES = (
 	"tests/fixtures/device_merge_contract.json",
 	"tests/fixtures/thread_device_field_model.json",

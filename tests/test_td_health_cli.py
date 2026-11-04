@@ -18,6 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("archived_health_catalog")
+
 import td_cli
 import td_health_cli
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
@@ -37,10 +39,18 @@ from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
 def _history_subprocess(data_dir: Path, *arguments: str) -> subprocess.CompletedProcess:
     root = Path(__file__).resolve().parents[1]
+    manifest_path, history_path = load_manifest_history.__defaults__
+    code = (
+        "import sys; from pathlib import Path; "
+        "import td_health_manifest as m; import td_health_manifest_history as h; "
+        "m.load_health_manifest.__defaults__=(Path(sys.argv[1]),); "
+        "h.load_manifest_history.__defaults__=(Path(sys.argv[1]),Path(sys.argv[2])); "
+        "import td_cli; sys.exit(td_cli.main(sys.argv[3:]))"
+    )
     return subprocess.run(
-        [sys.executable, str(root / "src/td_cli.py"), "--datadir", str(data_dir),
+        [sys.executable, "-c", code, str(manifest_path), str(history_path), "--datadir", str(data_dir),
          "health", "migrate-history", *arguments],
-        cwd=root, capture_output=True, text=True, timeout=30, check=False,
+        cwd=root / "src", capture_output=True, text=True, timeout=30, check=False,
     )
 
 
@@ -327,6 +337,8 @@ def test_history_archive_preflight_is_isolated_from_native_commands(tmp_path, ar
     for path in source.iterdir():
         if path.is_file() and path.suffix in {".py", ".json"} and path.name != "td-dataset-manifest-history.json":
             shutil.copy2(path, runtime / path.name)
+    manifest_path = load_manifest_history.__defaults__[0]
+    shutil.copy2(manifest_path, runtime / "td-dataset-manifest.json")
     if archive_contents is not None:
         (runtime / "td-dataset-manifest-history.json").write_text(
             archive_contents, encoding="utf-8",

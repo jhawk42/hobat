@@ -22,6 +22,7 @@ from test_td_unified_dataset import ROOT, SOURCE_TIME, _entry, _save, _seed
         ("multi_source_otbr_topology_mdns", "multi_source_unified"),
     ],
 )
+@pytest.mark.usefixtures("archived_health_catalog")
 def test_unified_preserves_original_composite_measured_health_samples(tmp_path, legacy, replacement):
     if replacement == "multi_source_unified":
         _seed_all(tmp_path)
