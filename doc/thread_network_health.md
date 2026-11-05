@@ -300,7 +300,7 @@ The exact displaced eleven-product manifest is archived as
 The displaced four-product manifest digest is
 `40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f`;
 it is retained in manifest history. The current catalog digest is
-`abe986ac80bba1d173b1bf5ca4bb45a4e8b1ce992aff2a11fd6bc2d4331cde89`.
+`ee673b43a09f1ed085d9d1026069205ada8624a362c177dab13317f255ecb947`.
 Both have the same health projection:
 `bef3b4accb98e9c60d9ef7bcc75232caa3f20fa06ed1dbbc77e1e8ec2852a0b7`.
 The four retained replay/target contracts are unchanged. Archived retired

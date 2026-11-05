@@ -175,13 +175,13 @@ def test_unified_exact_current_support_and_independent_vectors(resolver, dataset
         dataset_id, dataset.datasource_id, dataset.health_profile.profile_id, "comparison-v1-unified",
     )
     assert resolution.dataset == dataset
-    assert resolution.source_revision_ids == (
+    assert resolution.source_revision_ids == tuple(sorted((
         "manifest-sha256:40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f",
         "manifest-sha256:8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81",
         resolver.current.revision_id,
         "manifest-sha256:c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011",
         "manifest-sha256:d369ccc7cca9e30cd2016ac33213039343ef94d9d224ea73d2ffd2dbcb548dd6",
-    )
+    )))
     previous = resolver.resolve_source(
         dataset_id, dataset.datasource_id, dataset.health_profile.profile_id,
         "comparison-v1-unified",

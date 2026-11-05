@@ -83,7 +83,14 @@ def test_canonical_catalog_aliases_and_preserved_recipes():
     assert catalog["datasetAliases"] == expected_aliases
     assert len(expected_aliases) == 26
     assert catalog["sourceAliases"] == {"merged": "multi-source"}
-    for old, new in zip(baseline["datasources"], catalog["datasources"], strict=True):
+    sources = {source["value"]: source for source in catalog["datasources"]}
+    assert set(sources) == {
+        catalog["sourceAliases"].get(source["value"], source["value"])
+        for source in baseline["datasources"]
+    }
+    for old in baseline["datasources"]:
+        source_id = catalog["sourceAliases"].get(old["value"], old["value"])
+        new = sources[source_id]
         if "default_dataset_value" in old:
             if new["value"] == "multi-source":
                 assert new["default_dataset_value"] == "multi_source_unified"
@@ -91,6 +98,8 @@ def test_canonical_catalog_aliases_and_preserved_recipes():
             old_files = next(entry["files"] for entry in baseline["datasets"]
                              if entry["value"] == old["default_dataset_value"])
             assert resolve_dataset(catalog, new["default_dataset_value"])["files"] == old_files
+        else:
+            assert "default_dataset_value" not in new
     for alias, target in expected_aliases.items():
         assert resolve_dataset(catalog, alias)["value"] == target
     for retired in RETIRED_HEALTH_DATASET_IDS:
