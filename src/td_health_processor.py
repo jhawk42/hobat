@@ -829,9 +829,10 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         read_generation,
         read_original_evidence,
         read_rest_diagnostic_recovery,
+        read_rest_mesh_qualification,
     )
     from td_health_unified import (
-        CONTEXT_VERSION, digest, has_typed_ha_observation, plain, timestamp,
+        CONTEXT_VERSION, LEGACY_CONTEXT_VERSION, digest, has_typed_ha_observation, plain, timestamp,
         witness_for_sources,
     )
 
@@ -861,7 +862,8 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         ))
     sources.sort(key=lambda source: source.filename)
     source_time_provenance = []
-    if report.get("builderContract") == "unified-assembly-v11":
+    is_v12 = report.get("builderContract") == "unified-assembly-v12"
+    if report.get("builderContract") in {"unified-assembly-v11", "unified-assembly-v12"}:
         for item in metadata:
             declaration = view["declarations"][item["filename"]]
             if declaration["source"] == "mdns":
@@ -924,16 +926,31 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
                 or provenance.get("diagnosticsScopeSha256") != rest_diagnostic_metadata.get("scopeSha256")
                 or (
                     (report.get("builderContract") in {
-                        "unified-assembly-v10", "unified-assembly-v11",
+                        "unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12",
                     }
                      or "restDiagnostics" in report["coverage"])
                     and report["coverage"].get("restDiagnostics") != rest_diagnostics
                 )
             ):
                 raise HealthProcessingError("Unified REST recovery evidence changed")
+    rest_mesh = None
+    if is_v12 and dataset.datasource_id in {"otbr-restapi", "multi-source"}:
+        from td_const import OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME, OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME
+        mesh_outcome = by_metadata.get(OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME, {})
+        mesh_final = by_metadata.get(OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME, {})
+        if mesh_outcome.get("status") == mesh_final.get("status") == "selected":
+            try:
+                rest_mesh, _ = read_rest_mesh_qualification(
+                    data_dir, expected_network=report["networkInstance"],
+                    expected_outcome_digest=mesh_outcome["sha256"], expected_final_digest=mesh_final["sha256"],
+                )
+            except UnifiedDatasetError as exc:
+                raise HealthProcessingError(str(exc)) from exc
+        if report["coverage"].get("restMeshDiagnostics") != rest_mesh:
+            raise HealthProcessingError("Unified REST mesh qualification changed")
     rest_child_tables = None
     if dataset.datasource_id == "multi-source" and report.get("builderContract") in {
-        "unified-assembly-v10", "unified-assembly-v11",
+        "unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12",
     }:
         coverage = report["coverage"]
         advertised_sources = coverage.get("sources")
@@ -1072,7 +1089,9 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         if domain == "otbr-restapi":
             valid = valid and not unresolved_rest_children
             valid = valid and all(
-                _outcome_state(
+                (rest_mesh is not None and rest_mesh["complete"])
+                if is_v12 and i["file"] == OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME and rest_mesh is not None
+                else _outcome_state(
                     rest_effective_outcome
                     if i["file"] == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME
                     and rest_effective_outcome is not None
@@ -1112,7 +1131,7 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
             )
         original_evidence.append(item)
     context = {
-        "version": CONTEXT_VERSION, "recipe": plain(recipe),
+        "version": CONTEXT_VERSION if is_v12 else LEGACY_CONTEXT_VERSION, "recipe": plain(recipe),
         "recipeContractDigest": digest(recipe),
         "reportContractVersion": report["contractVersion"],
         "reportContractDigest": digest([
@@ -1123,6 +1142,9 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         "effectiveCoverage": dict(dataset.health_profile.coverage),
         "absenceWitness": witness,
     }
+    if is_v12:
+        context["restMeshDiagnostics"] = rest_mesh
+        context["restMeshDiagnosticsDigest"] = digest(rest_mesh)
     if source_time_provenance:
         context["sourceTimeProvenance"] = source_time_provenance
         context["sourceTimeProvenanceDigest"] = digest(source_time_provenance)
@@ -1299,6 +1321,11 @@ def build_processing_result(
             observation_parts += (digest({
                 "restDiagnostics": inputs.rest_diagnostics,
                 "restChildTableCoverage": inputs.unified_context.get("restChildTableCoverage"),
+                "unresolvedRestChildIdentities": inputs.unresolved_rest_children,
+                "restChildIdentities": [
+                    [parent, child_id, ext]
+                    for (parent, child_id), ext in sorted((inputs.rest_child_identities or {}).items())
+                ],
             }),)
     elif inputs.rest_diagnostics and (
         inputs.unresolved_rest_children or inputs.rest_child_identities or any(

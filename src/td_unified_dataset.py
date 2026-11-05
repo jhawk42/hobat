@@ -34,6 +34,8 @@ from td_const import (
     OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME, OTBR_RESTAPI_ACTIONS_LIST_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
     TD_DATA_DIR_ARG_HELP, UNIFIED_FILENAMES,
 )
 from td_dataset_catalog import (
@@ -53,7 +55,7 @@ from util_data import network_scope_path, resolve_data_dir
 
 
 CONTRACT_VERSION = "unified-v1"
-BUILDER_CONTRACT = "unified-assembly-v11"
+BUILDER_CONTRACT = "unified-assembly-v12"
 _NETWORK = re.compile(r"extpan:[0-9a-f]{16}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -254,6 +256,61 @@ def read_rest_diagnostic_recovery(
     )
     _recheck(data_dir, captured)
     return effective, captured
+
+
+def read_rest_mesh_qualification(
+    data_dir: Path, *, expected_network: str | None = None,
+    expected_outcome_digest: str | None = None, expected_final_digest: str | None = None,
+) -> tuple[dict | None, list[CachedInput]]:
+    from td_restapi_diagnostic_recovery import diagnostic_items, qualified_router_tables
+    from td_restapi_mesh_evidence import qualify_rest_mesh_outcome, witness_identifiers
+    from util_data import create_checkpoint_filename
+
+    final = _read_stable(data_dir, OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME)
+    outcome = _read_stable(data_dir, OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME)
+    final_scope = _read_stable(data_dir, network_scope_path(final.filename).name)
+    outcome_scope = _read_stable(data_dir, network_scope_path(outcome.filename).name)
+    captured = [final, outcome, final_scope, outcome_scope]
+    checkpoint = _read_stable(data_dir, create_checkpoint_filename(final.filename))
+    captured.append(checkpoint)
+    if (expected_outcome_digest is not None and outcome.digest != expected_outcome_digest
+            or expected_final_digest is not None and final.digest != expected_final_digest):
+        raise UnifiedDatasetError("REST mesh evidence changed during processing")
+    if final.content is None or outcome.content is None:
+        _recheck(data_dir, captured)
+        return None, captured
+    payload = _parse(outcome.content, outcome.filename)
+    if not isinstance(payload, dict) or "meshResponsiveness" not in payload:
+        _recheck(data_dir, captured)
+        return None, captured
+    final_network, _ = _scope(final_scope, final)
+    outcome_network, _ = _scope(outcome_scope, outcome)
+    selected = expected_network.removeprefix("extpan:") if expected_network else final_network
+    network = selected if selected == final_network == outcome_network else None
+    effective, witness_captures = read_rest_diagnostic_recovery(data_dir, expected_network=selected)
+    captured.extend(witness_captures)
+    diagnostic = next(item for item in witness_captures if item.filename == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME)
+    diagnostic_rows = diagnostic_items(_parse(diagnostic.content, diagnostic.filename)) if diagnostic.content is not None else []
+    tables = qualified_router_tables(effective, diagnostic_rows) if effective is not None else []
+    bindings = {item.filename: item.digest for item in witness_captures}
+    projection = qualify_rest_mesh_outcome(
+        payload, diagnostic_items(_parse(final.content, final.filename)), tables, bindings, network,
+        witness_identifiers([_parse(item.content, item.filename) for item in witness_captures if item.content is not None]),
+    )
+    projection["provenance"].update({
+        "meshFinalSha256": final.digest, "meshOutcomeSha256": outcome.digest,
+        "meshFinalScopeSha256": final_scope.digest, "meshOutcomeScopeSha256": outcome_scope.digest,
+    })
+    if checkpoint.content is not None and checkpoint.mtime_ns > final.mtime_ns:
+        projection["complete"] = False
+        projection["provenance"]["newerCheckpointSha256"] = checkpoint.digest
+        for target in projection["targets"]:
+            if target["classification"] == "not-provided":
+                target.update(classification="unanswered", reasonCode="diagnostic-invalid-evidence", childCoverage="unavailable", witness=None)
+                projection["counts"]["notProvided"] -= 1
+                projection["counts"]["unanswered"] += 1
+    _recheck(data_dir, captured)
+    return projection, captured
 
 
 def _record_scope(record: dict, file_scope: str | None) -> str | None:
@@ -1026,7 +1083,7 @@ def read_generation(data_dir: Path, entry: dict, *, verify_inputs: bool = False,
         if report["builderContract"] not in {
             "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
             "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
-            "unified-assembly-v9", "unified-assembly-v10",
+            "unified-assembly-v9", "unified-assembly-v10", "unified-assembly-v11",
             BUILDER_CONTRACT,
         }:
             raise UnifiedDatasetError("Unsupported Unified assembly contract")
@@ -1371,6 +1428,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
     child_coverage_payloads: dict[str, list] = {}
     rest_outcome_complete: bool | None = None
     rest_recovery: dict | None = None
+    rest_mesh: dict | None = None
+    rest_mesh_complete: bool | None = None
     usable = len(composition["dependency_reports"]) if composition else 0
     for item in ([] if composition else recipe["inputs"]):
         filename = item["file"]
@@ -1429,6 +1488,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
             outcome_complete = _validate_outcome(payload, filename, source=entry["source"])
             if filename == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME:
                 rest_outcome_complete = outcome_complete
+            elif filename == OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME:
+                rest_mesh_complete = outcome_complete
             elif not outcome_complete:
                 health_reasons.append(f"incomplete-outcome:{filename}")
             continue
@@ -1523,6 +1584,18 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
             composition["dependency_states"].get("otbr-restapi", {})
             .get("coverage", {}).get("restDiagnostics")
         )
+    if rest_mesh_complete is not None:
+        by_name = {item["filename"]: item for item in inputs}
+        rest_mesh, mesh_captures = read_rest_mesh_qualification(
+            data_dir, expected_network=selected,
+            expected_outcome_digest=by_name[OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME]["sha256"],
+            expected_final_digest=by_name.get(OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME, {}).get("sha256"),
+        )
+        captured.extend(mesh_captures)
+        if not rest_mesh_complete and not (rest_mesh and rest_mesh["complete"]):
+            health_reasons.append(f"incomplete-outcome:{OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME}")
+    elif composition:
+        rest_mesh = composition["dependency_states"].get("otbr-restapi", {}).get("coverage", {}).get("restMeshDiagnostics")
     rest_child_tables = None
     if composition and selected is not None:
         cli_coverage = composition["dependency_states"].get("otbr-cli", {}).get("coverage", {})
@@ -1603,7 +1676,11 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
             logging.warning("Explicitly rebuilding invalid Unified generation: %s", exc)
         else:
             previous_generation = previous["generationId"]
-            if previous_generation == generation:
+            if (
+                previous_generation == generation
+                and previous["coverage"].get("restMeshDiagnostics") == rest_mesh
+                and previous["coverage"].get("restChildTableCoverage") == rest_child_tables
+            ):
                 _recheck(data_dir, captured)
                 return _summary(entry, previous, no_op=True)
     row_content = _json_bytes(rows)
@@ -1651,7 +1728,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
                      "healthReasons": health_reasons,
                      **({"tablesNotProvided": tables_not_provided} if tables_not_provided else {}),
                      **({"restChildTableCoverage": rest_child_tables} if rest_child_tables else {}),
-                     **({"restDiagnostics": rest_recovery} if rest_recovery is not None else {})},
+                     **({"restDiagnostics": rest_recovery} if rest_recovery is not None else {}),
+                     **({"restMeshDiagnostics": rest_mesh} if rest_mesh is not None else {})},
         "excluded": ([OTBR_RESTAPI_ACTIONS_LIST_FILENAME] if entry["source"] == "otbr-restapi" else
                      [HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME, HA_MATTER_WS_SERVER_INFO_FILENAME]
                      if ha_source else []),

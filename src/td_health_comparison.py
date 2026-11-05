@@ -920,6 +920,13 @@ def compare_interval(
         }:
             old_context = before_assessment.reproduction_context.get("unifiedHealth", {})
             new_context = after_assessment.reproduction_context.get("unifiedHealth", {})
+            if (old_context.get("version") == new_context.get("version") == "unified-health-v2"
+                    and before_assessment.evaluator_version == after_assessment.evaluator_version == "snapshot-v19"
+                    and old_context.get("recipeContractDigest")
+                    and old_context["recipeContractDigest"] == new_context.get("recipeContractDigest")
+                    and old_context.get("reportContractDigest")
+                    and old_context["reportContractDigest"] == new_context.get("reportContractDigest")):
+                supported_contracts.add("comparison-v1-unified")
             if (old_context.get("version") == new_context.get("version") == "unified-health-v1"
                     and old_context.get("recipeContractDigest")
                     and old_context["recipeContractDigest"] == new_context.get("recipeContractDigest")

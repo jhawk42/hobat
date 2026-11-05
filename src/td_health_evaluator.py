@@ -31,10 +31,11 @@ from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 EVALUATOR_VERSION = "snapshot-v14"
 UNIFIED_EVALUATOR_VERSION = "snapshot-v18"
+MESH_UNIFIED_EVALUATOR_VERSION = "snapshot-v19"
 RETAINED_UNIFIED_EVALUATOR_VERSION = "snapshot-v17"
 REST_RECOVERY_EVALUATOR_VERSION = "snapshot-v17"
 RETAINED_UNIFIED_EVALUATOR_VERSIONS = frozenset({
-    RETAINED_UNIFIED_EVALUATOR_VERSION, UNIFIED_EVALUATOR_VERSION,
+    RETAINED_UNIFIED_EVALUATOR_VERSION, UNIFIED_EVALUATOR_VERSION, MESH_UNIFIED_EVALUATOR_VERSION,
 })
 REST_RECOVERY_DATASETS = frozenset({
     "otbr_restapi_devices_diagnostics_fetch",
@@ -57,6 +58,8 @@ def evaluator_version_for_dataset(dataset_id: str, sample_contract_version: str)
 
 
 def evaluator_version_for_unified_context(unified_health: Mapping[str, Any] | None) -> str:
+    if isinstance(unified_health, Mapping) and unified_health.get("version") == "unified-health-v2":
+        return MESH_UNIFIED_EVALUATOR_VERSION
     source_times = (
         unified_health.get("sourceTimeProvenance", ())
         if isinstance(unified_health, Mapping) else ()
@@ -2072,6 +2075,8 @@ def evaluate_observation(
         **({"sourceObservationKinds": source_observation_kinds}
            if source_observation_kinds else {}),
         **({"restDiagnostics": dict(rest_diagnostics)} if rest_diagnostics is not None else {}),
+          **({"restMeshDiagnostics": dict(unified_health["restMeshDiagnostics"])}
+              if unified_health and unified_health.get("restMeshDiagnostics") is not None else {}),
         "evaluationInputs": {
             name: {
                 "state": domain.state.value,

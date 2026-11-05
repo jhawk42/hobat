@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import time
+from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from otbr_restapi_diagnostics import make_progress_fn
+from td_restapi_mesh_evidence import (
+    ORIGIN, POLICY, RESPONSIVENESS_VERSION, classify_mesh_probe_eligibility,
+    sanitize_context, scope_identity, select_child_witness,
+    select_router_identity, validate_diagnostic_response,
+)
 from td_json_key_normalizer import convert_keys_to_camel_case
 from util_data import (
     CollectionWriteOutcome,
@@ -20,6 +29,7 @@ from otbr_restapi_util import (
     DestinationType,
     MESH_DIAGNOSTIC_TLVS,
     OTBRRestApiClient,
+    OTBRClientError,
     OTBRUsageError,
     collection_outcome_path,
     emit_rest_command_output,
@@ -29,6 +39,111 @@ from otbr_restapi_util import (
 CLI_MESH_TASK_TIMEOUT_DEFAULT = 15
 ROUTER_RLOC16_MASK = 0x03FF
 ROUTER_RLOC16_VALUE = 0
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _observe_scope(client: OTBRRestApiClient) -> dict:
+    requested = _utc_now()
+    try:
+        observed = scope_identity(client.get_active_dataset(raw=False))
+        reason = None if observed else "scope-unavailable"
+    except OTBRClientError:
+        observed, reason = None, "scope-unavailable"
+    return {"extPanId": observed, "requestedAt": requested, "receivedAt": _utc_now(), "reasonCode": reason}
+
+
+def _capture_child_witness(output_path: object, scope: dict) -> tuple[list, dict, list]:
+    if output_path is None or scope.get("extPanId") is None:
+        return [], {}, []
+    from td_const import OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME
+    from td_restapi_diagnostic_recovery import diagnostic_items, qualified_router_tables
+    from td_unified_dataset import UnifiedDatasetError, read_rest_diagnostic_recovery
+
+    try:
+        effective, captured = read_rest_diagnostic_recovery(
+            Path(output_path).parent, expected_network="extpan:" + scope["extPanId"],
+        )
+        final = next(item for item in captured if item.filename == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME)
+        rows = diagnostic_items(json.loads(final.content)) if final.content else []
+        bindings = {item.filename: item.digest for item in captured}
+        if effective is None or any(value is None for value in bindings.values()):
+            return [], {}, captured
+        return qualified_router_tables(effective, rows), bindings, captured
+    except (UnifiedDatasetError, OSError, ValueError, TypeError):
+        return [], {}, []
+
+
+def _attach_responsiveness(client, outcome, devices, scope_before, tables, bindings, captured, output_path, destination_type):
+    from td_restapi_mesh_evidence import witness_identifiers
+    evidence = {
+        "contractVersion": RESPONSIVENESS_VERSION, "enabled": True, "origin": ORIGIN,
+        "policy": deepcopy(POLICY), "scopeBefore": scope_before,
+        "witnessBindings": bindings, "targets": [],
+    }
+    used_ids = [table.get("diagnosticId") for table in tables]
+    used_ids.extend(witness_identifiers([json.loads(item.content) for item in captured if item.content is not None]))
+    for record in outcome.get("deviceResults", []):
+        used_ids.extend(record.get("diagnosticIds", []))
+        used_ids.extend(error.get("actionId") for error in record.get("attemptErrors", []))
+    for record in outcome.get("deviceResults", []):
+        if record.get("status") == "completed":
+            continue
+        started = _utc_now()
+        identity, identity_reason = select_router_identity(record["deviceId"], devices)
+        reason = classify_mesh_probe_eligibility(record, destination_type) or identity_reason
+        witness = None
+        if reason is None and scope_before.get("extPanId") is None:
+            reason = "scope-unavailable"
+        if reason is None:
+            witness, reason = select_child_witness(identity["extAddress"], tables, started)
+        target = {
+            "identity": identity or {"deviceId": record["deviceId"]}, "witness": witness,
+            "check": {"status": "not-attempted", "reasonCode": reason},
+        }
+        evidence["targets"].append(target)
+        if reason is not None:
+            continue
+        request = {"destination": record["deviceId"], "destinationType": "extended", "types": list(POLICY["types"]), "timeout": 15}
+        check = {"status": "response", "request": request, "startedAt": started}
+        target["check"] = check
+        clock = time.monotonic()
+        try:
+            context = client.fetch_device_diagnostics(
+                record["deviceId"], types=list(POLICY["types"]), destination_type="extended",
+                task_timeout=15, poll_interval=2.0, poll_timeout=20.0,
+                return_context=True, raw=False,
+            )
+            check["action"], check["diagnostic"] = sanitize_context(context)
+        except OTBRClientError as exc:
+            check.update({"status": "no-response", "reasonCode": "diagnostic-no-response", "error": {
+                "type": type(exc).__name__, "actionId": getattr(exc, "action_id", None),
+                "actionStatus": getattr(exc, "status", None),
+            }})
+        check.update({"completedAt": _utc_now(), "elapsedSeconds": time.monotonic() - clock})
+        if check["status"] == "response":
+            reason = validate_diagnostic_response(check, identity, used_ids)
+            check["reasonCode"] = reason
+            if reason:
+                check["status"] = "invalid-response"
+            used_ids.extend([check["action"].get("id"), check["diagnostic"].get("id")])
+    evidence["scopeAfter"] = _observe_scope(client)
+    if evidence["scopeAfter"].get("extPanId") != scope_before.get("extPanId"):
+        reason = "scope-changed" if evidence["scopeAfter"].get("extPanId") and scope_before.get("extPanId") else "scope-unavailable"
+        evidence["scopeAfter"]["reasonCode"] = reason
+        for target in evidence["targets"]:
+            target["check"]["reasonCode"] = reason
+    if captured and output_path is not None:
+        from td_unified_dataset import UnifiedDatasetError, _recheck
+        try:
+            _recheck(Path(output_path).parent, captured)
+        except (UnifiedDatasetError, OSError):
+            evidence["witnessBindings"] = {}
+            for target in evidence["targets"]:
+                target["check"]["reasonCode"] = "witness-binding-mismatch"
+    outcome["meshResponsiveness"] = evidence
 
 
 def _write_checkpoint_best_effort(payload: Any, checkpoint_path: Path) -> None:
@@ -181,6 +296,13 @@ def dispatch_mesh_diagnostics(
         types = parse_mesh_diag_types(args.types or list(MESH_DIAGNOSTIC_TLVS))
         do_update = not getattr(args, "no_update_devices", False)
         routers_only = getattr(args, "routers_only", True)
+        if getattr(args, "diagnostic_response_fallback", False) and not routers_only:
+            raise OTBRUsageError("--diagnostic-response-fallback requires --routers-only")
+        response_fallback = getattr(args, "diagnostic_response_fallback", False)
+        scope_before, tables, bindings, captured = None, [], {}, []
+        if response_fallback:
+            scope_before = _observe_scope(client)
+            tables, bindings, captured = _capture_child_witness(output_path, scope_before)
 
         if do_update:
             devices = client.fetch_device_collection(items_only=True)
@@ -224,6 +346,11 @@ def dispatch_mesh_diagnostics(
             on_checkpoint=_on_checkpoint,
             raw=raw_arg,
         )
+        if response_fallback:
+            _attach_responsiveness(
+                client, outcome, devices, scope_before, tables, bindings, captured,
+                output_path, dest_type,
+            )
         if output_path is not None:
             write_rest_collection_outcome(
                 outcome, collection_outcome_path(output_path),

@@ -49,6 +49,19 @@ class OTBRRestApiCLIIncompleteHelpTests(unittest.TestCase):
                 self.assertIn("usage:", out)
                 self.assertIn(expected, out)
 
+    def test_diagnostic_response_fallback_is_mesh_fetch_all_only(self) -> None:
+        parser = cli_module.build_parser()
+        self.assertIs(parser.parse_args(["mesh-diagnostics", "fetch-all"]).diagnostic_response_fallback, False)
+        enabled = parser.parse_args([
+            "mesh-diagnostics", "fetch-all", "--diagnostic-response-fallback", "--no-fallback",
+        ])
+        self.assertIs(enabled.diagnostic_response_fallback, True)
+        self.assertIs(enabled.no_fallback, True)
+        for argv in (["topology"], ["diagnostics", "fetch-all"], ["mesh-diagnostics", "fetch"]):
+            with self.subTest(argv=argv), io.StringIO() as err, redirect_stderr(err):
+                with self.assertRaises(SystemExit):
+                    parser.parse_args([*argv, "--diagnostic-response-fallback"])
+
     def test_children_expand_by_rloc_is_diagnostics_fetch_all_only(self) -> None:
         parser = cli_module.build_parser()
         default = parser.parse_args(["diagnostics", "fetch-all"])

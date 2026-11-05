@@ -82,6 +82,165 @@ def _artifacts(directory, entry):
             for name in names}
 
 
+def _seed_rest_mesh_response(directory, case="valid"):
+    from td_restapi_mesh_evidence import ORIGIN, POLICY, RESPONSIVENESS_VERSION
+    from test_td_restapi_diagnostic_recovery import PARENT, _fixture
+    from util_data import network_scope_path
+    _seed(directory, "otbr_restapi_unified")
+    diagnostic_outcome, diagnostic_rows = _fixture()
+    if case == "expansion-only-child":
+        diagnostic_outcome["deviceResults"].pop()
+    if case in {"witness-age-boundary", "witness-too-old", "witness-future"}:
+        created = {"witness-age-boundary": "2026-10-30T09:03:01+00:00", "witness-too-old": "2026-10-30T09:03:00+00:00", "witness-future": "2026-10-30T11:03:02+00:00"}[case]
+        for row in diagnostic_rows:
+            row["created"] = created
+        diagnostic_outcome["items"] = copy.deepcopy(diagnostic_rows)
+        diagnostic_outcome["startedAt"] = diagnostic_outcome["completedAt"] = created
+    diagnostic_file = "td-otbr-restapi-diagnostics-fetch-all.json"
+    diagnostic_outcome_file = "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+    if case == "children-uncovered":
+        diagnostic_rows[0]["childTable"].append({"childId": 43})
+        diagnostic_outcome["items"][0]["childTable"].append({"childId": 43})
+    if case == "empty-child-table":
+        diagnostic_rows[0]["childTable"] = []
+        diagnostic_outcome["items"][0]["childTable"] = []
+    _save(directory, diagnostic_file, diagnostic_rows)
+    _save(directory, diagnostic_outcome_file, diagnostic_outcome)
+    bindings = {name: hashlib.sha256((directory / name).read_bytes()).hexdigest() for name in (
+        diagnostic_file, diagnostic_outcome_file,
+        network_scope_path(diagnostic_file).name, network_scope_path(diagnostic_outcome_file).name,
+    )}
+    fields = ["children", "childIpv6Addresses", "routerNeighbors"]
+    items, results = [], []
+    for index in range(18):
+        address, diagnostic_id = f"{index + 3:016x}", f"mesh-{index}"
+        items.append({"id": diagnostic_id, "type": "networkDiagnostics", "extAddress": address, **{field: [] for field in fields}})
+        results.append({"deviceId": address, "status": "completed", "attemptedTypes": [fields], "diagnosticIds": [diagnostic_id]})
+    results.append({"deviceId": PARENT, "status": "failed", "attemptedTypes": [fields], "diagnosticIds": [],
+                    "attemptErrors": [{"type": "OTBRActionFailedError", "actionId": "mesh-failed", "actionStatus": "stopped"}]})
+    check = {
+        "status": "response", "startedAt": "2026-10-30T11:03:01+00:00", "completedAt": "2026-10-30T11:03:02+00:00", "elapsedSeconds": 1.0,
+        "request": {"destination": PARENT, "destinationType": "extended", "types": POLICY["types"], "timeout": 15},
+        "action": {"id": "fresh-action", "status": "completed", "relationships": {"result": {"data": {"id": "fresh-result", "type": "diagnostics"}}}},
+        "diagnostic": {"id": "fresh-result", "type": "networkDiagnostics", "created": "2026-10-30T11:03:01+00:00", "extAddress": PARENT},
+    }
+    evidence = {
+        "contractVersion": RESPONSIVENESS_VERSION, "enabled": True, "origin": ORIGIN, "policy": copy.deepcopy(POLICY),
+        "scopeBefore": {"extPanId": NETWORK[7:], "requestedAt": "2026-10-30T11:01:00+00:00", "receivedAt": "2026-10-30T11:01:01+00:00"},
+        "scopeAfter": {"extPanId": NETWORK[7:], "requestedAt": "2026-10-30T11:03:03+00:00", "receivedAt": "2026-10-30T11:03:04+00:00"},
+        "witnessBindings": bindings,
+        "targets": [{"identity": {"deviceId": PARENT, "extAddress": PARENT, "destination": PARENT, "destinationType": "extended", "role": "router"},
+                     "witness": {"diagnosticId": "parent-diagnostic", "created": diagnostic_rows[0]["created"], "extAddress": PARENT}, "check": check}],
+    }
+    if case == "wrong-extaddress":
+        check["diagnostic"]["extAddress"] = "ffffffffffffffff"
+    if case == "stale-response":
+        check["diagnostic"]["created"] = "2026-10-30T11:00:00+00:00"
+    if case in {"precision-before", "precision-after", "response-future"}:
+        check["diagnostic"]["created"] = {"precision-before": "2026-10-30T11:03:00+00:00", "precision-after": "2026-10-30T11:03:03+00:00", "response-future": "2026-10-30T11:03:04+00:00"}[case]
+    if case == "reused-result":
+        check["diagnostic"]["id"] = "child-diagnostic"
+        check["action"]["relationships"]["result"]["data"]["id"] = "child-diagnostic"
+    if case == "scope-changed":
+        evidence["scopeAfter"]["extPanId"] = OTHER_NETWORK[7:]
+    if case == "tampered-binding":
+        evidence["witnessBindings"][diagnostic_file] = "b" * 64
+    if case == "unsupported-contract":
+        evidence["contractVersion"] = "unsupported"
+    if case == "no-answered-router":
+        items, results = [], results[-1:]
+    if case == "missing-link":
+        check["action"].pop("relationships")
+    if case == "no-response":
+        check["status"] = "no-response"
+    if case == "changed-rloc":
+        check["diagnostic"]["rloc16"] = "0x9400"
+    outcome = {"items": items, "partial": True, "deviceResults": results, "queriedCount": len(results),
+               "startedAt": "2026-10-30T11:02:00+00:00", "completedAt": "2026-10-30T11:03:00+00:00", "meshResponsiveness": evidence}
+    _save(directory, "td-otbr-restapi-mesh-diagnostics-fetch-all.json", items)
+    _save(directory, "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json", outcome)
+    return outcome
+
+
+@pytest.mark.parametrize("case", ["valid", "expansion-only-child", "empty-child-table", "changed-rloc", "wrong-extaddress", "stale-response", "reused-result", "scope-changed", "tampered-binding", "unsupported-contract", "children-uncovered", "no-answered-router", "missing-link", "no-response", "witness-age-boundary", "witness-too-old", "witness-future", "precision-before", "precision-after", "response-future"])
+def test_rest_mesh_qualified_completeness_is_bound_and_conservative(tmp_path, case):
+    original = _seed_rest_mesh_response(tmp_path, case)
+    raw_before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
+    report = unified.build_unified_dataset(tmp_path, "otbr_restapi_unified")
+    projection = report["coverage"]["restMeshDiagnostics"]
+    expected = case in {"valid", "expansion-only-child", "empty-child-table", "changed-rloc", "witness-age-boundary", "precision-before", "precision-after"}
+    assert projection["complete"] is expected
+    assert ("incomplete-outcome:td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json" not in report["coverage"]["healthReasons"]) is expected
+    if expected:
+        assert projection["counts"] == {"selected": 19, "answered": 18, "notProvided": 1, "unanswered": 0, "probed": 1}
+    assert original["partial"] is True
+    assert original["deviceResults"][-1]["status"] == "failed"
+    assert all((tmp_path / name).read_bytes() == content for name, content in raw_before.items())
+
+
+@pytest.mark.parametrize("case", ["duplicate-target", "extra-target", "invalid-check", "invalid-identity", "invalid-action-type", "invalid-error-state", "invalid-result-id", "invalid-request-types", "invalid-policy-bool", "invalid-scope-order", "duplicate-final", "unexplained-partial"])
+def test_rest_mesh_invalid_evidence_never_qualifies(tmp_path, case):
+    from td_restapi_mesh_evidence import qualify_rest_mesh_outcome
+    from util_data import network_scope_path
+    outcome = _seed_rest_mesh_response(tmp_path)
+    evidence = outcome["meshResponsiveness"]
+    target = evidence["targets"][0]
+    if case == "duplicate-target":
+        evidence["targets"].append(copy.deepcopy(target))
+    elif case == "extra-target":
+        extra = copy.deepcopy(target)
+        extra["identity"]["deviceId"] = "eeeeeeeeeeeeeeee"
+        evidence["targets"].append(extra)
+    elif case == "invalid-check":
+        target["check"] = None
+    elif case == "invalid-identity":
+        target["identity"] = []
+    elif case == "invalid-action-type":
+        target["check"]["action"]["type"] = []
+    elif case == "invalid-error-state":
+        outcome["deviceResults"][-1]["attemptErrors"][0]["actionStatus"] = {}
+    elif case == "invalid-result-id":
+        target["check"]["diagnostic"]["id"] = []
+    elif case == "invalid-request-types":
+        outcome["deviceResults"][-1]["attemptedTypes"] = [[[]]]
+        outcome["deviceResults"][-1]["status"] = "completed"
+    elif case == "invalid-policy-bool":
+        evidence["policy"]["maxRequestsPerTarget"] = True
+    elif case == "invalid-scope-order":
+        evidence["scopeAfter"]["receivedAt"] = evidence["scopeBefore"]["requestedAt"]
+    elif case == "duplicate-final":
+        outcome["items"].append(copy.deepcopy(outcome["items"][0]))
+    elif case == "unexplained-partial":
+        outcome["deviceResults"].pop()
+        outcome["queriedCount"] = 18
+        evidence["targets"] = []
+    _save(tmp_path, "td-otbr-restapi-mesh-diagnostics-fetch-all.json", outcome["items"])
+    _save(tmp_path, "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json", outcome)
+    projection, _ = unified.read_rest_mesh_qualification(tmp_path, expected_network=NETWORK)
+    assert projection["complete"] is False
+    if case == "invalid-check":
+        malformed = copy.deepcopy(outcome)
+        malformed["deviceResults"] = [None, {"deviceId": [], "diagnosticIds": None, "attemptErrors": None}]
+        assert qualify_rest_mesh_outcome(malformed, [], [], {}, NETWORK)["complete"] is False
+
+
+def test_rest_mesh_newer_checkpoint_cannot_qualify_old_final(tmp_path):
+    from util_data import create_checkpoint_filename
+    _seed_rest_mesh_response(tmp_path)
+    final = tmp_path / "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
+    checkpoint = tmp_path / create_checkpoint_filename(final.name)
+    checkpoint.write_text("[]")
+    os.utime(checkpoint, ns=(final.stat().st_mtime_ns + 1, final.stat().st_mtime_ns + 1))
+    projection, _ = unified.read_rest_mesh_qualification(tmp_path, expected_network=NETWORK)
+    assert projection["complete"] is False
+    assert projection["counts"]["notProvided"] == 0
+    assert projection["counts"]["unanswered"] == 1
+    assert projection["provenance"]["newerCheckpointSha256"] == hashlib.sha256(b"[]").hexdigest()
+    checkpoint.unlink()
+    projection, _ = unified.read_rest_mesh_qualification(tmp_path, expected_network=NETWORK)
+    assert projection["complete"] is True
+
+
 def _mdns_omr_services():
     address = "fd6b:32e0:d18:0:131f:4a34:d524:2457"
     return [{
@@ -872,7 +1031,7 @@ def test_ping_reachable_router_without_tables_is_expected_and_complete(tmp_path)
         {"file": "td-otbr-cli-meshdiag-router-childtables.json", "rloc16": "0x4400"},
         {"file": "td-otbr-cli-meshdiag-router-neighbortables.json", "rloc16": "0x4400"},
     ]
-    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v11"
+    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v12"
 
 
 @pytest.mark.parametrize(("kwargs", "reason"), [

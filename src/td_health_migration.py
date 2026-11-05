@@ -23,6 +23,7 @@ from td_health_comparison import (
 from td_health_evaluator import (
     EVALUATOR_VERSION,
     UNIFIED_EVALUATOR_VERSION,
+    MESH_UNIFIED_EVALUATOR_VERSION,
     evaluator_version_for_dataset,
     evaluator_version_for_unified_context,
     evaluate_observation,
@@ -59,7 +60,7 @@ from td_health_sqlite import (
 
 _SUPPORTED_EVALUATORS = frozenset({
     "snapshot-v10", "snapshot-v11", "snapshot-v15", "snapshot-v16", "snapshot-v17",
-    EVALUATOR_VERSION, UNIFIED_EVALUATOR_VERSION,
+    EVALUATOR_VERSION, UNIFIED_EVALUATOR_VERSION, MESH_UNIFIED_EVALUATOR_VERSION,
 })
 _DEVICE_ID_PREFIX = "extaddr:"
 

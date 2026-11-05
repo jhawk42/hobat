@@ -26,6 +26,121 @@ from util_data import (
 )
 
 
+def test_mesh_response_flag_rejects_children_before_requests():
+    client = Mock()
+    args = SimpleNamespace(mesh_diag_command="fetch-all", types=None, poll_timeout=20,
+                           poll_interval=2, destination_type="extended", task_timeout=15,
+                           routers_only=False, diagnostic_response_fallback=True)
+    with pytest.raises(OTBRUsageError, match="requires --routers-only"):
+        mesh_module.dispatch_mesh_diagnostics(client, args, False)
+    assert client.mock_calls == []
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_mesh_response_reuses_destination_and_preserves_raw_mesh(tmp_path, monkeypatch, enabled):
+    from datetime import datetime, timezone
+    from copy import deepcopy
+    address = "1111111111111111"
+    client = Mock()
+    client.get_active_dataset.return_value = {"extPanId": "123456789abcdef0", "networkKey": "do-not-retain"}
+    client.list_devices.return_value = [{"id": address, "extAddress": address, "role": "router"}]
+    client.fetch_device_diagnostics.side_effect = lambda *_args, **_kwargs: {
+        "action": {"id": "new-action", "status": "completed", "relationships": {"result": {"data": {"id": "new-result", "type": "diagnostics"}}}},
+        "item": {"id": "new-result", "type": "networkDiagnostics", "created": datetime.now(timezone.utc).isoformat(), "extAddress": address},
+    }
+    original = {}
+    def sweep(*_args, **_kwargs):
+        now = datetime.now(timezone.utc).isoformat()
+        original.update(items=[], partial=True, startedAt=now, completedAt=now, queriedCount=1,
+                        deviceResults=[{"deviceId": address, "status": "failed", "attemptErrors": [{"type": "OTBRActionFailedError", "actionId": "old-action", "actionStatus": "stopped"}]}])
+        return deepcopy(original)
+    client.fetch_mesh_diagnostics_all_devices.side_effect = sweep
+    witness_time = "2026-11-05T00:00:00Z"
+    table = {"extAddress": address, "diagnosticId": "old-diag", "created": witness_time, "childTable": [], "resolvedChildren": []}
+    monkeypatch.setattr(mesh_module, "_capture_child_witness", lambda *_args: ([table], {"witness": "a" * 64}, []))
+    monkeypatch.setattr(mesh_module, "select_child_witness", lambda *_args: ({"diagnosticId": "old-diag", "created": witness_time, "extAddress": address}, None))
+    output = tmp_path / "mesh.json"
+    args = SimpleNamespace(mesh_diag_command="fetch-all", types=None, poll_timeout=20, poll_interval=2,
+                           destination_type="extended", task_timeout=15, routers_only=True,
+                           no_update_devices=True, diagnostic_response_fallback=enabled,
+                           no_progress=True, no_fallback=True, items_only=True, resolved_output_path=output)
+    assert mesh_module.dispatch_mesh_diagnostics(client, args, False) == []
+    saved = json.loads(output.with_suffix(".outcome.json").read_text())
+    for key, value in original.items():
+        assert saved[key] == value
+    assert client.fetch_mesh_diagnostics_all_devices.call_args.kwargs["progressive_fallback"] is False
+    assert client.fetch_device_diagnostics.call_count == int(enabled)
+    assert client.get_active_dataset.call_count == 2 * int(enabled)
+    client.get_device.assert_not_called()
+    if enabled:
+        call = client.fetch_device_diagnostics.call_args
+        assert call.args == (address,)
+        assert call.kwargs == {"types": ["extAddress", "rloc16", "mode", "ipv6Addresses"], "destination_type": "extended", "task_timeout": 15, "poll_interval": 2.0, "poll_timeout": 20.0, "return_context": True, "raw": False}
+        assert saved["meshResponsiveness"]["targets"][0]["check"]["status"] == "response"
+        assert "do-not-retain" not in json.dumps(saved)
+    else:
+        assert "meshResponsiveness" not in saved
+
+
+@pytest.mark.parametrize("case", ["timeout", "connection", "malformed", "cancelled", "scope-changed", "changed-witness", "missing-witness"])
+def test_mesh_response_failure_boundaries_do_not_retry_or_rewrite(tmp_path, monkeypatch, case):
+    from copy import deepcopy
+    from otbr_restapi_util import OTBRActionTimeoutError, OTBRConnectionError
+    from td_restapi_mesh_evidence import POLICY
+    from td_unified_dataset import UnifiedDatasetError
+    address = "1111111111111111"
+    original = {"items": [], "partial": True, "deviceResults": [{"deviceId": address, "status": "failed", "attemptErrors": [{"type": "OTBRActionFailedError", "actionId": "mesh-stopped", "actionStatus": "stopped"}]}]}
+    client = Mock()
+    client.get_active_dataset.return_value = {"extPanId": "123456789abcdef0"}
+    context = {"action": {"id": "new-action", "status": "completed", "relationships": {"result": {"data": {"id": "new-result"}}}}, "item": {"id": "new-result", "type": "networkDiagnostics", "extAddress": address, "created": "2026-11-05T00:00:00Z"}}
+    client.fetch_device_diagnostics.return_value = context
+    if case == "timeout":
+        client.fetch_device_diagnostics.side_effect = OTBRActionTimeoutError("timeout", action_id="new-action", status="running")
+    elif case == "connection":
+        client.fetch_device_diagnostics.side_effect = OTBRConnectionError("unavailable")
+    elif case == "cancelled":
+        client.fetch_device_diagnostics.side_effect = KeyboardInterrupt()
+    elif case == "malformed":
+        client.fetch_device_diagnostics.return_value = {}
+    elif case == "scope-changed":
+        client.get_active_dataset.return_value = {"extPanId": "ffffffffffffffff"}
+    monkeypatch.setattr(mesh_module, "_utc_now", lambda: "2026-11-05T00:00:00Z")
+    monkeypatch.setattr(mesh_module, "select_child_witness", lambda *_args: (None, "witness-missing") if case == "missing-witness" else ({"diagnosticId": "old", "created": "2026-11-05T00:00:00Z", "extAddress": address}, None))
+    captured = []
+    if case == "changed-witness":
+        captured = [SimpleNamespace(content=b"{}")]
+        def changed(*_args):
+            raise UnifiedDatasetError("changed original")
+        monkeypatch.setattr("td_unified_dataset._recheck", changed)
+    outcome = deepcopy(original)
+    def attach():
+        mesh_module._attach_responsiveness(client, outcome, [{"id": address, "extAddress": address, "role": "router"}], {"extPanId": "123456789abcdef0"}, [], {"witness": "a" * 64}, captured, tmp_path / "mesh.json", "extended")
+    if case == "cancelled":
+        with pytest.raises(KeyboardInterrupt):
+            attach()
+        assert "meshResponsiveness" not in outcome
+    else:
+        attach()
+        evidence = outcome["meshResponsiveness"]
+        check = evidence["targets"][0]["check"]
+        if case in {"timeout", "connection"}:
+            assert check["status"] == "no-response"
+        elif case == "malformed":
+            assert check["status"] == "invalid-response"
+        elif case == "scope-changed":
+            assert check["reasonCode"] == "scope-changed"
+        elif case == "changed-witness":
+            assert check["reasonCode"] == "witness-binding-mismatch"
+            assert evidence["witnessBindings"] == {}
+        elif case == "missing-witness":
+            assert check["status"] == "not-attempted"
+        assert evidence["policy"] == POLICY
+    assert client.fetch_device_diagnostics.call_count == int(case != "missing-witness")
+    assert {key: outcome[key] for key in original} == original
+    client.get_device.assert_not_called()
+    client.fetch_device_collection.assert_not_called()
+
+
 @pytest.mark.parametrize("rloc", ["0000", "0400", "0800", "f800", "0xF800", 0x0800])
 def test_router_inference_preserves_explicit_roles_and_flags(rloc):
     record = {"rloc16": rloc, "role": "child", "isRouter": False}

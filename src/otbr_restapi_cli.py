@@ -739,6 +739,11 @@ def _add_mesh_diagnostics_commands(
         help="Disable split mesh-TLV and basic responsiveness fallback",
     )
     mesh_fetch_all_p.add_argument(
+        "--diagnostic-response-fallback",
+        action="store_true",
+        help="Check failed routers with one fresh extended-address diagnostic (default: off)",
+    )
+    mesh_fetch_all_p.add_argument(
         "--items-only",
         action="store_true",
         help="Return only diagnostic items instead of the structured sweep outcome",

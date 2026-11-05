@@ -46,7 +46,7 @@ def process(directory, dataset_id, store=None, **kwargs):
 @pytest.mark.parametrize("builder_contract", [
     "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
     "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
-    "unified-assembly-v9", "unified-assembly-v10",
+    "unified-assembly-v9", "unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12",
 ])
 def test_original_samples_are_scoped_stable_and_reopenable(
     tmp_path, dataset_id, builder_contract, monkeypatch,
@@ -117,8 +117,10 @@ def test_qualification_profiles_and_no_ha_negative_authority(tmp_path, dataset_i
             "otbr-restapi" if dataset_id == "otbr_restapi_unified" else "otbr-cli")
 
 
-def test_typed_controller_health_is_complete_without_absence_authority(tmp_path):
+@pytest.mark.parametrize("builder,version", [("unified-assembly-v11", "snapshot-v18"), ("unified-assembly-v12", "snapshot-v19")])
+def test_typed_controller_health_is_complete_without_absence_authority(tmp_path, monkeypatch, builder, version):
     from td_health_unified import digest
+    monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", builder)
 
     entry = _seed_ha_controller(tmp_path)
     report = build_unified_dataset(tmp_path, entry["value"])
@@ -134,7 +136,7 @@ def test_typed_controller_health_is_complete_without_absence_authority(tmp_path)
     assert context["sourceTimeProvenanceDigest"] == digest(source_times)
     assert context["absenceWitness"] is None
     assert first.observation.completeness.value == "complete"
-    assert first.assessment.evaluator_version == "snapshot-v18"
+    assert first.assessment.evaluator_version == version
     assert not first.assessment.coverage["offlineEligible"]
     assert not first.assessment.coverage["topologyAuthority"]
     assert first.assessment.coverage["sourceObservationKinds"] == {
@@ -251,9 +253,10 @@ def test_missing_optional_controller_inputs_do_not_downgrade_complete_ha(tmp_pat
     assert result.assessment.reproduction_context["unifiedHealth"]["absenceWitness"] is None
 
 
-def test_source_time_provenance_requires_v11_builder_context(tmp_path):
+def test_source_time_provenance_requires_v11_builder_context(tmp_path, monkeypatch):
     from td_health_manifest import HealthManifestError
     from td_health_unified import digest, plain, validate_context
+    monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", "unified-assembly-v11")
 
     entry = _seed_ha_controller(tmp_path)
     build_unified_dataset(tmp_path, entry["value"])
@@ -442,8 +445,128 @@ def test_rest_unified_revalidates_recovery_and_preserves_other_gates(tmp_path, c
     result = process(tmp_path, "otbr_restapi_unified")
     coverage = result.assessment.coverage["restDiagnostics"]
     assert coverage["summary"]["recoveredChildren"] == (case != "missing-binding")
-    assert result.assessment.evaluator_version == "snapshot-v17"
+    assert result.assessment.evaluator_version == "snapshot-v19"
     assert {name: (tmp_path / name).read_bytes() for name in originals} == originals
+
+
+@pytest.mark.parametrize("case", ["valid", "expansion-only-child", "changed-rloc", "wrong-extaddress", "stale-response", "children-uncovered", "no-answered-router"])
+def test_rest_mesh_health_matches_cached_projection_and_reopens(tmp_path, monkeypatch, case):
+    from test_td_unified_dataset import _seed_rest_mesh_response
+    from td_health_unified import digest, plain, validate_context
+    from td_health_manifest import HealthManifestError
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("cache-only health attempted a live REST request")
+    monkeypatch.setattr("otbr_restapi_util.OTBRRestApiClient._request", forbidden)
+    _seed_rest_mesh_response(tmp_path, case)
+    raw_before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
+    report = build_unified_dataset(tmp_path, "otbr_restapi_unified")
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    result = process(tmp_path, "otbr_restapi_unified", store)
+    projection = report["coverage"]["restMeshDiagnostics"]
+    assert result.assessment.coverage["restMeshDiagnostics"] == projection
+    context = result.assessment.reproduction_context["unifiedHealth"]
+    assert context["version"] == "unified-health-v2"
+    assert context["restMeshDiagnostics"] == projection
+    assert context["restMeshDiagnosticsDigest"] == digest(projection)
+    assert result.assessment.evaluator_version == "snapshot-v19"
+    assert (result.observation.completeness.value == "complete") is (case in {"valid", "expansion-only-child", "changed-rloc"})
+    if case == "expansion-only-child":
+        assert "unresolvedRestChildIdentities" not in context
+    reopened = SQLiteHealthStore(tmp_path / "hobat_v1.db", read_only=True)
+    with closing(reopened._connect()) as connection:
+        retained = reopened._endpoint(connection, result.assessment.assessment_id)
+    assert retained[1].reproduction_context["unifiedHealth"]["restMeshDiagnostics"] == projection
+    if case == "expansion-only-child":
+        assert "unresolvedRestChildIdentities" not in retained[1].reproduction_context["unifiedHealth"]
+    dataset = load_health_manifest().dataset("otbr_restapi_unified")
+    tampered = plain(result.assessment.reproduction_context)
+    tampered["unifiedHealth"]["restMeshDiagnostics"]["counts"]["answered"] += 1
+    with pytest.raises(HealthManifestError, match="projection digest"):
+        validate_context(tampered, dataset, result.observation)
+    if case == "valid":
+        for field, value in (("witnessBindings", None), ("policy", {}), ("meshOutcomeSha256", "0" * 64), ("networkInstance", "0000000000000001")):
+            tampered = plain(result.assessment.reproduction_context)
+            tampered["unifiedHealth"]["restMeshDiagnostics"]["provenance"][field] = value
+            tampered["unifiedHealth"]["restMeshDiagnosticsDigest"] = digest(tampered["unifiedHealth"]["restMeshDiagnostics"])
+            with pytest.raises(HealthManifestError):
+                validate_context(tampered, dataset, result.observation)
+    inventory = inventory_health_history(reopened, target_policy=load_health_policy(), dataset_ids=("otbr_restapi_unified",))
+    assert inventory.items[0].eligibility.value == "already-current"
+    assert all((tmp_path / name).read_bytes() == content for name, content in raw_before.items())
+
+
+@pytest.mark.parametrize("builder_contract", ["unified-assembly-v11", "unified-assembly-v12"])
+def test_corrected_expansion_child_matches_preserve_previous_observation(tmp_path, monkeypatch, builder_contract):
+    from copy import deepcopy
+    from test_td_unified_dataset import _seed_rest_mesh_response
+    from td_restapi_diagnostic_recovery import qualified_router_tables
+
+    monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", builder_contract)
+    _seed_rest_mesh_response(tmp_path, "expansion-only-child")
+    raw_before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+
+    def previous_tables(effective, final_items):
+        previous = deepcopy(effective)
+        previous["diagnosticRecovery"]["devices"] = [
+            detail for detail in previous["diagnosticRecovery"]["devices"]
+            if not (detail.get("recoveryKind") == "none" and detail.get("role") == "child")
+        ]
+        return qualified_router_tables(previous, final_items)
+
+    with monkeypatch.context() as previous_matcher:
+        previous_matcher.setattr("td_restapi_diagnostic_recovery.qualified_router_tables", previous_tables)
+        build_unified_dataset(tmp_path, "otbr_restapi_unified")
+        previous = process(tmp_path, "otbr_restapi_unified", store)
+
+    build_unified_dataset(tmp_path, "otbr_restapi_unified")
+    current = process(tmp_path, "otbr_restapi_unified", store)
+
+    assert previous.observation.source_set_digest == current.observation.source_set_digest
+    assert previous.observation.observation_id != current.observation.observation_id
+    assert previous.observation.completeness.value == "degraded"
+    assert current.observation.completeness.value == (
+        "complete" if builder_contract == "unified-assembly-v12" else "degraded"
+    )
+    reopened = SQLiteHealthStore(tmp_path / "hobat_v1.db", read_only=True)
+    with closing(reopened._connect()) as connection:
+        retained_previous = reopened._endpoint(connection, previous.assessment.assessment_id)
+        retained_current = reopened._endpoint(connection, current.assessment.assessment_id)
+    assert retained_previous[1].reproduction_context["unifiedHealth"]["unresolvedRestChildIdentities"] is True
+    assert "unresolvedRestChildIdentities" not in retained_current[1].reproduction_context["unifiedHealth"]
+    assert all((tmp_path / name).read_bytes() == content for name, content in raw_before.items())
+
+
+def test_v12_mesh_context_cannot_be_read_as_v1_or_compared_to_v11(tmp_path, monkeypatch):
+    from td_health_manifest import HealthManifestError
+    from td_health_unified import plain, validate_context
+    from td_health_comparison import derive_comparison, source_roles_for_dataset
+    collection(tmp_path, "otbr_cli_unified", 1, positive=True)
+    current = process(tmp_path, "otbr_cli_unified")
+    tampered = plain(current.assessment.reproduction_context)
+    tampered["unifiedHealth"]["version"] = "unified-health-v1"
+    dataset = load_health_manifest().dataset("otbr_cli_unified")
+    with pytest.raises(HealthManifestError, match="version does not match"):
+        validate_context(tampered, dataset, current.observation)
+    monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", "unified-assembly-v11")
+    collection(tmp_path, "otbr_cli_unified", 2)
+    legacy = process(tmp_path, "otbr_cli_unified")
+    interval, _ = derive_comparison((current.observation, current.assessment), (legacy.observation, legacy.assessment), source_roles=source_roles_for_dataset(dataset))
+    assert interval.compatibility.comparable is False
+
+
+def test_multi_source_retains_same_rest_mesh_qualification(tmp_path):
+    from test_td_unified_dataset import _seed_rest_mesh_response
+    for dataset_id in ("otbr_cli_unified", "ha_matter_ws_unified", "mdns_unified"):
+        _seed(tmp_path, dataset_id)
+    _seed_rest_mesh_response(tmp_path)
+    primary = build_unified_dataset(tmp_path, "otbr_restapi_unified")
+    combined = build_unified_dataset(tmp_path, "multi_source_unified")
+    expected_projection = primary["coverage"]["restMeshDiagnostics"]
+    assert combined["coverage"]["restMeshDiagnostics"] == expected_projection
+    result = process(tmp_path, "multi_source_unified")
+    assert result.assessment.coverage["restMeshDiagnostics"] == expected_projection
+    assert result.assessment.reproduction_context["unifiedHealth"]["restMeshDiagnostics"] == expected_projection
 
 
 @pytest.mark.parametrize("child_table", [[], [{"childId": 42}]])
@@ -1974,8 +2097,9 @@ def test_v17_unified_assessment_reassesses_from_retained_observation_after_upgra
     assert retained[1].reproduction_context["unifiedHealth"]["absenceWitness"] is not None
 
 
-def test_unified_comparison_requires_matching_current_evaluator(tmp_path):
+def test_unified_comparison_requires_matching_current_evaluator(tmp_path, monkeypatch):
     from td_health_comparison import derive_comparison, source_roles_for_dataset
+    monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", "unified-assembly-v11")
     collection(tmp_path, "otbr_cli_unified", 1, positive=True)
     before = process(tmp_path, "otbr_cli_unified")
     collection(tmp_path, "otbr_cli_unified", 2)
@@ -1997,6 +2121,24 @@ def test_unified_comparison_requires_matching_current_evaluator(tmp_path):
             (before.observation, legacy), (after.observation, after_assessment), source_roles=roles,
         )
         assert interval.compatibility.comparable is comparable
+
+
+def test_v19_unified_comparison_requires_same_retained_contract(tmp_path):
+    from td_health_comparison import derive_comparison, source_roles_for_dataset
+    collection(tmp_path, "otbr_cli_unified", 1, positive=True)
+    before = process(tmp_path, "otbr_cli_unified")
+    collection(tmp_path, "otbr_cli_unified", 2)
+    after = process(tmp_path, "otbr_cli_unified")
+    roles = source_roles_for_dataset(load_health_manifest().dataset("otbr_cli_unified"))
+    assert before.assessment.evaluator_version == after.assessment.evaluator_version == "snapshot-v19"
+    interval, _ = derive_comparison((before.observation, before.assessment), (after.observation, after.assessment), source_roles=roles)
+    assert interval.compatibility.comparable
+    for field in ("reportContractDigest", "recipeContractDigest"):
+        context = dict(after.assessment.reproduction_context)
+        context["unifiedHealth"] = {**context["unifiedHealth"], field: "0" * 64}
+        modified = replace(after.assessment, reproduction_context=context)
+        interval, _ = derive_comparison((before.observation, before.assessment), (after.observation, modified), source_roles=roles)
+        assert not interval.compatibility.comparable
 
 
 @pytest.mark.parametrize("dataset_id", ["otbr_cli_unified", "otbr_restapi_unified"])
@@ -2067,7 +2209,7 @@ def test_cli_and_health_api_expose_the_same_explicit_qualified_profiles(tmp_path
     assert result.returncode == 0, result.stderr
     document = json.loads(result.stdout)
     assert document["datasetId"] == dataset_id
-    assert document["evaluatorVersion"] == "snapshot-v17"
+    assert document["evaluatorVersion"] == "snapshot-v19"
     assert not (tmp_path / "hobat_v1.db").exists()
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     persisted = process(tmp_path, dataset_id, store)

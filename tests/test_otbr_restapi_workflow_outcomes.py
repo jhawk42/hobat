@@ -32,6 +32,51 @@ def completed_action(action_id: str = "action-1", diagnostic_id: str | None = No
     return action
 
 
+@pytest.mark.parametrize("change,reason", [
+    ({}, None),
+    ({"extAddress": "2222222222222222"}, "diagnostic-identity-mismatch"),
+    ({"extAddress": None}, "diagnostic-identity-mismatch"),
+    ({"created": "2026-11-05T00:00:00Z"}, "diagnostic-response-stale"),
+    ({"created": None}, "diagnostic-response-stale"),
+])
+def test_mesh_identity_response_requires_fresh_linked_extaddress(change, reason):
+    from td_restapi_mesh_evidence import validate_diagnostic_response
+    identity = {"destination": "1111111111111111", "extAddress": "1111111111111111"}
+    diagnostic = {"id": "fresh-diagnostic", "type": "networkDiagnostics", "created": "2026-11-05T01:00:01Z", "extAddress": identity["extAddress"], **change}
+    check = {"status": "response", "startedAt": "2026-11-05T01:00:00Z", "completedAt": "2026-11-05T01:00:02Z", "elapsedSeconds": 2.0,
+             "request": {"destination": identity["destination"], "destinationType": "extended", "types": ["extAddress", "rloc16", "mode", "ipv6Addresses"], "timeout": 15},
+             "action": completed_action("fresh-action", diagnostic["id"]), "diagnostic": diagnostic}
+    assert validate_diagnostic_response(check, identity) == reason
+    if reason is None:
+        assert validate_diagnostic_response(check, identity, ["fresh-diagnostic"]) == "diagnostic-result-reused"
+        check["action"] = completed_action("fresh-action")
+        assert validate_diagnostic_response(check, identity) == "diagnostic-result-missing"
+
+
+def test_mesh_identity_selection_does_not_require_rloc():
+    from td_restapi_mesh_evidence import select_router_identity
+    device = {"id": "1111111111111111", "extAddress": "1111111111111111", "role": "router"}
+    identity, reason = select_router_identity(device["id"], [device])
+    assert reason is None
+    assert identity["destination"] == device["id"]
+    assert select_router_identity(device["id"], [device, device])[1] == "ambiguous-target"
+
+
+@pytest.mark.parametrize("error,eligible", [
+    ({"type": "OTBRActionFailedError", "actionId": "old", "actionStatus": "stopped"}, True),
+    ({"type": "OTBRActionTimeoutError", "actionId": "old", "actionStatus": "active"}, True),
+    ({"type": "OTBRActionFailedError", "actionId": "old"}, False),
+    ({"type": "OTBRHTTPError", "actionId": "old"}, False),
+])
+def test_mesh_response_eligibility_is_typed_and_table_free(error, eligible):
+    from td_restapi_mesh_evidence import classify_mesh_probe_eligibility
+    record = {"deviceId": "1111111111111111", "status": "failed", "attemptErrors": [error]}
+    assert (classify_mesh_probe_eligibility(record) is None) is eligible
+    assert classify_mesh_probe_eligibility(record, "rloc") == "unsupported-destination-type"
+    record["meshCoverage"] = ["children"]
+    assert classify_mesh_probe_eligibility(record) == "partial-table-returned"
+
+
 def test_completed_discovery_returns_structured_outcome(monkeypatch) -> None:
     client = OTBRRestApiClient(base_url="http://example.test")
     monkeypatch.setattr(

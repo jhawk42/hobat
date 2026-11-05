@@ -21,10 +21,13 @@ from td_const import (
     OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
 )
 
 SAMPLE_CONTRACT = "comparison-v1-unified"
-CONTEXT_VERSION = "unified-health-v1"
+CONTEXT_VERSION = "unified-health-v2"
+LEGACY_CONTEXT_VERSION = "unified-health-v1"
 RECIPE_VERSION = "unified-v1"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 DIAGNOSTICS = {
@@ -137,7 +140,7 @@ def _prepare_contract(dataset: HealthDataset) -> _PreparedContract:
         for builder_contract in (
             "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
             "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
-            "unified-assembly-v9", "unified-assembly-v10", "unified-assembly-v11",
+            "unified-assembly-v9", "unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12",
         )
     ))
 
@@ -229,11 +232,11 @@ def has_typed_ha_observation(context, dataset):
     value = context.get("unifiedHealth") if isinstance(context, Mapping) else None
     if not isinstance(value, Mapping) or dataset.datasource_id != "ha-matter-ws":
         return False
-    builder_digest = digest([
-        "unified-v1", "unified-assembly-v11",
-        dataset.unified_recipe["recipeDigest"], dataset.unified_recipe["authorityDigest"],
-    ])
-    if value.get("reportContractDigest") != builder_digest:
+    builder_digests = {digest([
+        "unified-v1", builder, dataset.unified_recipe["recipeDigest"],
+        dataset.unified_recipe["authorityDigest"],
+    ]) for builder in ("unified-assembly-v11", "unified-assembly-v12")}
+    if value.get("reportContractDigest") not in builder_digests:
         return False
     entries = _source_time_provenance(value, required=True)
     by_name = {item["filename"]: item for item in entries}
@@ -261,6 +264,83 @@ def has_typed_ha_observation(context, dataset):
     return True
 
 
+def _validate_mesh_projection(projection, dataset, observation):
+    from td_health_manifest import HealthManifestError
+    from td_restapi_mesh_evidence import POLICY, QUALIFICATION_VERSION, RESPONSIVENESS_VERSION, extended_address, timestamp
+    from util_data import network_scope_path
+
+    if projection is None:
+        return
+    if dataset.datasource_id not in {"otbr-restapi", "multi-source"} or not isinstance(projection, Mapping):
+        raise HealthManifestError("REST mesh qualification is outside its source domain")
+    counts, targets, provenance = projection.get("counts"), projection.get("targets"), projection.get("provenance")
+    if (projection.get("contractVersion") != QUALIFICATION_VERSION
+            or not isinstance(counts, Mapping) or set(counts) != {"selected", "answered", "notProvided", "unanswered", "probed"}
+            or any(type(item) is not int or item < 0 for item in counts.values())
+            or counts["selected"] != counts["answered"] + counts["notProvided"] + counts["unanswered"]
+            or counts["probed"] > counts["selected"]
+            or counts["notProvided"] > counts["probed"]
+            or not isinstance(targets, list) or len(targets) != counts["selected"]
+            or any(not isinstance(item, Mapping) for item in targets)
+            or type(projection.get("complete")) is not bool
+            or not isinstance(provenance, Mapping)):
+        raise HealthManifestError("Invalid retained REST mesh qualification")
+    for classification, count in (("answered", "answered"), ("not-provided", "notProvided"), ("unanswered", "unanswered")):
+        if sum(item.get("classification") == classification for item in targets) != counts[count]:
+            raise HealthManifestError("Invalid retained REST mesh counts")
+    if projection["complete"] and (not counts["selected"] or not counts["answered"] or counts["unanswered"]):
+        raise HealthManifestError("Invalid complete REST mesh qualification")
+    if any(item.get("classification") == "not-provided" and (
+        item.get("rawStatus") != "failed" or item.get("reasonCode") != "not-provided-qualified"
+        or item.get("checkStatus") != "response"
+    ) for item in targets):
+        raise HealthManifestError("Invalid retained REST mesh exemption")
+    bindings = provenance.get("witnessBindings")
+    witness_files = {OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME, OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME}
+    witness_files |= {network_scope_path(filename).name for filename in tuple(witness_files)}
+    if not isinstance(bindings, Mapping) or not set(bindings) <= witness_files:
+        raise HealthManifestError("Invalid retained REST mesh witness bindings")
+    admitted = [item for item in targets if item.get("classification") != "unanswered"]
+    addresses = [extended_address(item.get("deviceId")) for item in admitted]
+    if (None in addresses or len(set(addresses)) != len(addresses)
+            or any(item.get("extAddress") != address or item.get("destination") != item.get("deviceId")
+                   or item.get("destinationType") != "extended" for item, address in zip(admitted, addresses))):
+        raise HealthManifestError("Invalid retained REST mesh target identity")
+    if counts["notProvided"]:
+        policy = provenance.get("policy")
+        if (provenance.get("responsivenessContract") != RESPONSIVENESS_VERSION
+                or not isinstance(policy, Mapping) or policy != POLICY
+                or any(type(policy[key]) is not type(value) for key, value in POLICY.items())
+                or set(bindings) != witness_files
+                or any(not isinstance(value, str) or not _DIGEST.fullmatch(value) for value in bindings.values())
+                or any(not isinstance(provenance.get(field), str) or not _DIGEST.fullmatch(provenance[field])
+                       for field in ("meshFinalSha256", "meshOutcomeSha256", "meshFinalScopeSha256", "meshOutcomeScopeSha256"))):
+            raise HealthManifestError("Invalid retained REST mesh qualification provenance")
+        for item in targets:
+            if item.get("classification") != "not-provided":
+                continue
+            witness = item.get("witness")
+            if (item.get("childCoverage") != "qualified" or not isinstance(witness, Mapping)
+                    or witness.get("extAddress") != item["extAddress"]
+                    or not isinstance(witness.get("diagnosticId"), str) or not witness["diagnosticId"]
+                    or timestamp(witness.get("created")) is None):
+                raise HealthManifestError("Invalid retained REST mesh child coverage")
+    if observation is not None:
+        sources = {source.filename: source.digest for source in observation.sources}
+        for filename, field in (
+            (OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME, "meshFinalSha256"),
+            (OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME, "meshOutcomeSha256"),
+        ):
+            if provenance.get(field) != sources.get(filename) or not sources.get(filename):
+                raise HealthManifestError("Retained REST mesh source digest mismatch")
+        if counts["notProvided"] and "extpan:" + str(provenance.get("networkInstance")) != observation.network_id:
+            raise HealthManifestError("Retained REST mesh network identity mismatch")
+        for filename, source_digest in bindings.items():
+            if ((filename in sources and sources[filename] != source_digest)
+                    or counts["notProvided"] and filename in {OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME, OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME} and filename not in sources):
+                raise HealthManifestError("Retained REST mesh witness digest mismatch")
+
+
 def validate_context(context, dataset, observation=None, *, prepared: _PreparedContract | None = None):
     """Validate retained lineage without consulting today's raw cache."""
     from td_health_manifest import HealthManifestError
@@ -269,7 +349,7 @@ def validate_context(context, dataset, observation=None, *, prepared: _PreparedC
     elif prepared.dataset != dataset:
         raise HealthManifestError("Prepared Unified contract does not match the selected dataset")
     value = context.get("unifiedHealth") if isinstance(context, Mapping) else None
-    if (not isinstance(value, Mapping) or value.get("version") != CONTEXT_VERSION
+    if (not isinstance(value, Mapping) or value.get("version") not in {CONTEXT_VERSION, LEGACY_CONTEXT_VERSION}
             or value.get("recipe") != prepared.recipe
             or value.get("recipeContractDigest") != prepared.recipe_digest
             or value.get("reportContractDigest") not in prepared.report_contract_digests
@@ -281,18 +361,31 @@ def validate_context(context, dataset, observation=None, *, prepared: _PreparedC
         "unified-v1", "unified-assembly-v11",
         dataset.unified_recipe["recipeDigest"], dataset.unified_recipe["authorityDigest"],
     ])
+    v12_digest = digest([
+        "unified-v1", "unified-assembly-v12",
+        dataset.unified_recipe["recipeDigest"], dataset.unified_recipe["authorityDigest"],
+    ])
+    is_v12 = value.get("reportContractDigest") == v12_digest
+    if (value.get("version") == CONTEXT_VERSION) != is_v12:
+        raise HealthManifestError("Unified context version does not match its builder contract")
+    if is_v12:
+        if "restMeshDiagnostics" not in value or value.get("restMeshDiagnosticsDigest") != digest(value["restMeshDiagnostics"]):
+            raise HealthManifestError("Invalid retained REST mesh projection digest")
+        _validate_mesh_projection(value["restMeshDiagnostics"], dataset, observation)
+    elif "restMeshDiagnostics" in value or "restMeshDiagnosticsDigest" in value:
+        raise HealthManifestError("REST mesh qualification requires the v12 Unified contract")
     has_source_time_provenance = (
         "sourceTimeProvenance" in value or "sourceTimeProvenanceDigest" in value
     )
     if has_source_time_provenance and (
-        value.get("reportContractDigest") != v11_digest
+        value.get("reportContractDigest") not in {v11_digest, v12_digest}
         or "sourceTimeProvenance" not in value
         or "sourceTimeProvenanceDigest" not in value
     ):
         raise HealthManifestError("Source-time provenance requires the v11 Unified contract")
     retained_source_times = _source_time_provenance(
         value, observation,
-        required=value.get("reportContractDigest") == v11_digest,
+        required=value.get("reportContractDigest") in {v11_digest, v12_digest},
     )
     typed_files = {
         item["filename"] for item in retained_source_times
@@ -360,7 +453,7 @@ def validate_context(context, dataset, observation=None, *, prepared: _PreparedC
                 "unified-v1", builder_contract, dataset.unified_recipe["recipeDigest"],
                 dataset.unified_recipe["authorityDigest"],
             ])
-            for builder_contract in ("unified-assembly-v10", "unified-assembly-v11")
+            for builder_contract in ("unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12")
         }
         if (
             dataset.datasource_id != "multi-source"

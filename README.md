@@ -108,6 +108,13 @@ digest-bound outcome metadata even with `--items-only`; the flag still returns
 the compatibility item array. Guarded empty sweeps retain old diagnostics.
 Cache-only builds do not repair old outcomes or their scope bindings.
 See the [REST collection reference](doc/help_td_restapi_cli.md#diagnostics-fetch-all).
+REST `mesh-diagnostics fetch-all --diagnostic-response-fallback` opts into one
+bounded Network Diagnostics check for each eligible failed router, using the
+same extended-address destination. It records a fresh matching response
+separately from failed mesh tables; no ping, RLOC target, or host mesh route is
+required. The REST-only collection script enables it for full runs, not `--quick`.
+Normal dashboard Sync remains unchanged. See the
+[REST mesh coverage rules](doc/thread_network_health.md#rest-mesh-diagnostic-responsiveness).
 CLI, REST, HA Matter and Multi-source now have dedicated health profiles;
 mDNS remains enrichment-only and health-ineligible. Explicit
 `health process-dataset --dataset ID` verifies original cached evidence without

@@ -8,6 +8,8 @@ from td_restapi_diagnostic_recovery import (
     REST_DIAGNOSTIC_RECOVERY_VERSION,
     reconcile_bound_rest_diagnostics,
     reconcile_rest_diagnostics,
+    qualified_router_tables,
+    unresolved_child_table_identities,
     valid_child_table,
 )
 
@@ -121,6 +123,107 @@ def _fixture(raw: bool = False) -> tuple[dict, list]:
         },
     }
     return outcome, deepcopy(outcome["items"])
+
+
+def _bound_outcome(outcome: dict, final: list, *, scope: str = "1234567890abcdef") -> dict:
+    return reconcile_bound_rest_diagnostics(
+        outcome, final,
+        outcome_digest="a" * 64, diagnostics_digest="b" * 64,
+        outcome_scope={"extPanId": "1234567890abcdef", "provenance": "observed", "snapshotSha256": "a" * 64},
+        diagnostics_scope={"extPanId": scope, "provenance": "observed", "snapshotSha256": "b" * 64},
+        outcome_scope_digest="c" * 64, diagnostics_scope_digest="d" * 64,
+        expected_network="extpan:1234567890abcdef",
+    )
+
+
+@pytest.mark.parametrize("raw", [False, True])
+@pytest.mark.parametrize("base_child", [False, True])
+def test_completed_expansion_only_child_qualifies_router_table(raw: bool, base_child: bool) -> None:
+    outcome, final = _fixture(raw)
+    if not base_child:
+        outcome["deviceResults"].pop()
+    original, original_final = deepcopy(outcome), deepcopy(final)
+    effective = _bound_outcome(outcome, final)
+    tables = qualified_router_tables(effective, final)
+
+    assert tables[0]["resolvedChildren"] == [{
+        "childId": 42, "rloc16": "0x382a", "extAddress": CHILD,
+    }]
+    assert unresolved_child_table_identities(effective, final) is False
+    assert outcome == original
+    assert final == original_final
+
+
+@pytest.mark.parametrize("raw", [False, True])
+@pytest.mark.parametrize("case", [
+    "failed", "covered", "missing-passes", "malformed-passes", "missing-pass-result",
+    "duplicate-pass", "failed-action", "wrong-action-result", "duplicate-target",
+    "duplicate-base", "duplicate-reference", "duplicate-final", "duplicate-identity",
+    "duplicate-rloc", "wrong-parent", "wrong-destination", "wrong-target-rloc",
+    "wrong-child-id", "parent-issue", "parent-action", "stale-child", "missing-time",
+    "mismatched-final", "different-scope",
+])
+def test_invalid_expansion_only_child_never_qualifies(raw: bool, case: str) -> None:
+    outcome, final = _fixture(raw)
+    base_child = outcome["deviceResults"].pop()
+    target = outcome["childrenExpansion"]["results"][0]
+    if case in {"failed", "covered"}:
+        target["status"] = case
+    elif case == "missing-passes":
+        target.pop("passes")
+    elif case == "malformed-passes":
+        target["passes"] = None
+    elif case == "missing-pass-result":
+        target["passes"][0]["diagnosticId"] = "other-result"
+    elif case == "duplicate-pass":
+        target["passes"].append(deepcopy(target["passes"][0]))
+    elif case == "failed-action":
+        target["passes"][0]["action"]["status"] = "failed"
+    elif case == "wrong-action-result":
+        target["passes"][0]["action"] = _action("other-result")
+    elif case == "duplicate-target":
+        outcome["childrenExpansion"]["results"].append(deepcopy(target))
+    elif case == "duplicate-base":
+        outcome["deviceResults"].extend([base_child, deepcopy(base_child)])
+    elif case == "duplicate-reference":
+        base_child.update(status="completed", diagnosticId="child-diagnostic", action=_action("child-diagnostic"))
+        outcome["deviceResults"].append(base_child)
+    elif case == "duplicate-final":
+        final.append(deepcopy(final[1]))
+    elif case in {"duplicate-identity", "duplicate-rloc"}:
+        extra = _row("other-diagnostic", {
+            "extAddress": CHILD if case == "duplicate-identity" else "3333333333333333",
+            "rloc16": "0x382a" if case == "duplicate-rloc" else "0x382b",
+            "created": "2026-10-30T11:00:02+00:00",
+        }, raw)
+        outcome["items"].append(extra)
+        final.append(deepcopy(extra))
+    elif case == "wrong-parent":
+        target["parentExtAddress"] = "3333333333333333"
+    elif case == "wrong-destination":
+        target["destination"] = "00382b"
+    elif case == "wrong-target-rloc":
+        target["rloc16"] = "0x382b"
+    elif case == "wrong-child-id":
+        target["childId"] = 43
+    elif case == "parent-issue":
+        outcome["childrenExpansion"]["issues"].append({"code": "invalid_child_entry", "parentExtAddress": PARENT})
+    elif case == "parent-action":
+        outcome["deviceResults"][0]["action"] = _action("other-result")
+    elif case == "stale-child":
+        _attributes(outcome["items"][1])["created"] = "2026-10-30T10:00:00+00:00"
+        _attributes(final[1])["created"] = "2026-10-30T10:00:00+00:00"
+    elif case == "missing-time":
+        outcome["completedAt"] = None
+    elif case == "mismatched-final":
+        _attributes(final[1])["extAddress"] = "3333333333333333"
+    original, original_final = deepcopy(outcome), deepcopy(final)
+    effective = _bound_outcome(outcome, final, scope="fedcba0987654321" if case == "different-scope" else "1234567890abcdef")
+
+    assert all(not table["resolvedChildren"] for table in qualified_router_tables(effective, final))
+    assert unresolved_child_table_identities(effective, final) is True
+    assert outcome == original
+    assert final == original_final
 
 
 @pytest.mark.parametrize("raw", [False, True])

@@ -613,10 +613,41 @@ def qualified_router_tables(
         detail for detail in recovery.get("devices", [])
         if isinstance(detail, Mapping) and detail.get("recoveryKind") in {"child-rloc", "child-detail"}
     )
+    child_counts = counts.copy()
+    for detail in recovery.get("devices", []):
+        if (
+            not isinstance(detail, Mapping)
+            or detail.get("recoveryKind") != "none"
+            or detail.get("originalStatus") != "completed"
+            or detail.get("role") != "child"
+        ):
+            continue
+        ext = _usable_ext_address(detail.get("extAddress"))
+        diagnostic_id = detail.get("diagnosticId")
+        if ext is None or counts[ext] != 0 or not isinstance(diagnostic_id, str):
+            continue
+        matching = [
+            target for target in targets
+            if isinstance(target, Mapping) and target.get("status") == "completed"
+            and _usable_ext_address(target.get("extAddress")) == ext
+            and target.get("diagnosticId") == diagnostic_id
+        ]
+        if len(matching) != 1 or not isinstance(matching[0].get("passes"), list):
+            continue
+        passes = [
+            record for record in matching[0]["passes"]
+            if isinstance(record, Mapping) and record.get("status") == "completed"
+            and record.get("diagnosticId") == diagnostic_id
+            and _action_matches(record.get("action"), diagnostic_id)
+        ]
+        if len(passes) != 1:
+            continue
+        child_records.append({**detail, "action": passes[0].get("action")})
+        child_counts[ext] = 1
     for child in child_records:
         ext, diagnostic_id = _usable_ext_address(child.get("extAddress")), child.get("diagnosticId")
         row = lookup(diagnostic_id)
-        if ext is None or counts[ext] != 1 or row is None or not isinstance(diagnostic_id, str):
+        if ext is None or child_counts[ext] != 1 or row is None or not isinstance(diagnostic_id, str):
             continue
         rloc = _parse_rloc16(row.get("rloc16"))
         if (

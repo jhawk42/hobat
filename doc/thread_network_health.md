@@ -430,6 +430,59 @@ reasons remain available, and missing values do not become zeroes or health
 findings. The Findings assessment's expandable **REST diagnostic coverage**
 shows these details and, where applicable, the cross-source provenance.
 
+Child identity matching also uses completed child-expansion responses when the
+child is absent from the base roster. The response must pass the existing
+same-run parent, destination, identity, time, and scope checks, with unique
+diagnostic attribution and one matching completed pass. Duplicate or conflicting
+evidence stays unresolved. An explicit cache-only rebuild and health processing
+can use these already-collected responses without another live collection;
+historical assessments and raw outcomes are not rewritten.
+Explicit rebuilds refresh changed REST qualification even when raw inputs are
+unchanged. Corrected child matches produce a distinct health observation so
+previous assessments remain readable rather than being overwritten.
+
+### REST Mesh Diagnostic Responsiveness
+
+`otbr-restapi mesh-diagnostics fetch-all --diagnostic-response-fallback` is
+default off and router-only. After existing mesh attempts finish, each eligible
+typed failed/stopped/timed-out action with no mesh tables may receive one new
+`getNetworkDiagnosticTask` through the same OTBR REST source and the exact same
+extended-address destination. No RLOC16, derived IPv6 address, host route, or
+ICMP ping is required. The requested basic TLVs are `extAddress`, `rloc16`,
+`mode`, and `ipv6Addresses`; only the returned extended address is required for
+identity matching. The task timeout is 15 seconds, polling interval 2 seconds,
+and polling budget 20 seconds, plus the client's finite HTTP timeout/retry
+overhead. No alternate destination, TLV retry, or indeterminate enqueue replay
+is added. The full REST-only collection script explicitly enables this option;
+normal dashboard Sync and quick collection do not.
+
+The raw mesh outcome keeps its failed status, `partial` flag, original attempts,
+and collected items. Separate `meshResponsiveness` evidence retains sanitized
+request/action/result identity, original response time, and observed Extended
+PAN ID before and after the batch. A cached row, HTTP success, or completed
+action without a linked fresh matching response does not establish device
+responsiveness. The original diagnostic creation time must be within the check
+interval, with at most one second for timestamp precision. Missing or different
+returned RLOC16 values do not invalidate extended-address responsiveness. A
+failed check never proves the device offline or a firmware limitation.
+
+Assembly-v12 derives `coverage.restMeshDiagnostics` from bound original mesh
+files/scopes and the recorded action/result, not a saved classification label.
+It admits `not-provided` only with qualified same-network parent/child coverage
+from bound network diagnostics no more than 7,200 seconds old at check start.
+An explicit valid empty child table can establish zero children; unresolved
+children cannot be repaired by a parent response. At least one router must
+actually answer mesh tables and every other target must answer or qualify.
+Only that mesh-completeness blocker can be removed; no table rows, counters,
+neighbor links, or healthy telemetry are fabricated. Other findings remain.
+
+New generations use retained `unified-health-v2` context and evaluator
+`snapshot-v19`; older builder/context/evaluator semantics remain supported
+without rewriting assessments. V19 comparisons require matching v12 contracts;
+cross-version comparisons remain unsupported. Explicit Unified rebuild and
+health processing are cache-only and never refresh evidence. Live validation
+requires separate approval of the endpoint, commands, writes, and duration.
+
 Samples and roster facts retain original filenames, field authority and
 original observation times. Identity/outcome companions, mDNS services,
 non-Thread Matter devices, relationship-only placeholders and derived dashboard
