@@ -46,7 +46,8 @@ flag, and source defaults must reference visible recipes in the same source.
 ### Unified processing
 
 The catalog declares selectable CLI/REST/HA Matter/mDNS and
-Multi-source Unified primaries while retaining fast source defaults.
+Multi-source Unified primaries. Multi-source defaults to Unified; other source
+defaults are unchanged.
 [td_unified_dataset.py](../src/td_unified_dataset.py) reads only those declared
 cached finals and their scope companions. Source records reuse the merge
 engine's in-memory path; BBR envelope conversion stays in its CLI owner.
@@ -87,10 +88,10 @@ for unchanged inputs, retaining coherent v2/v3/v4/v5/v6/v7 read compatibility.
 CLI/REST/HA Matter/Multi-source health profiles now consume verified original
 evidence with dedicated retained contracts; mDNS is enrichment-only and remains
 health-ineligible. Qualification never processes health on selection. Selector
-retirement remains separately gated. CLI topology and the HA seven-file
-composite are menu-hidden but explicitly resolvable; REST topology and legacy
-precomputed Multi-source remain visible pending real-cache workflow parity.
-All three OTBR + mDNS alternatives stay in their original source groups.
+retirement remains separately gated. CLI and REST topology, the HA seven-file composite, and the Multi-source dynamic
+merge are menu-hidden but explicitly resolvable; legacy precomputed Multi-source
+remains visible. The CLI and REST OTBR + mDNS alternatives stay in their
+original source groups.
 
 The HA converters preserve commissioned/non-Thread membership, full safe
 device/endpoint/power/operational fields and explicit roles. Native IDs stay in

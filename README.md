@@ -95,13 +95,12 @@ Outputs have digest-bound reports, outcomes where applicable, and network
 context. Unchanged evidence is a byte/mtime-preserving no-op. Interrupted
 publication is recovered only by the next explicit build, not a read.
 
-All five Unified products are selectable and designated source primaries;
-the fast source defaults remain unchanged. The redundant CLI topology and
-HA seven-file composite are hidden from menus but retain explicit recipe lookup.
-REST topology and the legacy precomputed Multi-source option remain selectable:
-their real-cache relationship and operator-workflow parity gates are not yet
-passed. The catalog currently
-contains 43 definitions / 41 selectable options, not the final 39-option target.
+All five Unified products are selectable and designated source primaries.
+Multi-source defaults to Unified; the other source defaults remain unchanged.
+CLI and REST topology, the HA seven-file composite, and the Multi-source dynamic
+merge are hidden from menus but retain explicit recipe lookup. The legacy
+precomputed Multi-source option remains selectable. The catalog currently
+contains 43 definitions / 39 selectable options.
 Availability checks validate outcomes using each source's own format, including
 HA Matter. Standalone REST diagnostic and mesh-diagnostic sweeps publish full
 digest-bound outcome metadata even with `--items-only`; the flag still returns

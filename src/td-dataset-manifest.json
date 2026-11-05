@@ -14,10 +14,1235 @@
   ],
   "datasets": [
     {
+      "source": "otbr-cli",
+      "value": "otbr_cli_unified",
+      "label": "Unified otbr-cli \ud83d\udd2c",
+      "group": null,
+      "files": [
+        "td-otbr-cli-unified.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "unified",
+      "defaultPhysicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 40,
+      "healthEligible": true,
+      "selectable": true,
+      "unified": {
+        "version": "unified-v1",
+        "reportFile": "td-otbr-cli-unified.report.json",
+        "outcomeFile": "td-otbr-cli-unified.outcome.json",
+        "identityFile": "td-otbr-cli-unified-thread-network-info.json",
+        "inputs": [
+          {
+            "file": "td-otbr-cli-meshdiag-topology.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-otbr-cli-networkdiag-fetch-all.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-otbr-cli-meshdiag-router-neighbortables.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-otbr-cli-meshdiag-router-childtables.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-otbr-cli-router-table.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-otbr-cli-meshdiag-router-childip6.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-otbr-cli-networkdiag-multicast-network.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-otbr-cli-networkdiag-multicast-neighbors.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-otbr-cli-bbr.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-otbr-cli-thread-network-info.json",
+            "role": "identity",
+            "required": false,
+            "extractor": "identity"
+          }
+        ]
+      },
+      "unifiedRecipe": {
+        "version": "unified-v1",
+        "recipeDigest": "02d4ca14230d80f774cfb2d7fd682908dbbcef6f4f3b2fce8c26e782b671b196",
+        "authorityDigest": "cc973120adaa2a5e9b488892e5461e72b3bbdfe74b3c0d3d126c7ff7fc3563fc",
+        "rawInputs": [
+          {
+            "file": "td-otbr-cli-meshdiag-topology.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array",
+            "source": "otbr-cli"
+          },
+          {
+            "file": "td-otbr-cli-networkdiag-fetch-all.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array",
+            "source": "otbr-cli"
+          },
+          {
+            "file": "td-otbr-cli-meshdiag-router-neighbortables.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array",
+            "source": "otbr-cli"
+          },
+          {
+            "file": "td-otbr-cli-meshdiag-router-childtables.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array",
+            "source": "otbr-cli"
+          },
+          {
+            "file": "td-otbr-cli-router-table.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array",
+            "source": "otbr-cli"
+          },
+          {
+            "file": "td-otbr-cli-meshdiag-router-childip6.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array",
+            "source": "otbr-cli"
+          },
+          {
+            "file": "td-otbr-cli-networkdiag-multicast-network.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array",
+            "source": "otbr-cli"
+          },
+          {
+            "file": "td-otbr-cli-networkdiag-multicast-neighbors.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array",
+            "source": "otbr-cli"
+          },
+          {
+            "file": "td-otbr-cli-bbr.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array",
+            "source": "otbr-cli"
+          },
+          {
+            "file": "td-otbr-cli-thread-network-info.json",
+            "role": "identity",
+            "required": false,
+            "extractor": "identity",
+            "source": "otbr-cli"
+          }
+        ]
+      },
+      "healthProfile": "otbr-cli-unified-v1"
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_unified",
+      "label": "Unified otbr-restapi \ud83d\udd2c",
+      "group": null,
+      "files": [
+        "td-otbr-restapi-unified.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "unified",
+      "defaultPhysicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 40,
+      "healthEligible": true,
+      "selectable": true,
+      "unified": {
+        "version": "unified-v1",
+        "reportFile": "td-otbr-restapi-unified.report.json",
+        "outcomeFile": "td-otbr-restapi-unified.outcome.json",
+        "identityFile": "td-otbr-restapi-unified-thread-network-info.json",
+        "inputs": [
+          {
+            "file": "td-otbr-restapi-devices-fetch.json",
+            "role": "records",
+            "required": true,
+            "extractor": "json-api"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "role": "records",
+            "required": true,
+            "extractor": "json-api"
+          },
+          {
+            "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+            "role": "records",
+            "required": true,
+            "extractor": "json-api"
+          },
+          {
+            "file": "td-otbr-restapi-devices.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api"
+          },
+          {
+            "file": "td-otbr-restapi-devices-list.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics-list.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics-fetch.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api"
+          },
+          {
+            "file": "td-otbr-restapi-mesh-diagnostics-fetch.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api"
+          },
+          {
+            "file": "td-otbr-restapi-dataset-active.json",
+            "role": "identity",
+            "required": false,
+            "extractor": "identity"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome"
+          },
+          {
+            "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome"
+          }
+        ]
+      },
+      "unifiedRecipe": {
+        "version": "unified-v1",
+        "recipeDigest": "234133be4c0b173d4b8c71598212e9200ede6ec217043f1cced5c82dee04bd7a",
+        "authorityDigest": "cc973120adaa2a5e9b488892e5461e72b3bbdfe74b3c0d3d126c7ff7fc3563fc",
+        "rawInputs": [
+          {
+            "file": "td-otbr-restapi-devices-fetch.json",
+            "role": "records",
+            "required": true,
+            "extractor": "json-api",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "role": "records",
+            "required": true,
+            "extractor": "json-api",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+            "role": "records",
+            "required": true,
+            "extractor": "json-api",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-devices.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-devices-list.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics-list.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics-fetch.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-mesh-diagnostics-fetch.json",
+            "role": "records",
+            "required": false,
+            "extractor": "json-api",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-dataset-active.json",
+            "role": "identity",
+            "required": false,
+            "extractor": "identity",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome",
+            "source": "otbr-restapi"
+          },
+          {
+            "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome",
+            "source": "otbr-restapi"
+          }
+        ]
+      },
+      "healthProfile": "otbr-restapi-unified-v1"
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_mesh",
+      "label": "Mesh Topology (meshdiag)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 30,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-meshdiag-topology.json",
+          "order": 1
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_diagnostics_ftd_multicast",
+      "label": "Network Diagnostics (multicast FTD)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-cli-networkdiag-multicast-network.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 15,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-networkdiag-multicast-network.json",
+          "order": 3
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_mesh_ftd",
+      "label": "Mesh + FTD Diagnostics",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-multicast-network.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 30,
+      "healthEligible": false
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_mesh_ftd_tables_mdns",
+      "label": "Mesh + FTD + Neighbor/Child + mDNS",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-multicast-network.json",
+        "td-otbr-cli-meshdiag-router-neighbortables.json",
+        "td-otbr-cli-meshdiag-router-childtables.json",
+        "td-mdns-scopes-thread.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 270,
+      "healthEligible": false
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_mesh_neighbors",
+      "label": "Router Neighbor Table",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-cli-meshdiag-router-neighbortables.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "merged-detailed",
+      "defaultPhysicsProfile": "mesh-ring",
+      "topologyMode": "merged-detailed",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 90,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-meshdiag-router-neighbortables.json",
+          "order": 4
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_mesh_children",
+      "label": "Router Child Table",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-cli-meshdiag-router-childtables.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "merged-detailed",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "merged-detailed",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 90,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-meshdiag-router-childtables.json",
+          "order": 5
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_diagnostics_fetch",
+      "label": "Network Diagnostics (fetch-all)\u23f1\ufe0f",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-cli-networkdiag-fetch-all.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "healthEligible": false,
+      "healthProfile": "otbr-cli-networkdiag-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 600,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-networkdiag-fetch-all.json",
+          "order": 2
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_topology",
+      "label": "Topology \u23f1\ufe0f",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-otbr-cli-meshdiag-router-neighbortables.json",
+        "td-otbr-cli-meshdiag-router-childtables.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "healthEligible": false,
+      "healthProfile": "otbr-cli-topology-diagnostics-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 900,
+      "selectable": false
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_topology_mdns",
+      "label": "Topology + mDNS \u23f1\ufe0f",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-otbr-cli-meshdiag-router-neighbortables.json",
+        "td-otbr-cli-meshdiag-router-childtables.json",
+        "td-mdns-scopes-thread.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "healthEligible": false,
+      "healthProfile": "otbr-cli-topology-diagnostics-mdns-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 900
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_router_table",
+      "label": "Router Table",
+      "group": "System",
+      "files": [
+        "td-otbr-cli-router-table.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "router-table",
+      "healthEligible": false,
+      "defaultPhysicsProfile": "mesh-ring",
+      "topologyMode": "router-table",
+      "defaultView": "table",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-router-table.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_diagnostics_list",
+      "label": "Diagnostics (list)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-restapi-diagnostics-list.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-diagnostics-list.json",
+          "order": 4
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_list",
+      "label": "Devices (list)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-restapi-devices-list.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-devices-list.json",
+          "order": 3
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_diagnostics_list",
+      "label": "Devices + Diagnostics (list)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-restapi-devices-list.json",
+        "td-otbr-restapi-diagnostics-list.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 2,
+      "healthEligible": false
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_fetch",
+      "label": "Devices (fetch)",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-restapi-devices-fetch.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 30,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-devices-fetch.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_diagnostics_fetch",
+      "label": "Devices Fetch + Diagnostics (fetch-all)\u23f1\ufe0f",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-restapi-devices-fetch.json",
+        "td-otbr-restapi-diagnostics-fetch-all.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "healthEligible": false,
+      "healthProfile": "otbr-restapi-devices-diagnostics-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1260
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_diagnostics_fetch",
+      "label": "Diagnostics (fetch-all)\u23f1\ufe0f",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-restapi-diagnostics-fetch-all.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1200,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-diagnostics-fetch-all.json",
+          "order": 1
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_mesh_diagnostics",
+      "label": "Mesh Diagnostics (fetch-all)\u23f1\ufe0f",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 600,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+          "order": 2
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_topology",
+      "label": "Topology \u23f1\ufe0f",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-restapi-devices-fetch.json",
+        "td-otbr-restapi-diagnostics-fetch-all.json",
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "healthEligible": false,
+      "healthProfile": "otbr-restapi-topology-diagnostics-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 2450,
+      "selectable": false
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_topology_mdns",
+      "label": "Topology + mDNS\u23f1\ufe0f",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-restapi-devices-fetch.json",
+        "td-otbr-restapi-diagnostics-fetch-all.json",
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+        "td-mdns-scopes-thread.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "healthEligible": false,
+      "healthProfile": "otbr-restapi-topology-diagnostics-mdns-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 2450
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_actions_list",
+      "label": "Actions (list)",
+      "group": "System",
+      "files": [
+        "td-otbr-restapi-actions-list.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "raw-array",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "raw-array",
+      "defaultView": "table",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_unified",
+      "label": "Unified ha-matter-ws \ud83d\udd2c",
+      "group": null,
+      "files": [
+        "td-ha-matter-ws-unified.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "unified",
+      "defaultPhysicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 40,
+      "healthEligible": true,
+      "selectable": true,
+      "unified": {
+        "version": "unified-v1",
+        "reportFile": "td-ha-matter-ws-unified.report.json",
+        "outcomeFile": "td-ha-matter-ws-unified.outcome.json",
+        "identityFile": "td-ha-matter-ws-thread-network-info.json",
+        "inputs": [
+          {
+            "file": "td-ha-matter-ws-devices-fetch-all.json",
+            "role": "records",
+            "required": true,
+            "extractor": "ha-inventory"
+          },
+          {
+            "file": "td-ha-matter-ws-topology.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-ha-matter-ws-thread-border-routers.json",
+            "role": "records",
+            "required": true,
+            "extractor": "ha-border-routers"
+          },
+          {
+            "file": "td-ha-matter-ws-network-topology.json",
+            "role": "records",
+            "required": true,
+            "extractor": "ha-native-topology"
+          },
+          {
+            "file": "td-ha-matter-ws-diagnostics-fetch-all.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array"
+          },
+          {
+            "file": "td-ha-matter-ws-dashboard.json",
+            "role": "projection",
+            "required": false,
+            "extractor": "ha-projection"
+          },
+          {
+            "file": "td-ha-matter-ws-collection.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome"
+          },
+          {
+            "file": "td-ha-matter-ws-thread-border-routers.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome"
+          },
+          {
+            "file": "td-ha-matter-ws-network-topology.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome"
+          }
+        ]
+      },
+      "unifiedRecipe": {
+        "version": "unified-v1",
+        "recipeDigest": "f6bb9d54f0100c0016a30dc97c18bf7e7597093ca8dc6c831aa739de6f2e24ac",
+        "authorityDigest": "cc973120adaa2a5e9b488892e5461e72b3bbdfe74b3c0d3d126c7ff7fc3563fc",
+        "rawInputs": [
+          {
+            "file": "td-ha-matter-ws-devices-fetch-all.json",
+            "role": "records",
+            "required": true,
+            "extractor": "ha-inventory",
+            "source": "ha-matter-ws"
+          },
+          {
+            "file": "td-ha-matter-ws-topology.json",
+            "role": "records",
+            "required": true,
+            "extractor": "raw-array",
+            "source": "ha-matter-ws"
+          },
+          {
+            "file": "td-ha-matter-ws-thread-border-routers.json",
+            "role": "records",
+            "required": true,
+            "extractor": "ha-border-routers",
+            "source": "ha-matter-ws"
+          },
+          {
+            "file": "td-ha-matter-ws-network-topology.json",
+            "role": "records",
+            "required": true,
+            "extractor": "ha-native-topology",
+            "source": "ha-matter-ws"
+          },
+          {
+            "file": "td-ha-matter-ws-diagnostics-fetch-all.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array",
+            "source": "ha-matter-ws"
+          },
+          {
+            "file": "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
+            "role": "records",
+            "required": false,
+            "extractor": "raw-array",
+            "source": "ha-matter-ws"
+          },
+          {
+            "file": "td-ha-matter-ws-dashboard.json",
+            "role": "projection",
+            "required": false,
+            "extractor": "ha-projection",
+            "source": "ha-matter-ws"
+          },
+          {
+            "file": "td-ha-matter-ws-collection.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome",
+            "source": "ha-matter-ws"
+          },
+          {
+            "file": "td-ha-matter-ws-thread-border-routers.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome",
+            "source": "ha-matter-ws"
+          },
+          {
+            "file": "td-ha-matter-ws-network-topology.outcome.json",
+            "role": "outcome",
+            "required": false,
+            "extractor": "outcome",
+            "source": "ha-matter-ws"
+          }
+        ]
+      },
+      "healthProfile": "ha-matter-ws-unified-v1"
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_devices",
+      "label": "Devices",
+      "group": "Inventory",
+      "files": [
+        "td-ha-matter-ws-devices-fetch-all.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "ha-matter-ws",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "table",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_border_routers",
+      "label": "Border Routers (thread)",
+      "group": "Inventory",
+      "files": [
+        "td-ha-matter-ws-thread-border-routers.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "ha-matter-ws-border-routers",
+      "adaptor": "ha-matter-ws-native-thread",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "ha-matter-ws-native-thread",
+      "defaultView": "table",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 10,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_diagnostics",
+      "label": "Diagnostics",
+      "group": "Diagnostics",
+      "files": [
+        "td-ha-matter-ws-dashboard.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "ha-matter-ws-diagnostics",
+      "adaptor": "ha-matter-ws",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_mesh_diagnostics",
+      "label": "Mesh Diagnostics",
+      "group": "Diagnostics",
+      "files": [
+        "td-ha-matter-ws-dashboard.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "ha-matter-ws-mesh-diagnostics",
+      "adaptor": "ha-matter-ws",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_matter_topology",
+      "label": "Topology (matter)",
+      "group": "Topology",
+      "files": [
+        "td-ha-matter-ws-topology.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "ha-matter-ws",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-ha-matter-ws-topology.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "ha-matter-ws"
+      ]
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_thread_topology",
+      "label": "Topology (thread)",
+      "group": "Topology",
+      "files": [
+        "td-ha-matter-ws-network-topology.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "ha-matter-ws-network-topology",
+      "adaptor": "ha-matter-ws-network-topology",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "ha-matter-ws-network-topology",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 10,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_topology_merge",
+      "label": "Topology (thread, matter)",
+      "group": "Topology",
+      "files": [
+        "td-ha-matter-ws-devices-fetch-all.json",
+        "td-ha-matter-ws-diagnostics-fetch-all.json",
+        "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
+        "td-ha-matter-ws-topology.json",
+        "td-ha-matter-ws-dashboard.json",
+        "td-ha-matter-ws-thread-border-routers.json",
+        "td-ha-matter-ws-network-topology.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "mergeRowExtractors": [
+        "raw-array",
+        "raw-array",
+        "raw-array",
+        "raw-array",
+        "ha-matter-ws-topology",
+        "ha-matter-ws-border-routers",
+        "ha-matter-ws-network-topology"
+      ],
+      "adaptor": "ha-matter-ws-merge-topology",
+      "healthEligible": false,
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60,
+      "selectable": false
+    },
+    {
+      "source": "eve",
+      "value": "eve_layout",
+      "label": "Eve Layout (native)",
+      "group": "Native",
+      "files": [
+        "Eve Thread Network Layout.evethreadlayout"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "eve-native",
+      "adaptor": "eve-native",
+      "defaultPhysicsProfile": "mesh-ring",
+      "topologyMode": "eve_native",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false
+    },
+    {
+      "source": "eve",
+      "value": "eve_topology",
+      "label": "Eve Topology (processed)",
+      "group": "Processed",
+      "files": [
+        "td-eve-topology.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "eve-processed",
+      "adaptor": "eve-enhanced",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "eve_enhanced",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-eve-topology.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "eve"
+      ]
+    },
+    {
+      "source": "thread-tools",
+      "value": "thread_tools_diagnostics",
+      "label": "Thread Tools (native)",
+      "group": "Native",
+      "files": [
+        "diagnostics.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "thread-tools-native",
+      "adaptor": "thread-tools-native",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "thread_tools_native",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false
+    },
+    {
       "source": "multi-source",
       "value": "multi_source_unified",
-      "label": "Unified",
-      "group": "Unified",
+      "label": "Unified multi-source \ud83d\udd2c",
+      "group": null,
       "files": [
         "td-merged-unified.json"
       ],
@@ -324,528 +1549,81 @@
       "healthProfile": "multi-source-unified-v1"
     },
     {
-      "source": "otbr-cli",
-      "value": "otbr_cli_unified",
-      "label": "Unified",
-      "group": "Unified",
+      "source": "multi-source",
+      "value": "multi_source_otbr_mdns",
+      "label": "Topology Dynamic Merge: CLI + REST + mDNS",
+      "group": null,
       "files": [
-        "td-otbr-cli-unified.json"
+        "td-static-extaddr-device-label.json",
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-otbr-restapi-devices-list.json",
+        "td-otbr-restapi-diagnostics-list.json",
+        "td-mdns-scopes-thread.json"
       ],
-      "mergeStrategy": "none",
+      "mergeStrategy": "by-identity",
       "rowExtractor": "raw-array",
-      "adaptor": "unified",
+      "adaptor": "meshdiag-networkdiag",
       "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
       "defaultView": "topology",
       "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 40,
-      "healthEligible": true,
-      "selectable": true,
-      "unified": {
-        "version": "unified-v1",
-        "reportFile": "td-otbr-cli-unified.report.json",
-        "outcomeFile": "td-otbr-cli-unified.outcome.json",
-        "identityFile": "td-otbr-cli-unified-thread-network-info.json",
-        "inputs": [
-          {
-            "file": "td-otbr-cli-meshdiag-topology.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-otbr-cli-networkdiag-fetch-all.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-otbr-cli-meshdiag-router-neighbortables.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-otbr-cli-meshdiag-router-childtables.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-otbr-cli-router-table.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-otbr-cli-meshdiag-router-childip6.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-otbr-cli-networkdiag-multicast-network.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-otbr-cli-networkdiag-multicast-neighbors.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-otbr-cli-bbr.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-otbr-cli-thread-network-info.json",
-            "role": "identity",
-            "required": false,
-            "extractor": "identity"
-          }
-        ]
-      },
-      "unifiedRecipe": {
-        "version": "unified-v1",
-        "recipeDigest": "02d4ca14230d80f774cfb2d7fd682908dbbcef6f4f3b2fce8c26e782b671b196",
-        "authorityDigest": "cc973120adaa2a5e9b488892e5461e72b3bbdfe74b3c0d3d126c7ff7fc3563fc",
-        "rawInputs": [
-          {
-            "file": "td-otbr-cli-meshdiag-topology.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array",
-            "source": "otbr-cli"
-          },
-          {
-            "file": "td-otbr-cli-networkdiag-fetch-all.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array",
-            "source": "otbr-cli"
-          },
-          {
-            "file": "td-otbr-cli-meshdiag-router-neighbortables.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array",
-            "source": "otbr-cli"
-          },
-          {
-            "file": "td-otbr-cli-meshdiag-router-childtables.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array",
-            "source": "otbr-cli"
-          },
-          {
-            "file": "td-otbr-cli-router-table.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array",
-            "source": "otbr-cli"
-          },
-          {
-            "file": "td-otbr-cli-meshdiag-router-childip6.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array",
-            "source": "otbr-cli"
-          },
-          {
-            "file": "td-otbr-cli-networkdiag-multicast-network.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array",
-            "source": "otbr-cli"
-          },
-          {
-            "file": "td-otbr-cli-networkdiag-multicast-neighbors.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array",
-            "source": "otbr-cli"
-          },
-          {
-            "file": "td-otbr-cli-bbr.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array",
-            "source": "otbr-cli"
-          },
-          {
-            "file": "td-otbr-cli-thread-network-info.json",
-            "role": "identity",
-            "required": false,
-            "extractor": "identity",
-            "source": "otbr-cli"
-          }
-        ]
-      },
-      "healthProfile": "otbr-cli-unified-v1"
+      "estimateActionCostSecs": 720,
+      "healthEligible": false,
+      "selectable": false
     },
     {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_unified",
-      "label": "Unified",
-      "group": "Unified",
+      "source": "multi-source",
+      "value": "multi_source_otbr_topology_mdns",
+      "label": "Topology CLI~ + REST~ + mDNS\u23f1\ufe0f",
       "files": [
-        "td-otbr-restapi-unified.json"
+        "td-static-extaddr-device-label.json",
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-otbr-cli-meshdiag-router-neighbortables.json",
+        "td-otbr-cli-meshdiag-router-childtables.json",
+        "td-otbr-restapi-devices-fetch.json",
+        "td-otbr-restapi-diagnostics-fetch-all.json",
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+        "td-mdns-scopes-thread.json"
       ],
-      "mergeStrategy": "none",
+      "mergeStrategy": "by-identity",
       "rowExtractor": "raw-array",
-      "adaptor": "unified",
+      "adaptor": "meshdiag-networkdiag",
+      "healthEligible": false,
+      "healthProfile": "merged-otbr-topology-diagnostics-mdns-v1",
       "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
       "defaultView": "topology",
       "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 40,
-      "healthEligible": true,
-      "selectable": true,
-      "unified": {
-        "version": "unified-v1",
-        "reportFile": "td-otbr-restapi-unified.report.json",
-        "outcomeFile": "td-otbr-restapi-unified.outcome.json",
-        "identityFile": "td-otbr-restapi-unified-thread-network-info.json",
-        "inputs": [
-          {
-            "file": "td-otbr-restapi-devices-fetch.json",
-            "role": "records",
-            "required": true,
-            "extractor": "json-api"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics-fetch-all.json",
-            "role": "records",
-            "required": true,
-            "extractor": "json-api"
-          },
-          {
-            "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
-            "role": "records",
-            "required": true,
-            "extractor": "json-api"
-          },
-          {
-            "file": "td-otbr-restapi-devices.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api"
-          },
-          {
-            "file": "td-otbr-restapi-devices-list.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics-list.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics-fetch.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api"
-          },
-          {
-            "file": "td-otbr-restapi-mesh-diagnostics-fetch.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api"
-          },
-          {
-            "file": "td-otbr-restapi-dataset-active.json",
-            "role": "identity",
-            "required": false,
-            "extractor": "identity"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome"
-          },
-          {
-            "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome"
-          }
-        ]
-      },
-      "unifiedRecipe": {
-        "version": "unified-v1",
-        "recipeDigest": "234133be4c0b173d4b8c71598212e9200ede6ec217043f1cced5c82dee04bd7a",
-        "authorityDigest": "cc973120adaa2a5e9b488892e5461e72b3bbdfe74b3c0d3d126c7ff7fc3563fc",
-        "rawInputs": [
-          {
-            "file": "td-otbr-restapi-devices-fetch.json",
-            "role": "records",
-            "required": true,
-            "extractor": "json-api",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics-fetch-all.json",
-            "role": "records",
-            "required": true,
-            "extractor": "json-api",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
-            "role": "records",
-            "required": true,
-            "extractor": "json-api",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-devices.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-devices-list.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics-list.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics-fetch.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-mesh-diagnostics-fetch.json",
-            "role": "records",
-            "required": false,
-            "extractor": "json-api",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-dataset-active.json",
-            "role": "identity",
-            "required": false,
-            "extractor": "identity",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome",
-            "source": "otbr-restapi"
-          },
-          {
-            "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome",
-            "source": "otbr-restapi"
-          }
-        ]
-      },
-      "healthProfile": "otbr-restapi-unified-v1"
+      "estimateActionCostSecs": 900
     },
     {
-      "source": "ha-matter-ws",
-      "value": "ha_matter_ws_unified",
-      "label": "Unified",
-      "group": "Unified",
+      "source": "multi-source",
+      "value": "multi_source_merged",
+      "label": "Topology Premerged Multi-Source",
+      "group": null,
       "files": [
-        "td-ha-matter-ws-unified.json"
+        "td-merged-topology-all.json"
       ],
       "mergeStrategy": "none",
       "rowExtractor": "raw-array",
-      "adaptor": "unified",
+      "adaptor": "merged-detailed",
       "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "merged-detailed",
+      "physicsProfile": "mesh-compact",
       "defaultView": "topology",
       "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 40,
-      "healthEligible": true,
-      "selectable": true,
-      "unified": {
-        "version": "unified-v1",
-        "reportFile": "td-ha-matter-ws-unified.report.json",
-        "outcomeFile": "td-ha-matter-ws-unified.outcome.json",
-        "identityFile": "td-ha-matter-ws-thread-network-info.json",
-        "inputs": [
-          {
-            "file": "td-ha-matter-ws-devices-fetch-all.json",
-            "role": "records",
-            "required": true,
-            "extractor": "ha-inventory"
-          },
-          {
-            "file": "td-ha-matter-ws-topology.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-ha-matter-ws-thread-border-routers.json",
-            "role": "records",
-            "required": true,
-            "extractor": "ha-border-routers"
-          },
-          {
-            "file": "td-ha-matter-ws-network-topology.json",
-            "role": "records",
-            "required": true,
-            "extractor": "ha-native-topology"
-          },
-          {
-            "file": "td-ha-matter-ws-diagnostics-fetch-all.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array"
-          },
-          {
-            "file": "td-ha-matter-ws-dashboard.json",
-            "role": "projection",
-            "required": false,
-            "extractor": "ha-projection"
-          },
-          {
-            "file": "td-ha-matter-ws-collection.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome"
-          },
-          {
-            "file": "td-ha-matter-ws-thread-border-routers.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome"
-          },
-          {
-            "file": "td-ha-matter-ws-network-topology.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome"
-          }
-        ]
-      },
-      "unifiedRecipe": {
-        "version": "unified-v1",
-        "recipeDigest": "f6bb9d54f0100c0016a30dc97c18bf7e7597093ca8dc6c831aa739de6f2e24ac",
-        "authorityDigest": "cc973120adaa2a5e9b488892e5461e72b3bbdfe74b3c0d3d126c7ff7fc3563fc",
-        "rawInputs": [
-          {
-            "file": "td-ha-matter-ws-devices-fetch-all.json",
-            "role": "records",
-            "required": true,
-            "extractor": "ha-inventory",
-            "source": "ha-matter-ws"
-          },
-          {
-            "file": "td-ha-matter-ws-topology.json",
-            "role": "records",
-            "required": true,
-            "extractor": "raw-array",
-            "source": "ha-matter-ws"
-          },
-          {
-            "file": "td-ha-matter-ws-thread-border-routers.json",
-            "role": "records",
-            "required": true,
-            "extractor": "ha-border-routers",
-            "source": "ha-matter-ws"
-          },
-          {
-            "file": "td-ha-matter-ws-network-topology.json",
-            "role": "records",
-            "required": true,
-            "extractor": "ha-native-topology",
-            "source": "ha-matter-ws"
-          },
-          {
-            "file": "td-ha-matter-ws-diagnostics-fetch-all.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array",
-            "source": "ha-matter-ws"
-          },
-          {
-            "file": "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
-            "role": "records",
-            "required": false,
-            "extractor": "raw-array",
-            "source": "ha-matter-ws"
-          },
-          {
-            "file": "td-ha-matter-ws-dashboard.json",
-            "role": "projection",
-            "required": false,
-            "extractor": "ha-projection",
-            "source": "ha-matter-ws"
-          },
-          {
-            "file": "td-ha-matter-ws-collection.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome",
-            "source": "ha-matter-ws"
-          },
-          {
-            "file": "td-ha-matter-ws-thread-border-routers.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome",
-            "source": "ha-matter-ws"
-          },
-          {
-            "file": "td-ha-matter-ws-network-topology.outcome.json",
-            "role": "outcome",
-            "required": false,
-            "extractor": "outcome",
-            "source": "ha-matter-ws"
-          }
-        ]
-      },
-      "healthProfile": "ha-matter-ws-unified-v1"
+      "estimateActionCostSecs": 1,
+      "healthEligible": false
     },
     {
       "source": "mdns",
       "value": "mdns_unified",
-      "label": "Unified",
-      "group": "Unified",
+      "label": "Unified mDNS",
+      "group": null,
       "files": [
         "td-mdns-unified.json"
       ],
@@ -890,782 +1668,6 @@
           }
         ]
       }
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_mesh",
-      "label": "Mesh Topology (meshdiag)",
-      "group": "Fast",
-      "files": [
-        "td-otbr-cli-meshdiag-topology.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "raw-array",
-      "adaptor": "meshdiag-networkdiag",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "meshdiag-networkdiag",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 30,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-cli-meshdiag-topology.json",
-          "order": 1
-        }
-      ],
-      "mergeGroups": [
-        "otbr-cli"
-      ]
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_diagnostics_ftd_multicast",
-      "label": "Network Diagnostics (multicast FTD)",
-      "group": "Fast",
-      "files": [
-        "td-otbr-cli-networkdiag-multicast-network.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "raw-array",
-      "adaptor": "meshdiag-networkdiag",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "meshdiag-networkdiag",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 15,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-cli-networkdiag-multicast-network.json",
-          "order": 3
-        }
-      ],
-      "mergeGroups": [
-        "otbr-cli"
-      ]
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_mesh_ftd",
-      "label": "Mesh + FTD Diagnostics",
-      "group": "Versatile: more time",
-      "files": [
-        "td-otbr-cli-meshdiag-topology.json",
-        "td-otbr-cli-networkdiag-multicast-network.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "raw-array",
-      "adaptor": "meshdiag-networkdiag",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "meshdiag-networkdiag",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 30,
-      "healthEligible": false
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_mesh_ftd_tables_mdns",
-      "label": "Mesh + FTD + Neighbor/Child + mDNS",
-      "group": "Versatile: more time",
-      "files": [
-        "td-otbr-cli-meshdiag-topology.json",
-        "td-otbr-cli-networkdiag-multicast-network.json",
-        "td-otbr-cli-meshdiag-router-neighbortables.json",
-        "td-otbr-cli-meshdiag-router-childtables.json",
-        "td-mdns-scopes-thread.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "raw-array",
-      "adaptor": "meshdiag-networkdiag",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "meshdiag-networkdiag",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 270,
-      "healthEligible": false
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_mesh_neighbors",
-      "label": "Router Neighbor Table",
-      "group": "Versatile: more time",
-      "files": [
-        "td-otbr-cli-meshdiag-router-neighbortables.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "raw-array",
-      "adaptor": "merged-detailed",
-      "defaultPhysicsProfile": "mesh-ring",
-      "topologyMode": "merged-detailed",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 90,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-cli-meshdiag-router-neighbortables.json",
-          "order": 4
-        }
-      ],
-      "mergeGroups": [
-        "otbr-cli"
-      ]
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_mesh_children",
-      "label": "Router Child Table",
-      "group": "Versatile: more time",
-      "files": [
-        "td-otbr-cli-meshdiag-router-childtables.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "raw-array",
-      "adaptor": "merged-detailed",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "merged-detailed",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 90,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-cli-meshdiag-router-childtables.json",
-          "order": 5
-        }
-      ],
-      "mergeGroups": [
-        "otbr-cli"
-      ]
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_diagnostics_fetch",
-      "label": "Network Diagnostics (fetch-all)\ud83d\udd2c\u23f1\ufe0f",
-      "group": "Detailed: most time",
-      "files": [
-        "td-otbr-cli-networkdiag-fetch-all.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "raw-array",
-      "adaptor": "meshdiag-networkdiag",
-      "healthEligible": false,
-      "healthProfile": "otbr-cli-networkdiag-v1",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "meshdiag-networkdiag",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 600,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-cli-networkdiag-fetch-all.json",
-          "order": 2
-        }
-      ],
-      "mergeGroups": [
-        "otbr-cli"
-      ]
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_topology",
-      "label": "Topology \ud83d\udd2c\u23f1\ufe0f",
-      "group": "Detailed: most time",
-      "files": [
-        "td-otbr-cli-meshdiag-topology.json",
-        "td-otbr-cli-networkdiag-fetch-all.json",
-        "td-otbr-cli-meshdiag-router-neighbortables.json",
-        "td-otbr-cli-meshdiag-router-childtables.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "raw-array",
-      "adaptor": "meshdiag-networkdiag",
-      "healthEligible": false,
-      "healthProfile": "otbr-cli-topology-diagnostics-v1",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "meshdiag-networkdiag",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 900,
-      "selectable": false
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_topology_mdns",
-      "label": "Topology + mDNS\ud83d\udd2c\u23f1\ufe0f",
-      "group": "Detailed: most time",
-      "files": [
-        "td-otbr-cli-meshdiag-topology.json",
-        "td-otbr-cli-networkdiag-fetch-all.json",
-        "td-otbr-cli-meshdiag-router-neighbortables.json",
-        "td-otbr-cli-meshdiag-router-childtables.json",
-        "td-mdns-scopes-thread.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "raw-array",
-      "adaptor": "meshdiag-networkdiag",
-      "healthEligible": false,
-      "healthProfile": "otbr-cli-topology-diagnostics-mdns-v1",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "meshdiag-networkdiag",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 900
-    },
-    {
-      "source": "otbr-cli",
-      "value": "otbr_cli_router_table",
-      "label": "Router Table",
-      "group": "System",
-      "files": [
-        "td-otbr-cli-router-table.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "raw-array",
-      "adaptor": "router-table",
-      "healthEligible": false,
-      "defaultPhysicsProfile": "mesh-ring",
-      "topologyMode": "router-table",
-      "defaultView": "table",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 1,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-cli-router-table.json",
-          "order": 0
-        }
-      ],
-      "mergeGroups": [
-        "otbr-cli"
-      ]
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_diagnostics_list",
-      "label": "Diagnostics (list)",
-      "group": "Fast",
-      "files": [
-        "td-otbr-restapi-diagnostics-list.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "otbr-restapi",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "otbr_restapi",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 1,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-restapi-diagnostics-list.json",
-          "order": 4
-        }
-      ],
-      "mergeGroups": [
-        "otbr-restapi"
-      ]
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_devices_list",
-      "label": "Devices (list)",
-      "group": "Fast",
-      "files": [
-        "td-otbr-restapi-devices-list.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "otbr-restapi",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "otbr_restapi",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 1,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-restapi-devices-list.json",
-          "order": 3
-        }
-      ],
-      "mergeGroups": [
-        "otbr-restapi"
-      ]
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_devices_diagnostics_list",
-      "label": "Devices + Diagnostics (list)",
-      "group": "Fast",
-      "files": [
-        "td-otbr-restapi-devices-list.json",
-        "td-otbr-restapi-diagnostics-list.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "otbr-restapi",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "otbr_restapi",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 2,
-      "healthEligible": false
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_devices_fetch",
-      "label": "Devices (fetch)",
-      "group": "Versatile: more time",
-      "files": [
-        "td-otbr-restapi-devices-fetch.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "otbr-restapi",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "otbr_restapi",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 30,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-restapi-devices-fetch.json",
-          "order": 0
-        }
-      ],
-      "mergeGroups": [
-        "otbr-restapi"
-      ]
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_devices_diagnostics_fetch",
-      "label": "Devices Fetch + Diagnostics (fetch-all)\ud83d\udd2c\u23f1\ufe0f",
-      "group": "Detailed: most time",
-      "files": [
-        "td-otbr-restapi-devices-fetch.json",
-        "td-otbr-restapi-diagnostics-fetch-all.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "otbr-restapi",
-      "healthEligible": false,
-      "healthProfile": "otbr-restapi-devices-diagnostics-v1",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "otbr_restapi",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 1260
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_diagnostics_fetch",
-      "label": "Diagnostics (fetch-all)\u23f1\ufe0f",
-      "group": "Detailed: most time",
-      "files": [
-        "td-otbr-restapi-diagnostics-fetch-all.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "otbr-restapi",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "otbr_restapi",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 1200,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-restapi-diagnostics-fetch-all.json",
-          "order": 1
-        }
-      ],
-      "mergeGroups": [
-        "otbr-restapi"
-      ]
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_mesh_diagnostics",
-      "label": "Mesh Diagnostics (fetch-all)\u23f1\ufe0f",
-      "group": "Detailed: most time",
-      "files": [
-        "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "otbr-restapi",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "otbr_restapi",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 600,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
-          "order": 2
-        }
-      ],
-      "mergeGroups": [
-        "otbr-restapi"
-      ]
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_topology",
-      "label": "Topology \ud83d\udd2c\u23f1\ufe0f",
-      "group": "Detailed: most time",
-      "files": [
-        "td-otbr-restapi-devices-fetch.json",
-        "td-otbr-restapi-diagnostics-fetch-all.json",
-        "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "otbr-restapi",
-      "healthEligible": false,
-      "healthProfile": "otbr-restapi-topology-diagnostics-v1",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "otbr_restapi",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 2450
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_topology_mdns",
-      "label": "Topology + mDNS\ud83d\udd2c\u23f1\ufe0f",
-      "group": "Detailed: most time",
-      "files": [
-        "td-otbr-restapi-devices-fetch.json",
-        "td-otbr-restapi-diagnostics-fetch-all.json",
-        "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
-        "td-mdns-scopes-thread.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "otbr-restapi",
-      "healthEligible": false,
-      "healthProfile": "otbr-restapi-topology-diagnostics-mdns-v1",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "otbr_restapi",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 2450
-    },
-    {
-      "source": "otbr-restapi",
-      "value": "otbr_restapi_actions_list",
-      "label": "Actions (list)",
-      "group": "System",
-      "files": [
-        "td-otbr-restapi-actions-list.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "otbr-restapi",
-      "adaptor": "raw-array",
-      "defaultPhysicsProfile": "mesh-balanced",
-      "topologyMode": "raw-array",
-      "defaultView": "table",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 1,
-      "healthEligible": false
-    },
-    {
-      "source": "ha-matter-ws",
-      "value": "ha_matter_ws_devices",
-      "label": "Devices",
-      "group": "Inventory",
-      "files": [
-        "td-ha-matter-ws-devices-fetch-all.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "raw-array",
-      "adaptor": "ha-matter-ws",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "ha-matter-ws",
-      "defaultView": "table",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 60,
-      "healthEligible": false
-    },
-    {
-      "source": "ha-matter-ws",
-      "value": "ha_matter_ws_border_routers",
-      "label": "Border Routers (thread)",
-      "group": "Inventory",
-      "files": [
-        "td-ha-matter-ws-thread-border-routers.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "ha-matter-ws-border-routers",
-      "adaptor": "ha-matter-ws-native-thread",
-      "defaultPhysicsProfile": "mesh-balanced",
-      "topologyMode": "ha-matter-ws-native-thread",
-      "defaultView": "table",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 10,
-      "healthEligible": false
-    },
-    {
-      "source": "ha-matter-ws",
-      "value": "ha_matter_ws_diagnostics",
-      "label": "Diagnostics",
-      "group": "Diagnostics",
-      "files": [
-        "td-ha-matter-ws-dashboard.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "ha-matter-ws-diagnostics",
-      "adaptor": "ha-matter-ws",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "ha-matter-ws",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 60,
-      "healthEligible": false
-    },
-    {
-      "source": "ha-matter-ws",
-      "value": "ha_matter_ws_mesh_diagnostics",
-      "label": "Mesh Diagnostics",
-      "group": "Diagnostics",
-      "files": [
-        "td-ha-matter-ws-dashboard.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "ha-matter-ws-mesh-diagnostics",
-      "adaptor": "ha-matter-ws",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "ha-matter-ws",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 60,
-      "healthEligible": false
-    },
-    {
-      "source": "ha-matter-ws",
-      "value": "ha_matter_ws_matter_topology",
-      "label": "Topology (matter)",
-      "group": "Topology",
-      "files": [
-        "td-ha-matter-ws-topology.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "raw-array",
-      "adaptor": "ha-matter-ws",
-      "defaultPhysicsProfile": "mesh-balanced",
-      "topologyMode": "ha-matter-ws",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 60,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-ha-matter-ws-topology.json",
-          "order": 0
-        }
-      ],
-      "mergeGroups": [
-        "ha-matter-ws"
-      ]
-    },
-    {
-      "source": "ha-matter-ws",
-      "value": "ha_matter_ws_thread_topology",
-      "label": "Topology (thread)",
-      "group": "Topology",
-      "files": [
-        "td-ha-matter-ws-network-topology.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "ha-matter-ws-network-topology",
-      "adaptor": "ha-matter-ws-network-topology",
-      "defaultPhysicsProfile": "mesh-balanced",
-      "topologyMode": "ha-matter-ws-network-topology",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 10,
-      "healthEligible": false
-    },
-    {
-      "source": "ha-matter-ws",
-      "value": "ha_matter_ws_topology_merge",
-      "label": "Topology (thread, matter)",
-      "group": "Topology",
-      "files": [
-        "td-ha-matter-ws-devices-fetch-all.json",
-        "td-ha-matter-ws-diagnostics-fetch-all.json",
-        "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
-        "td-ha-matter-ws-topology.json",
-        "td-ha-matter-ws-dashboard.json",
-        "td-ha-matter-ws-thread-border-routers.json",
-        "td-ha-matter-ws-network-topology.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "raw-array",
-      "mergeRowExtractors": [
-        "raw-array",
-        "raw-array",
-        "raw-array",
-        "raw-array",
-        "ha-matter-ws-topology",
-        "ha-matter-ws-border-routers",
-        "ha-matter-ws-network-topology"
-      ],
-      "adaptor": "ha-matter-ws-merge-topology",
-      "healthEligible": false,
-      "defaultPhysicsProfile": "mesh-balanced",
-      "topologyMode": "ha-matter-ws",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 60,
-      "selectable": false
-    },
-    {
-      "source": "eve",
-      "value": "eve_layout",
-      "label": "Eve Layout (native)",
-      "group": "Native",
-      "files": [
-        "Eve Thread Network Layout.evethreadlayout"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "eve-native",
-      "adaptor": "eve-native",
-      "defaultPhysicsProfile": "mesh-ring",
-      "topologyMode": "eve_native",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 1,
-      "healthEligible": false
-    },
-    {
-      "source": "eve",
-      "value": "eve_topology",
-      "label": "Eve Topology (processed)",
-      "group": "Processed",
-      "files": [
-        "td-eve-topology.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "eve-processed",
-      "adaptor": "eve-enhanced",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "eve_enhanced",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 1,
-      "healthEligible": false,
-      "mergeInputs": [
-        {
-          "file": "td-eve-topology.json",
-          "order": 0
-        }
-      ],
-      "mergeGroups": [
-        "eve"
-      ]
-    },
-    {
-      "source": "thread-tools",
-      "value": "thread_tools_diagnostics",
-      "label": "Thread Tools (native)",
-      "group": "Native",
-      "files": [
-        "diagnostics.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "thread-tools-native",
-      "adaptor": "thread-tools-native",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "thread_tools_native",
-      "defaultView": "topology",
-      "defaultLinkFilter": "all_links",
-      "estimateActionCostSecs": 1,
-      "healthEligible": false
-    },
-    {
-      "source": "multi-source",
-      "value": "multi_source_otbr_mdns",
-      "label": "Topology Dynamic Merge: CLI + REST + mDNS",
-      "group": null,
-      "files": [
-        "td-static-extaddr-device-label.json",
-        "td-otbr-cli-meshdiag-topology.json",
-        "td-otbr-cli-networkdiag-fetch-all.json",
-        "td-otbr-restapi-devices-list.json",
-        "td-otbr-restapi-diagnostics-list.json",
-        "td-mdns-scopes-thread.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "raw-array",
-      "adaptor": "meshdiag-networkdiag",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "meshdiag-networkdiag",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 720,
-      "healthEligible": false
-    },
-    {
-      "source": "multi-source",
-      "value": "multi_source_otbr_topology_mdns",
-      "label": "Topology CLI* + REST* + mDNS\ud83d\udd2c\u23f1\ufe0f",
-      "files": [
-        "td-static-extaddr-device-label.json",
-        "td-otbr-cli-meshdiag-topology.json",
-        "td-otbr-cli-networkdiag-fetch-all.json",
-        "td-otbr-cli-meshdiag-router-neighbortables.json",
-        "td-otbr-cli-meshdiag-router-childtables.json",
-        "td-otbr-restapi-devices-fetch.json",
-        "td-otbr-restapi-diagnostics-fetch-all.json",
-        "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
-        "td-mdns-scopes-thread.json"
-      ],
-      "mergeStrategy": "by-identity",
-      "rowExtractor": "raw-array",
-      "adaptor": "meshdiag-networkdiag",
-      "healthEligible": false,
-      "healthProfile": "merged-otbr-topology-diagnostics-mdns-v1",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "meshdiag-networkdiag",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 900
-    },
-    {
-      "source": "multi-source",
-      "value": "multi_source_merged",
-      "label": "Topology Premerged Multi-Source",
-      "group": null,
-      "files": [
-        "td-merged-topology-all.json"
-      ],
-      "mergeStrategy": "none",
-      "rowExtractor": "raw-array",
-      "adaptor": "merged-detailed",
-      "defaultPhysicsProfile": "mesh-compact",
-      "topologyMode": "merged-detailed",
-      "physicsProfile": "mesh-compact",
-      "defaultView": "topology",
-      "defaultLinkFilter": "default_links",
-      "estimateActionCostSecs": 1,
-      "healthEligible": false
     },
     {
       "source": "mdns",
@@ -2816,23 +2818,23 @@
       "primary_dataset_value": "ha_matter_ws_unified"
     },
     {
-      "value": "eve",
-      "label": "eve app"
-    },
-    {
-      "value": "thread-tools",
-      "label": "thread tools app"
-    },
-    {
       "value": "multi-source",
       "label": "multi-source",
-      "default_dataset_value": "multi_source_otbr_mdns",
+      "default_dataset_value": "multi_source_unified",
       "primary_dataset_value": "multi_source_unified"
     },
     {
       "value": "mdns",
       "label": "mdns",
       "primary_dataset_value": "mdns_unified"
+    },
+    {
+      "value": "eve",
+      "label": "eve app"
+    },
+    {
+      "value": "thread-tools",
+      "label": "thread tools app"
     },
     {
       "value": "system",

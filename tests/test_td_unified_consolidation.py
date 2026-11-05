@@ -197,16 +197,17 @@ def test_selector_rollout_keeps_explicit_recipes_and_fast_same_source_workflows(
         "otbr-cli": "otbr_cli_mesh_ftd",
         "otbr-restapi": "otbr_restapi_devices_diagnostics_list",
         "ha-matter-ws": "ha_matter_ws_matter_topology",
-        "multi-source": "multi_source_otbr_mdns",
+        "multi-source": "multi_source_unified",
     }
     retired = {
-        "otbr_cli_topology", "ha_matter_ws_topology_merge",
+        "otbr_cli_topology", "otbr_restapi_topology", "ha_matter_ws_topology_merge",
+        "multi_source_otbr_mdns",
     }
     assert {value for value in retired if by_id[value].get("selectable", True) is False} == retired
     for value in retired:
         assert resolve_dataset(catalog, value) == by_id[value]
-    assert sum(entry.get("selectable", True) for entry in by_id.values()) == 41
-    for pending in ("otbr_restapi_topology", "multi_source_merged"):
+    assert sum(entry.get("selectable", True) for entry in by_id.values()) == 39
+    for pending in ("multi_source_merged",):
         assert by_id[pending].get("selectable", True)
     for source in catalog["datasources"]:
         primary = source.get("primary_dataset_value")

@@ -21,6 +21,20 @@ import aiohttp.web
 
 from td_health_manifest import HealthManifestError, load_health_manifest
 from td_dataset_catalog import load_dataset_catalog
+
+
+def _report_catalog_error(exc: HealthManifestError) -> None:
+    print(f"Error: {exc}\nCheck the dataset catalog JSON syntax and configuration.", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    try:
+        load_dataset_catalog()
+    except HealthManifestError as exc:
+        _report_catalog_error(exc)
+        raise SystemExit(1) from None
+
+
 from td_health_read import (
     DEFAULT_PAGE_SIZE,
     DEFAULT_TABLE_PAGE_SIZE,
@@ -2853,4 +2867,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        exit_code = main()
+    except HealthManifestError as exc:
+        _report_catalog_error(exc)
+        exit_code = 1
+    raise SystemExit(exit_code)

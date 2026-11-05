@@ -142,6 +142,8 @@ def validate_unified_recipes(raw: dict) -> None:
 
 
 def validate_dataset_catalog(raw: dict, *, historical: bool = False) -> None:
+    if not isinstance(raw, dict):
+        raise HealthManifestError("Dataset catalog must be a JSON object")
     if raw.get("schemaVersion") != 2:
         raise HealthManifestError("Dataset catalog requires schemaVersion 2")
     vocabulary = raw.get("vocabulary")
@@ -219,7 +221,10 @@ def validate_dataset_catalog(raw: dict, *, historical: bool = False) -> None:
                 continue
             dataset = values.get(source[key]) if isinstance(source[key], str) else None
             if dataset is None or dataset["source"] != source["value"] or not dataset.get("selectable", True):
-                raise HealthManifestError(f"Invalid {key} for {source['value']}")
+                raise HealthManifestError(
+                    f"Invalid {key} for {source['value']}: {source[key]!r} "
+                    "must name a selectable dataset in the same source"
+                )
     if not isinstance(raw.get("mergeGroups"), dict) or not isinstance(raw.get("authority"), dict):
         raise HealthManifestError("Dataset catalog requires mergeGroups and authority")
     groups = raw["mergeGroups"]
@@ -252,9 +257,12 @@ def validate_dataset_catalog(raw: dict, *, historical: bool = False) -> None:
 
 
 def load_dataset_catalog(path: Path = MANIFEST_PATH) -> dict:
-    raw = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object)
-    validate_dataset_catalog(raw)
-    policy = load_health_manifest(path).roster_policy
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object)
+        validate_dataset_catalog(raw)
+        policy = load_health_manifest(path).roster_policy
+    except (OSError, UnicodeError, json.JSONDecodeError, HealthManifestError) as exc:
+        raise HealthManifestError(f"Cannot load dataset catalog {path}: {exc}") from exc
     raw["authority"]["fieldOverrides"] = {field: dict(ranks) for field, ranks in policy.sources.items()}
     raw["authority"]["freshnessSeconds"] = dict(policy.freshness_seconds)
     return raw

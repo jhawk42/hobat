@@ -15,6 +15,11 @@ example, `--port 9166`) and use that port in the browser URL. The suggested port
 is only an example; it is not checked for availability. No automatic retry or
 interactive prompt occurs. Other unexpected OS errors are still raised.
 
+If the dataset catalog cannot be loaded or validated, startup exits with status
+1 and reports the catalog path and error without a traceback. Check the JSON
+syntax and the reported configuration in [td-dataset-manifest.json](../src/td-dataset-manifest.json);
+source defaults must name selectable datasets belonging to that source.
+
 When the webserver regenerates data files by invoking `td_cli`, it surfaces the underlying command return codes instead of normalizing them away. That matters for empty- or partial-data-directory runs, where missing local inputs now distinguish rc `4` from runtime rc `3` and invalid-payload rc `5`.
 
 The root route redirects to `/tdash.html`. Data requests use the allowlisted

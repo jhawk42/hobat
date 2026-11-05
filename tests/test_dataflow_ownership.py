@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import warnings
 from pathlib import Path
 
@@ -84,6 +85,9 @@ def test_canonical_catalog_aliases_and_preserved_recipes():
     assert catalog["sourceAliases"] == {"merged": "multi-source"}
     for old, new in zip(baseline["datasources"], catalog["datasources"], strict=True):
         if "default_dataset_value" in old:
+            if new["value"] == "multi-source":
+                assert new["default_dataset_value"] == "multi_source_unified"
+                continue
             old_files = next(entry["files"] for entry in baseline["datasets"]
                              if entry["value"] == old["default_dataset_value"])
             assert resolve_dataset(catalog, new["default_dataset_value"])["files"] == old_files
@@ -156,6 +160,49 @@ def test_catalog_duplicate_alias_json_keys_are_rejected(tmp_path):
     path.write_text(content.replace('"datasetAliases": {', '"datasetAliases": {"duplicate": "a", "duplicate": "b",', 1))
     with pytest.raises(HealthManifestError, match="Duplicate JSON key"):
         load_dataset_catalog(path)
+
+
+@pytest.mark.parametrize("invalid", ["hidden-default", "invalid-json", "duplicate-key", "missing", "array"])
+def test_webserver_reports_catalog_errors_without_traceback(tmp_path, invalid):
+    path = tmp_path / "catalog.json"
+    if invalid == "hidden-default":
+        catalog = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        source = next(s for s in catalog["datasources"] if s["value"] == "multi-source")
+        source["default_dataset_value"] = "multi_source_otbr_mdns"
+        path.write_text(json.dumps(catalog), encoding="utf-8")
+        detail = "Invalid default_dataset_value for multi-source: 'multi_source_otbr_mdns'"
+    elif invalid == "invalid-json":
+        path.write_text('{"datasets":', encoding="utf-8")
+        detail = "line 1 column"
+    elif invalid == "duplicate-key":
+        path.write_text('{"schemaVersion": 2, "schemaVersion": 2}', encoding="utf-8")
+        detail = "Duplicate JSON key: schemaVersion"
+    elif invalid == "array":
+        path.write_text("[]", encoding="utf-8")
+        detail = "Dataset catalog must be a JSON object"
+    else:
+        detail = "No such file or directory"
+
+    script = """
+import runpy
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import td_health_manifest
+td_health_manifest.MANIFEST_PATH = Path(sys.argv[2])
+sys.argv = ["td_webserver", "--help"]
+runpy.run_module("td_webserver", run_name="__main__")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(PYTHON), str(path)],
+        capture_output=True, text=True, cwd=ROOT, timeout=30,
+    )
+    assert result.returncode == 1
+    assert str(path) in result.stderr
+    assert detail in result.stderr
+    assert "Check the dataset catalog JSON syntax and configuration" in result.stderr
+    assert "Traceback" not in result.stderr
+
 
 
 def _text(path: Path, overrides: dict[str, str]) -> str:

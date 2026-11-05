@@ -74,6 +74,9 @@ EXPECTED = (
     ("65fb5c69690040bddc0af3fbeb10618c8a1760c2",
      "c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011",
      "1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09"),
+    ("d77eb02a71d6332125ac8e5603213c4c1d12385a",
+     "40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f",
+     "bef3b4accb98e9c60d9ef7bcc75232caa3f20fa06ed1dbbc77e1e8ec2852a0b7"),
     (None,
      "8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81",
      "1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09"),
@@ -116,8 +119,8 @@ def _resolve(resolver, dataset_id=DATASET_ID, **kwargs):
     return resolver.resolve_source(dataset_id, "otbr-cli", PROFILE_ID, SAMPLE_CONTRACT, **kwargs)
 
 
-def test_all_fifteen_exact_snapshots_and_original_policy_metadata(resolver):
-    assert len(resolver.revisions) == 15
+def test_all_sixteen_exact_snapshots_and_original_policy_metadata(resolver):
+    assert len(resolver.revisions) == 16
     assert len(resolver.declared_dataset_ids) == 23
     for revision, (commit, snapshot, projection) in zip(resolver.revisions, EXPECTED, strict=True):
         assert revision.commit == commit
@@ -144,7 +147,8 @@ def test_all_fifteen_exact_snapshots_and_original_policy_metadata(resolver):
         assert captured.captured_at
     assert all(revision.capture_kind is None for revision in resolver.revisions[:8])
     assert resolver.revisions[13].capture_kind is None
-    assert resolver.revisions[14].capture_kind == "worktree"
+    assert resolver.revisions[14].capture_kind is None
+    assert resolver.revisions[15].capture_kind == "worktree"
     assert resolver.revisions[3].manifest_digest != resolver.revisions[4].manifest_digest
     assert resolver.revisions[3].health_contract_digest == resolver.revisions[4].health_contract_digest
     assert resolver.current.is_current
@@ -172,11 +176,19 @@ def test_unified_exact_current_support_and_independent_vectors(resolver, dataset
     )
     assert resolution.dataset == dataset
     assert resolution.source_revision_ids == (
-        resolver.current.revision_id,
+        "manifest-sha256:40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f",
         "manifest-sha256:8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81",
+        resolver.current.revision_id,
         "manifest-sha256:c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011",
         "manifest-sha256:d369ccc7cca9e30cd2016ac33213039343ef94d9d224ea73d2ffd2dbcb548dd6",
     )
+    previous = resolver.resolve_source(
+        dataset_id, dataset.datasource_id, dataset.health_profile.profile_id,
+        "comparison-v1-unified",
+        revision_id="manifest-sha256:40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f",
+    )
+    assert previous.source_contract_digest == replay_digest
+    assert resolver.resolve_target(previous, "comparison-v1-unified").reason is None
     assert resolver.resolve_target(resolution, "comparison-v1-unified").reason is None
     for version in ("comparison-v1", "comparison-v1-route64"):
         assert not resolver.matching_candidates(
@@ -228,7 +240,7 @@ def test_controller_observation_v18_target_vectors(resolver, dataset_id, expecte
 
 
 def test_source_label_change_preserves_displaced_manifest_and_exact_contracts(resolver):
-    prior = resolver.revisions[-2]
+    prior = resolver.revisions[-3]
     presentation = json.loads(canonical_json(prior.manifest))
     assert presentation["datasources"][5]["label"] == "Multi-source"
     presentation["datasources"][5]["label"] = "multi-source"

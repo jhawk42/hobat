@@ -297,9 +297,11 @@ matching pre-cutover code/catalog before restarting.
 
 The exact displaced eleven-product manifest is archived as
 `8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81`.
-The four-product manifest digest is
+The displaced four-product manifest digest is
 `40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f`;
-its health projection is
+it is retained in manifest history. The current catalog digest is
+`abe986ac80bba1d173b1bf5ca4bb45a4e8b1ce992aff2a11fd6bc2d4331cde89`.
+Both have the same health projection:
 `bef3b4accb98e9c60d9ef7bcc75232caa3f20fa06ed1dbbc77e1e8ec2852a0b7`.
 The four retained replay/target contracts are unchanged. Archived retired
 recipes have no current health target and cannot recreate purged results through
