@@ -11,14 +11,14 @@ compatibility colors for pure adaptor consumers, not a second live palette.
 
 | Role | Light background / border | Dark background / border | Shape |
 |---|---|---|---|
-| Border router | `#e4f3e7` / `#28723a` | `#153923` / `#70c982` | square |
-| Router | `#dcecf8` / `#4b4237` | `#18354f` / `#f2ede3` | hexagon |
-| REED / router-eligible child | `#c2d9fa` / `#24559a` | `#24559a` / `#91baff` | dot |
-| MED / receiver-on-when-idle minimal end device | `#c8f0f5` / `#006b80` | `#104655` / `#62d6ed` | dot |
-| SED / sleepy end device | `#ffffff` / `#006b80` | `#121416` / `#62d6ed` | dot, hollow-looking |
-| Child / subtype unconfirmed | `#fff0c2` / `#806000` | `#3c3218` / `#e8c766` | dot |
-| Eve fallback | `#ddf2ef` / `#006b6b` | `#143d3d` / `#6acaca` | adaptor-selected |
-| Unknown role | `#e7ebf0` / `#5d6672` | `#303844` / `#b4becc` | dot, dashed outline |
+| Border router | `#e4f3e7` / `#549660` | `#153923` / `#70c982` | square |
+| Router | `#dcecf8` / `#958674` | `#18354f` / `#f2ede3` | hexagon |
+| REED / router-eligible child | `#c2d9fa` / `#5789d6` | `#24559a` / `#91baff` | dot |
+| MED / receiver-on-when-idle minimal end device | `#c8f0f5` / `#2696aa` | `#104655` / `#62d6ed` | dot |
+| SED / sleepy end device | `#ffffff` / `#2696aa` | `#121416` / `#62d6ed` | dot, hollow-looking |
+| Child / subtype unconfirmed | `#fff0c2` / `#a68726` | `#3c3218` / `#e8c766` | dot |
+| Eve fallback | `#ddf2ef` / `#269893` | `#143d3d` / `#6acaca` | adaptor-selected |
+| Unknown role | `#e7ebf0` / `#88929f` | `#303844` / `#b4becc` | dot, dashed outline |
 
 All topology adaptors share the same role emphasis: border routers use
 `borderWidth: 5` and `size: 45`, routers use `borderWidth: 3` and `size: 45`,
@@ -27,9 +27,19 @@ ha-matter-ws commissioned, native, and merged topology nodes. Adaptors may
 still select different labels, fonts, and role classifications based on their
 source data.
 
-Router outlines use warm graphite in Light and warm white in Dark to separate
+Router outlines use warm bronze in Light and warm white in Dark to separate
 hexagons from dense blue High-LQ links. Fills, geometry and interaction colors
-are unchanged; border-to-fill contrast is 8.15:1 in Light and 10.84:1 in Dark.
+are unchanged; border-to-fill contrast is 2.93:1 in Light and 10.84:1 in Dark.
+
+The approved Trial 3 Light borders (2026-11-06) blend the Trial 1 proposals
+15% toward white in sRGB, rounding each channel to the nearest integer.
+Connecting-edge colors and Dark styling are unchanged. Every Light role border
+retains at least 3:1 contrast against the white canvas (minimum 3.15:1).
+The user explicitly accepted lower border-to-fill contrast for Router (2.93:1),
+REED (2.45:1), MED (2.86:1), and Unknown (2.63:1). All other role borders
+retain at least 3:1 against their fills. These are opaque-token measurements,
+not rendered fit-zoom readability or red-green CVD certification; shapes,
+unknown dashes and separate health cues remain essential.
 
 Border routers use green role identity in both themes. Dark outlines have
 9.11:1 contrast against the canvas and 6.32:1 against their deep-green fill.

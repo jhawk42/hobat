@@ -388,14 +388,14 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
     assert canvas_rules is not None
     assert "background: var(--topology-canvas-bg);" in canvas_rules[1]
     approved_roles = {
-        "router": ("#dcecf8", "#4b4237", "#18354f", "#f2ede3"),
-        "border-router": ("#e4f3e7", "#28723a", "#153923", "#70c982"),
-        "reed": ("#c2d9fa", "#24559a", "#24559a", "#91baff"),
-        "med": ("#c8f0f5", "#006b80", "#104655", "#62d6ed"),
-        "sed": ("#ffffff", "#006b80", "#121416", "#62d6ed"),
-        "child": ("#fff0c2", "#806000", "#3c3218", "#e8c766"),
-        "eve": ("#ddf2ef", "#006b6b", "#143d3d", "#6acaca"),
-        "unknown": ("#e7ebf0", "#5d6672", "#303844", "#b4becc"),
+        "router": ("#dcecf8", "#958674", "#18354f", "#f2ede3"),
+        "border-router": ("#e4f3e7", "#549660", "#153923", "#70c982"),
+        "reed": ("#c2d9fa", "#5789d6", "#24559a", "#91baff"),
+        "med": ("#c8f0f5", "#2696aa", "#104655", "#62d6ed"),
+        "sed": ("#ffffff", "#2696aa", "#121416", "#62d6ed"),
+        "child": ("#fff0c2", "#a68726", "#3c3218", "#e8c766"),
+        "eve": ("#ddf2ef", "#269893", "#143d3d", "#6acaca"),
+        "unknown": ("#e7ebf0", "#88929f", "#303844", "#b4becc"),
     }
     for role, expected in approved_roles.items():
         assert (
@@ -421,6 +421,8 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
         ]
         return sum(channel * weight for channel, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
 
+    # Exact Trial 3 fill-contrast exceptions approved on 2026-11-06; canvas stays 3:1.
+    light_fill_minimums = {"router": 2.92, "reed": 2.44, "med": 2.85, "unknown": 2.62}
     for palette in (light, light | dark):
         pairs = [
             ("--text", "--surface", 4.5),
@@ -429,6 +431,11 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
             ("--action-bg", "--surface", 3),
             ("--text-on-selected", "--surface-selected", 4.5),
             ("--text-heading", "--accent-soft", 4.5),
+            ("--context-selection-text", "--context-selection-bg", 4.5),
+            ("--context-selection-text", "--context-selection-hover", 4.5),
+            ("--context-selection-text", "--surface", 3),
+            ("--focus-ring", "--context-selection-bg", 3),
+            ("--focus-ring", "--context-selection-hover", 3),
             ("--topology-label-text", "--topology-label-bg", 4.5),
             ("--topology-search-dim-text", "--topology-search-dim-bg", 4.5),
             ("--control-border", "--surface", 3),
@@ -439,7 +446,8 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
             pairs.append(("--muted", background, 4.5))
             pairs.append(("--control-border", background, 3))
         for role in approved_roles:
-            pairs.append((f"--node-{role}-border", f"--node-{role}-bg", 3))
+            fill_minimum = light_fill_minimums.get(role, 3) if palette is light else 3
+            pairs.append((f"--node-{role}-border", f"--node-{role}-bg", fill_minimum))
             pairs.append((f"--node-{role}-border", "--surface", 3))
             pairs.append((f"--node-{role}-border", "--topology-canvas-bg", 3))
         pairs.append(("--lq-high", "--surface", 3))
@@ -1122,6 +1130,29 @@ def test_navigation_panel_supports_expanded_and_icon_only_states() -> None:
     assert "overflow-x: auto;" in css
     assert "scrollbar-width: none;" in css
     assert "width: 240px;" not in css
+
+
+def test_context_selection_styles_are_scoped_and_distinct_from_hover() -> None:
+    css = _read_text(CSS)
+    selected = re.search(
+        r"\.workspace-navigation-tabs button\.active,\s*"
+        r"#device-details-nav-bar-left button\.active\s*\{([^}]+)\}",
+        css,
+    )
+    assert selected is not None
+    for declaration in (
+        "background: var(--context-selection-bg);",
+        "color: var(--context-selection-text);",
+        "box-shadow: inset 3px 0 0 var(--context-selection-text);",
+    ):
+        assert declaration in selected[1]
+    assert ".workspace-navigation-tabs button:not(.active):hover" in css
+    assert "#device-details-nav-bar-left button:not(.active):hover" in css
+    assert "background: var(--context-hover);" in css
+    assert ".workspace-navigation-tabs button.active:hover" in css
+    assert "#device-details-nav-bar-left button.active:hover" in css
+    assert "background: var(--context-selection-hover);" in css
+    assert "outline: 2px solid var(--focus-ring);" in css
 
 
 def test_desktop_navigation_is_compact_without_shrinking_mobile_targets() -> None:

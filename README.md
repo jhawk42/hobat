@@ -185,8 +185,13 @@ an appearance-specific notice explains that the choice applies only to the
 current page. Appearance changes do not Sync, refresh health, run diagnostics,
 or reset topology position, selection, camera, or paused physics.
 
-The topology physics pause/resume toggle uses the same compact, theme-aware
-styling as the navigation buttons; its icon and tooltip show the available action.
+The active workspace and device-details tab use a blue icon, a subtle
+background, and an inset bar; expanded workspace navigation also highlights
+the active label. This is a navigation cue, not a link-quality or health
+indicator. Keyboard focus remains separately outlined.
+
+The topology physics pause/resume toggle uses compact, theme-aware button
+styling; its icon and tooltip show the available action.
 
 Select a topology device to emphasize its immediate links while keeping the
 rest of the mesh visible. Clearing selection restores the current base styles,

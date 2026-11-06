@@ -16,6 +16,10 @@
   --accent: #0f766e;
   --accent-soft: #d6f5f2;
   --accent-hover: #0e6b63;
+  --context-selection-text: #1359ad;
+  --context-selection-bg: #e7f1ff;
+  --context-selection-hover: #d8e9ff;
+  --context-hover: #eaedf2;
 
   /* Link Quality tokens */
   --lq-high: #4e8afa;
@@ -27,21 +31,21 @@
 
   /* Topology node colors */
   --node-router-bg: #dcecf8;
-  --node-router-border: #4b4237;
+  --node-router-border: #958674;
   --node-border-router-bg: #e4f3e7;
-  --node-border-router-border: #28723a;
+  --node-border-router-border: #549660;
   --node-reed-bg: #c2d9fa;
-  --node-reed-border: #24559a;
+  --node-reed-border: #5789d6;
   --node-med-bg: #c8f0f5;
-  --node-med-border: #006b80;
+  --node-med-border: #2696aa;
   --node-sed-bg: #ffffff;
-  --node-sed-border: #006b80;
+  --node-sed-border: #2696aa;
   --node-child-bg: #fff0c2;
-  --node-child-border: #806000;
+  --node-child-border: #a68726;
   --node-eve-bg: #ddf2ef;
-  --node-eve-border: #006b6b;
+  --node-eve-border: #269893;
   --node-unknown-bg: #e7ebf0;
-  --node-unknown-border: #5d6672;
+  --node-unknown-border: #88929f;
   --topology-label-text: #172434;
   --topology-label-bg: #ffffff;
   --topology-canvas-bg: #ffffff;
@@ -91,6 +95,10 @@
   --accent: #14b8a6;
   --accent-soft: #134e4a;
   --accent-hover: #0d9488;
+  --context-selection-text: #a5ceff;
+  --context-selection-bg: #203a56;
+  --context-selection-hover: #284867;
+  --context-hover: #2a3036;
   --lq-high: #4e8afa;
   --lq-medium: #e5ad55;
   --lq-low: #f18e79;
@@ -1023,6 +1031,27 @@ button.active {
   border-color: var(--control-border);
   color: var(--action-text);
   font-weight: 600;
+}
+
+.workspace-navigation-tabs button.active,
+#device-details-nav-bar-left button.active {
+  background: var(--context-selection-bg);
+  color: var(--context-selection-text);
+  box-shadow: inset 3px 0 0 var(--context-selection-text);
+}
+
+@media (hover: hover) {
+  .workspace-navigation-tabs button:not(.active):hover,
+  #device-details-nav-bar-left button:not(.active):hover {
+    background: var(--context-hover);
+    border-color: var(--control-border);
+  }
+
+  .workspace-navigation-tabs button.active:hover,
+  #device-details-nav-bar-left button.active:hover {
+    background: var(--context-selection-hover);
+    border-color: var(--control-border);
+  }
 }
 
 #btn-fetch {
@@ -3776,6 +3805,10 @@ td:last-child {
     --accent: #14b8a6;
     --accent-soft: #134e4a;
     --accent-hover: #0d9488;
+    --context-selection-text: #a5ceff;
+    --context-selection-bg: #203a56;
+    --context-selection-hover: #284867;
+    --context-hover: #2a3036;
 
     /* LQ colors — maintain high contrast on dark bg */
     --lq-high: #4e8afa;
