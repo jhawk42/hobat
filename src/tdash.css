@@ -1059,7 +1059,7 @@ button.active {
 
 .view-toggle-bar {
   display: grid;
-  grid-template-columns: auto minmax(8rem, 1fr) minmax(0, max-content);
+  grid-template-columns: auto minmax(8rem, 1fr) minmax(0, max-content) auto;
   gap: 4px;
   margin-bottom: 6px;
   align-items: center;
@@ -1093,7 +1093,7 @@ button.active {
   flex-wrap: wrap;
 }
 
-.view-toggle-controls #btn-details-panel-toggle { margin-left: auto; }
+#btn-details-panel-toggle { grid-column: 4; grid-row: 1; }
 
 #view-status-line-panel {
   display: flex;
@@ -1111,7 +1111,7 @@ button.active {
   position: fixed;
   z-index: 1000;
   box-sizing: border-box;
-  width: min(360px, calc(100vw - 16px));
+  width: min(432px, calc(100vw - 16px));
   overflow: auto;
   overflow-wrap: anywhere;
   padding: 12px;
@@ -1123,13 +1123,41 @@ button.active {
 #view-status-details-popover[hidden] { display: none; }
 .view-status-details-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .view-status-details-header h2 { margin: 0; font-size: 1rem; }
-#view-status-details-list { margin: 8px 0 0; }
-#view-status-details-list dt { font-weight: 700; }
-#view-status-details-list dd { margin: 0 0 8px; }
+#view-status-details-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 8px 0 0;
+}
+#view-status-details-list dt,
+#view-status-details-list dd { min-width: 0; margin: 0; }
+
+#topology-view div.vis-tooltip {
+  width: min(360px, calc(100% - 10px));
+  max-height: calc(100% - 10px);
+  overflow: auto;
+  white-space: normal;
+  font: inherit;
+  background: var(--surface);
+  color: var(--text);
+}
+.topology-hover-heading { font-weight: 700; overflow-wrap: anywhere; }
+.topology-hover-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0;
+}
+.topology-hover-list dt,
+.topology-hover-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.topology-hover-text { grid-column: 1 / -1; overflow-wrap: anywhere; }
 
 @container workspace (max-width: 680px) {
-  .view-toggle-bar { grid-template-columns: auto minmax(0, 1fr); }
-  .view-toggle-controls { grid-column: 1 / -1; }
+  .view-toggle-bar { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .view-toggle-controls { grid-column: 1 / -1; grid-row: 2; }
+  #btn-details-panel-toggle { grid-column: 3; }
 }
 
 /* ── Status line ──────────────────────────────────────────── */
@@ -2635,14 +2663,18 @@ button[aria-expanded="true"] > .disclosure-icon {
   align-items: baseline;
 }
 
-.node-details-list .detail-kv-key {
+.node-details-list .detail-kv-key,
+#view-status-details-list dt,
+.topology-hover-list dt {
   flex-shrink: 0;
   font-weight: 400;
   color: var(--dashboard-supporting-text);
   text-align: left;
 }
 
-.node-details-list .detail-kv-value {
+.node-details-list .detail-kv-value,
+#view-status-details-list dd,
+.topology-hover-list dd {
   flex: 1;
   text-align: right;
   word-break: break-all;

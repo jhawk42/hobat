@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { runAdaptor } from "../../src/js/tdash-adaptors.js";
 import { resolveLayoutCollisions } from "../../src/js/tdash-layouts.js";
-import { assignParallelEdgeCurves } from "../../src/js/tdash-topology-renderer.js";
+import { assignParallelEdgeCurves, buildTopologyHoverContent } from "../../src/js/tdash-topology-renderer.js";
 import { buildNodeHoverLabel, buildVisNodeData } from "../../src/js/tdash-topology-utils.js";
 
 function mergedEdges(row) {
@@ -108,5 +108,25 @@ const longHoverLabel = buildNodeHoverLabel({
 assert.equal(longHoverLabel.split("\n")[0].length, 80);
 assert.match(longHoverLabel, /\.\.\.\nRloc16: 0x2000$/);
 assert.equal(visNodes[0].title, "Unknown node\nIdentifier: unavailable");
+
+globalThis.document = {
+  createElement(tagName) {
+    return {
+      tagName, children: [], className: "", textContent: "",
+      append(...children) { this.children.push(...children); },
+    };
+  },
+};
+const nodeHover = buildTopologyHoverContent("Router: A\nRloc16: 0x1000\nVendor: A: B", true);
+assert.equal(nodeHover.children[0].textContent, "Router: A");
+assert.deepEqual(nodeHover.children[1].children.map(({ tagName, textContent }) => [tagName, textContent]), [
+  ["dt", "Rloc16:"], ["dd", "0x1000"], ["dt", "Vendor:"], ["dd", "A: B"],
+]);
+const edgeHover = buildTopologyHoverContent("from: <router>\nto: node\nLQI: 3 ▂▄▆", false);
+assert.deepEqual(edgeHover.children[0].children.map(({ tagName, textContent }) => [tagName, textContent]), [
+  ["dt", "from:"], ["dd", "<router>"], ["dt", "to:"], ["dd", "node"], ["dt", "LQI:"], ["dd", "3 ▂▄▆"],
+]);
+const plainHover = buildTopologyHoverContent("standalone", false);
+assert.equal(plainHover.children[0].children[0].textContent, "standalone");
 
 process.stdout.write("phase2 regressions passed\n");

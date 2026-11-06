@@ -719,6 +719,18 @@ def test_compact_view_status_dom_and_layout_contract() -> None:
     assert parser.attributes_by_id["btn-view-status-details"]["aria-controls"] == "view-status-details-popover"
     assert parser.attributes_by_id["view-status-details-popover"]["role"] == "region"
     assert parser.attributes_by_id["view-status-details-popover"]["tabindex"] == "-1"
+    popover = re.search(r"#view-status-details-popover\s*\{([^}]+)\}", css)
+    assert popover is not None
+    assert 'width: min(432px, calc(100vw - 16px));' in popover[1]
+    assert parser.tag_by_id["view-status-details-list"] == "dl"
+    assert 'list.append(dt, dd);' in ui
+    status_list = re.search(r"#view-status-details-list\s*\{([^}]+)\}", css)
+    assert status_list is not None
+    assert 'display: grid;' in status_list[1]
+    assert 'grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);' in status_list[1]
+    assert 'align-items: baseline;' in status_list[1]
+    assert '.node-details-list .detail-kv-key,\n#view-status-details-list dt,\n.topology-hover-list dt {' in css
+    assert '.node-details-list .detail-kv-value,\n#view-status-details-list dd,\n.topology-hover-list dd {' in css
     assert parser.tag_by_id["topology-title"] == "h2"
     assert "visually-hidden" in parser.attributes_by_id["topology-title"]["class"]
     assert html.count('id="view-status-line-content"') == 1
@@ -728,19 +740,22 @@ def test_compact_view_status_dom_and_layout_contract() -> None:
     assert '@container workspace (max-width: 680px)' in css
     toolbar = re.search(r"\.view-toggle-bar\s*\{([^}]+)\}", css)
     assert toolbar is not None
-    assert 'grid-template-columns: auto minmax(8rem, 1fr) minmax(0, max-content);' in toolbar[1]
+    assert 'grid-template-columns: auto minmax(8rem, 1fr) minmax(0, max-content) auto;' in toolbar[1]
     controls = re.search(r"\.view-toggle-controls\s*\{([^}]+)\}", css)
     assert controls is not None
     assert 'grid-column: 3;' in controls[1]
     assert 'min-width: 0;' in controls[1]
     assert 'flex-wrap: wrap;' in controls[1]
-    assert '.view-toggle-controls #btn-details-panel-toggle { margin-left: auto; }' in css
+    assert '#btn-details-panel-toggle { grid-column: 4; grid-row: 1; }' in css
     control_markup = re.search(r'<div class="view-toggle-controls">(.*?)</div>', html, re.S)
     assert control_markup is not None
     control_buttons = re.findall(r'<button id="([^"]+)"', control_markup[1])
-    assert control_buttons[-1] == "btn-details-panel-toggle"
-    assert '.view-toggle-controls { grid-column: 1 / -1; }' in css
-    assert '.view-toggle-bar { grid-template-columns: auto minmax(0, 1fr); }' in css
+    assert "btn-details-panel-toggle" not in control_buttons
+    assert parser.parent_by_id["btn-details-panel-toggle"] == parser.parent_by_id["btn-functions-panel-toggle"]
+    assert '.view-toggle-controls { grid-column: 1 / -1; grid-row: 2; }' in css
+    assert '.view-toggle-bar { grid-template-columns: auto minmax(0, 1fr) auto; }' in css
+    assert '#btn-details-panel-toggle { grid-column: 3; }' in css
+    assert '.view-toggle-controls input, #btn-details-panel-toggle' in ui
     assert 'grid-template-rows: auto minmax(0, 1fr);' in css
     assert 'grid-row: 3;' not in css[css.index('#view-topology,\n#view-table'):css.index('.topology-canvas-wrap {')]
     assert 'region.addEventListener("focusin", cancelClose)' in ui

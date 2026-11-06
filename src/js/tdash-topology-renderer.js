@@ -88,6 +88,37 @@ const THEME_TOKENS = Object.freeze({
 let activeThemePalette = null;
 let activePaletteTheme = null;
 
+export function buildTopologyHoverContent(title, isNode) {
+  const content = document.createElement("div");
+  content.className = "topology-hover-details";
+  const lines = title.split("\n");
+  if (isNode) {
+    const heading = document.createElement("div");
+    heading.className = "topology-hover-heading";
+    heading.textContent = lines.shift();
+    content.append(heading);
+  }
+  const list = document.createElement("dl");
+  list.className = "topology-hover-list";
+  for (const line of lines) {
+    const separator = line.indexOf(": ");
+    if (separator < 0) {
+      const text = document.createElement("div");
+      text.className = "topology-hover-text";
+      text.textContent = line;
+      list.append(text);
+      continue;
+    }
+    const key = document.createElement("dt");
+    const value = document.createElement("dd");
+    key.textContent = line.slice(0, separator + 1);
+    value.textContent = line.slice(separator + 2);
+    list.append(key, value);
+  }
+  content.append(list);
+  return content;
+}
+
 export function readThemePalette() {
   const root = document.documentElement;
   const theme = root.dataset.theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
@@ -553,8 +584,14 @@ export function renderTopologyForDataset(
   viewModel = themed.viewModel;
   const nodeStyles = new Map(themed.nodeUpdates.map((patch) => [patch.id, patch]));
   const edgeStyles = new Map(themed.edgeUpdates.map((patch) => [patch.id, patch]));
-  const nodesDataset = new vis.DataSet(viewModel.nodes.map((node) => ({ ...node, ...nodeStyles.get(node.id) })));
-  const edgesDataset = new vis.DataSet(viewModel.edges.map((edge) => ({ ...edge, ...edgeStyles.get(edge.id) })));
+  const nodesDataset = new vis.DataSet(viewModel.nodes.map((node) => ({
+    ...node, ...nodeStyles.get(node.id),
+    title: node.title ? buildTopologyHoverContent(node.title, true) : node.title,
+  })));
+  const edgesDataset = new vis.DataSet(viewModel.edges.map((edge) => ({
+    ...edge, ...edgeStyles.get(edge.id),
+    title: edge.title ? buildTopologyHoverContent(edge.title, false) : edge.title,
+  })));
   const optionsWithProfile = Object.assign({}, VIS_OPTIONS, {
     physics: Object.assign({}, VIS_OPTIONS.physics, {
       barnesHut: Object.assign({}, VIS_OPTIONS.physics?.barnesHut, physicsProfile.barnesHut),

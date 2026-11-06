@@ -245,7 +245,7 @@ function createStatusDisclosure() {
         const focusable = [...region.querySelectorAll("button, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])")]
           .filter((element) => !element.disabled && element.getClientRects().length);
         if (document.activeElement === focusable.at(-1)) {
-          const next = [...document.querySelectorAll(".view-toggle-controls button, .view-toggle-controls select, .view-toggle-controls input")]
+          const next = [...document.querySelectorAll(".view-toggle-controls button, .view-toggle-controls select, .view-toggle-controls input, #btn-details-panel-toggle")]
             .find((element) => !element.disabled && element.getClientRects().length);
           if (next) { event.preventDefault(); next.focus(); }
         }
