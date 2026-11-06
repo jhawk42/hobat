@@ -2595,6 +2595,34 @@ def test_health_assessment_observation_uses_comparison_timestamp_and_age_format(
         "unknown": "Observed unknown · Age: unknown",
     }
 
+def test_health_insights_compact_status_uses_accepted_observation() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import {buildHealthInsightsStatus as build} from "./src/js/tdash-health.js";
+      const dataset = {entry: {value: "d", healthEligible: true}};
+      const assessment = {datasetId: "d", assessmentId: "a", networkId: "extpan:123",
+        status: "Moderate", completeness: "Complete", confidence: "High",
+        observedAt: "2026-10-10T00:00:00Z", assessedAt: "2026-10-10T02:00:00Z",
+        coverage: {deviceCount: 12}};
+      const now = Date.parse("2026-10-10T16:21:00Z");
+      const status = build({dataset, assessment, mode: "pinned", pinnedAssessmentId: "a", now});
+      assert.equal(status.summary, "Moderate | Complete | Observed 16h 21m ago");
+      assert.equal(status.details.find(x => x.label === "Network ID").value, "extpan:123");
+      assert.equal(status.details.find(x => x.label === "Observed devices").value, "12");
+      assert.match(status.details.find(x => x.label === "History").value, /Pinned: a/);
+      assert.match(build({dataset, assessment: {...assessment, observedAt: "invalid"}, now}).summary, /Observed unknown/);
+      assert.match(build({dataset, assessment: {...assessment, completeness: "Degraded"}, error: "failed", now}).summary, /Degraded.*Health refresh failed/);
+      assert.match(build({dataset, assessment: {...assessment, status: "Unknown"}, refreshStatus: "cancelled", now}).summary, /Unknown.*Health processing cancelled/);
+      assert.match(build({dataset, assessment, refreshStatus: "error", now}).summary, /Health refresh failed/);
+      assert.equal(build({}).summary, "No dataset loaded");
+      assert.equal(build({dataset: {entry: {healthEligible: false}}}).summary, "Network insights");
+      assert.equal(build({dataset, loading: true, mode: "pinned", pinnedAssessmentId: "old"}).summary, "Loading health assessment");
+      assert.equal(build({dataset, mode: "pinned"}).summary, "Health assessment unavailable");
+      assert.match(build({dataset, error: "unavailable"}).summary, /failed: unavailable/);
+      assert.equal(build({dataset, assessment: {...assessment, coverage: {}}, now}).details.find(x => x.label === "Observed devices").value, "Unknown");
+    """
+    subprocess.run(["node", "--input-type=module", "--eval", script], cwd=ROOT, check=True)
+
 
 def test_health_insights_tab_accessible_names_distinguish_counts_and_missing_data() -> None:
     script = r"""
@@ -2701,8 +2729,8 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert "projectTopologyTheme(viewModel, palette, styleMode, currentSearchState, _healthStatusByDeviceId)" in topology_js
     assert 'background: palette[`health${status[0].toUpperCase()}${status.slice(1)}Bg`]' in view_model_js
     assert "--health-poor-bg" in css
-    view_toolbar = html.split('<div class="view-toggle-bar">', 1)[1].split(
-      '<div id="view-status-line-panel"', 1,
+    view_toolbar = html.split('<div class="view-toggle-controls">', 1)[1].split(
+      '<div id="view-topology"', 1,
     )[0]
     assert 'id="btn-health-coloring"' in view_toolbar
     assert 'id="btn-health-columns"' in view_toolbar

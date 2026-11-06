@@ -1058,7 +1058,8 @@ button.active {
 /* ── View toggle bar ──────────────────────────────────────── */
 
 .view-toggle-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 1fr) minmax(0, max-content);
   gap: 4px;
   margin-bottom: 6px;
   align-items: center;
@@ -1080,7 +1081,55 @@ button.active {
   height: 20px;
   background: var(--line);
   align-self: center;
-  margin: 0 4px 0 auto;
+  margin: 0 4px;
+}
+
+.view-toggle-controls {
+  display: flex;
+  grid-column: 3;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.view-toggle-controls #btn-details-panel-toggle { margin-left: auto; }
+
+#view-status-line-panel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+#view-status-line-panel[hidden] { display: none; }
+#view-status-line-content { min-width: 0; overflow-wrap: anywhere; }
+#btn-view-status-details { flex: none; }
+#view-status-health-icon[hidden] { display: none; }
+
+#view-status-details-popover {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 16px));
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--dashboard-canvas-bg, var(--topology-canvas-bg));
+  box-shadow: 0 4px 16px #0004;
+}
+#view-status-details-popover[hidden] { display: none; }
+.view-status-details-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.view-status-details-header h2 { margin: 0; font-size: 1rem; }
+#view-status-details-list { margin: 8px 0 0; }
+#view-status-details-list dt { font-weight: 700; }
+#view-status-details-list dd { margin: 0 0 8px; }
+
+@container workspace (max-width: 680px) {
+  .view-toggle-bar { grid-template-columns: auto minmax(0, 1fr); }
+  .view-toggle-controls { grid-column: 1 / -1; }
 }
 
 /* ── Status line ──────────────────────────────────────────── */
@@ -1112,7 +1161,7 @@ button.active {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
-  gap: 12px;
+  gap: 0;
   align-items: start;
 }
 
@@ -1126,7 +1175,8 @@ button.active {
 #panel-view {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  container: workspace / inline-size;
   gap: 12px;
   align-items: start;
   position: relative;
@@ -1142,11 +1192,6 @@ button.active {
   grid-row: 1;
 }
 
-#view-status-line-panel {
-  grid-column: 1;
-  grid-row: 2;
-}
-
 #view-status-line-content {
   font-size: 14px;
 }
@@ -1154,14 +1199,14 @@ button.active {
 #view-topology,
 #view-table {
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 2;
 }
 
 #view-insights,
 #view-settings,
 #view-operations {
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 2;
 }
 
 .topology-canvas-wrap {
@@ -1653,22 +1698,6 @@ button[aria-expanded="true"] > .disclosure-icon {
   z-index: 3;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
-}
-.health-insights-heading-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 12px;
-  margin-bottom: 4px;
-}
-.health-insights-heading-row h2 {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-  margin: 0;
-  font-size: 18px;
-  line-height: 1.5;
 }
 #health-insights-summary {
   display: flex;
@@ -2313,7 +2342,6 @@ button[aria-expanded="true"] > .disclosure-icon {
 @media (max-width: 760px) {
   .view-toggle-bar { flex-wrap: wrap; }
   .toggle-bar-separator { display: none; }
-  #btn-details-panel-toggle { margin-left: auto; }
   .health-coverage-pillars { grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); }
   .health-finding-evidence { grid-template-columns: 1fr; }
   .health-finding-evidence dd { margin-bottom: 5px; }
@@ -3372,7 +3400,7 @@ td:last-child {
   }
 
   .topology-layout {
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
   }
 
   #topology-view {
@@ -3574,7 +3602,7 @@ td:last-child {
   }
 
   #panel-view {
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto auto;
   }
 
   #view-topology,
@@ -3585,7 +3613,7 @@ td:last-child {
   }
 
   .topology-layout {
-    grid-template-rows: auto auto;
+    grid-template-rows: auto;
   }
 
   .topology-canvas-wrap {

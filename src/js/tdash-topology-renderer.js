@@ -511,7 +511,7 @@ export function renderTopologyForDataset(
   try {
     adaptorResult = runAdaptor(dataset);
   } catch (err) {
-    publishViewStatus("topology", `Topology error: ${err.message}`, statusDatasetToken);
+    publishViewStatus("topology", { summary: `Topology error: ${err.message}`, details: [], state: "error" }, statusDatasetToken);
     return;
   }
 
@@ -546,7 +546,7 @@ export function renderTopologyForDataset(
     palette = readThemePalette();
   } catch (error) {
     console.error("Unable to resolve topology appearance.", error);
-    publishViewStatus("topology", `Topology error: ${error.message}`, statusDatasetToken);
+    publishViewStatus("topology", { summary: `Topology error: ${error.message}`, details: [], state: "error" }, statusDatasetToken);
     return;
   }
   const themed = projectTopologyTheme(viewModel, palette, "canonical", null, _healthStatusByDeviceId);
@@ -647,7 +647,14 @@ export function renderTopologyForDataset(
     lastStatusCounts = counts;
     const status = buildTopologyStatus(viewModel, counts, currentSearchState, network.getScale(), {
       diagnosticMode: diagnosticFilterEl.value,
-      physicsProfileLabel,
+      filtered: nodeFilterEl.value !== "all" || diagnosticFilterEl.value !== "all"
+        || linkFilterEl.value !== "default_links",
+      filterLabels: {
+        "Node filter": nodeFilterEl.selectedOptions?.[0]?.text ?? nodeFilterEl.value,
+        "Diagnostic filter": diagnosticFilterEl.selectedOptions?.[0]?.text ?? diagnosticFilterEl.value,
+        "Link filter": linkFilterEl.selectedOptions?.[0]?.text ?? linkFilterEl.value,
+      },
+      resolvedLayout: document.getElementById("physics-profile-select")?.value === "auto" ? physicsProfileLabel : "",
       stabilizationMs: lastStabilizationMs,
     });
     const fetchStatusEl = document.getElementById("fetch-status-line-content");
@@ -656,7 +663,7 @@ export function renderTopologyForDataset(
     if (fetchStatusEl && !isFetchStatusPinned) {
       fetchStatusEl.textContent = `Loaded: ${viewModel.sourceNames.join(", ")}`;
     }
-    publishViewStatus("topology", status.text, statusDatasetToken);
+    publishViewStatus("topology", status.presentation, statusDatasetToken);
   }
 
   // ── Node detail click handler ──────────────────────────────────────────
@@ -809,7 +816,7 @@ export function renderTopologyForDataset(
     restoreOriginalNodeStyling();
   } catch (error) {
     owner.dispose();
-    publishViewStatus("topology", `Topology error: ${error.message}`, statusDatasetToken);
+    publishViewStatus("topology", { summary: `Topology error: ${error.message}`, details: [], state: "error" }, statusDatasetToken);
     return;
   }
 

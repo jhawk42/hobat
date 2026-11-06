@@ -61,7 +61,6 @@ import {
   PHYSICS_PROFILE_MESH_TREE_HORIZONTAL,
   PHYSICS_PROFILE_MESH_TREE_VERTICAL,
   PHYSICS_PROFILES,
-  getPhysicsProfileLabel,
 } from "./tdash-constants.js";
 import {
   bindDeviceDetailsSectionFields,
@@ -97,7 +96,9 @@ import {
   configureViewStatusPresenter,
   invalidateViewStatuses,
   networkInstanceStatus,
+  resolveNetworkInstance,
   networkInstanceMatchesId,
+  publishViewStatus,
   supersedeViewStatus,
 } from "./tdash-view-status.js";
 import {
@@ -142,7 +143,7 @@ import {
   renderHealthComparison,
   renderHealthAssessmentHistory,
   renderHealthStatus,
-  formatHealthAssessmentObservation,
+  buildHealthInsightsStatus,
   formatHealthInsightsTabAccessibleName,
   startHealthProcessing,
 } from "./tdash-health.js";
@@ -160,22 +161,163 @@ function datasetIdentityLabel(dataset) {
   return `${source?.label ?? dataset?.entry?.source ?? "unknown source"} / ${label}`;
 }
 
+function createStatusDisclosure() {
+  const trigger = document.getElementById("btn-view-status-details");
+  const region = document.getElementById("view-status-details-popover");
+  const closeButton = document.getElementById("btn-view-status-details-close");
+  const list = document.getElementById("view-status-details-list");
+  let state = "closed";
+  let suppressed = false;
+  let closeTimer = null;
+  let positionFrame = null;
+  const cancelClose = () => { clearTimeout(closeTimer); closeTimer = null; };
+  const position = () => {
+    if (state === "closed") return;
+    const rect = trigger.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom - 16;
+    const above = rect.top - 16;
+    const placeBelow = below >= region.scrollHeight || below >= above;
+    region.style.maxHeight = `${Math.max(0, placeBelow ? below : above)}px`;
+    const height = region.getBoundingClientRect().height;
+    region.style.top = `${Math.max(8, placeBelow ? rect.bottom + 8 : rect.top - height - 8)}px`;
+    region.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - region.offsetWidth - 8))}px`;
+  };
+  const schedulePosition = () => {
+    if (state !== "closed" && positionFrame === null) positionFrame = requestAnimationFrame(() => {
+      positionFrame = null;
+      position();
+    });
+  };
+  const close = ({ restoreFocus = false, suppress = false } = {}) => {
+    const inside = region.contains(document.activeElement);
+    state = "closed";
+    suppressed = suppress;
+    cancelClose();
+    if (positionFrame !== null) cancelAnimationFrame(positionFrame);
+    positionFrame = null;
+    region.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    if (restoreFocus && inside) trigger.focus();
+  };
+  const open = (nextState) => {
+    cancelClose();
+    state = nextState;
+    region.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    position();
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    if (state !== "preview") return;
+    closeTimer = setTimeout(() => {
+      if (!trigger.matches(":hover") && !region.matches(":hover")
+          && document.activeElement !== trigger && !region.contains(document.activeElement)) close();
+    }, 150);
+  };
+  trigger.addEventListener("pointerenter", () => { suppressed = false; if (state === "closed") open("preview"); else cancelClose(); });
+  trigger.addEventListener("pointerleave", scheduleClose);
+  trigger.addEventListener("focus", () => { if (!suppressed && state === "closed") open("preview"); });
+  trigger.addEventListener("blur", () => { suppressed = false; scheduleClose(); });
+  region.addEventListener("pointerenter", cancelClose);
+  region.addEventListener("pointerleave", scheduleClose);
+  region.addEventListener("focusin", cancelClose);
+  region.addEventListener("focusout", scheduleClose);
+  trigger.addEventListener("click", () => {
+    suppressed = false;
+    if (state === "pinned") close({ suppress: true });
+    else open("pinned");
+  });
+  closeButton.addEventListener("click", () => close({ restoreFocus: true, suppress: true }));
+  document.addEventListener("pointerdown", (event) => {
+    if (state !== "closed" && !trigger.contains(event.target) && !region.contains(event.target)) close();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (state === "closed") return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close({ restoreFocus: true, suppress: true });
+    } else if (event.key === "Tab") {
+      if (document.activeElement === trigger && !event.shiftKey) {
+        event.preventDefault(); closeButton.focus();
+      } else if (document.activeElement === closeButton && event.shiftKey) {
+        event.preventDefault(); trigger.focus();
+      } else if (region.contains(document.activeElement) && !event.shiftKey) {
+        const focusable = [...region.querySelectorAll("button, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])")]
+          .filter((element) => !element.disabled && element.getClientRects().length);
+        if (document.activeElement === focusable.at(-1)) {
+          const next = [...document.querySelectorAll(".view-toggle-controls button, .view-toggle-controls select, .view-toggle-controls input")]
+            .find((element) => !element.disabled && element.getClientRects().length);
+          if (next) { event.preventDefault(); next.focus(); }
+        }
+      }
+    }
+  });
+  window.addEventListener("resize", schedulePosition);
+  document.addEventListener("scroll", schedulePosition, true);
+  return {
+    close,
+    update(details) {
+      const scrollTop = region.scrollTop;
+      list.replaceChildren();
+      for (const { label, value } of details) {
+        const dt = document.createElement("dt");
+        const dd = document.createElement("dd");
+        dt.textContent = label;
+        dd.textContent = value;
+        list.append(dt, dd);
+      }
+      region.scrollTop = scrollTop;
+      position();
+    },
+  };
+}
+
+const statusDisclosure = createStatusDisclosure();
+let statusContext = null;
+let healthStatusTimer = null;
+
 configureViewStatusPresenter((status) => {
   const statusEl = document.getElementById("view-status-line-content");
+  const panel = document.getElementById("view-status-line-panel");
+  const enabled = ["table", "topology", "insights"].includes(currentView);
+  panel.hidden = !enabled;
+  document.getElementById("view-status-health-icon").toggleAttribute("hidden", currentView !== "insights");
+  if (!enabled) { statusDisclosure.close(); return; }
+  const context = [currentView, currentDataset,
+    currentView === "insights" ? healthInsightsState.assessmentRequestVersion : null,
+    currentView === "insights" ? healthInsightsState.assessment?.assessmentId : null];
+  if (!statusContext || context.some((value, index) => value !== statusContext[index])) statusDisclosure.close();
+  statusContext = context;
+  const base = status ?? { summary: currentDataset ? "Loading view" : "No dataset loaded", details: [], state: currentDataset ? "loading" : "empty" };
   const statusFiles = currentDataset
     ? [...new Set([
       ...(currentDataset.loadedFiles ?? currentDataset.entry.files ?? []),
       ...Object.keys(currentDataset.auxiliaryFiles ?? {}),
     ])]
     : [];
-  const statusParts = [currentDataset?.entry
-    ? `${status} | ${networkInstanceStatus(statusFiles, sourceCapabilities)}`
-    : status];
+  const statusParts = [base.summary];
+  const details = [...base.details];
+  let scopeWarning = "";
+  if (currentDataset && (currentView !== "insights" || currentDataset.entry?.healthEligible !== true)) {
+    details.unshift({ label: "Source / dataset", value: datasetIdentityLabel(currentDataset) });
+    const scope = resolveNetworkInstance(statusFiles, sourceCapabilities);
+    details.push({ label: "Network instance", value: networkInstanceStatus(statusFiles, sourceCapabilities) });
+    if (scope.status === "mixed") scopeWarning = "Mixed networks";
+    else if (scope.status === "unknown") scopeWarning = "Network unknown";
+  } else if (currentView === "insights" && healthInsightsState.assessment
+      && !healthInsightsState.assessment.networkId) scopeWarning = "Network unknown";
   if (currentDataset?.isPartial) {
-    statusParts.push(`Incomplete preview: ${datasetIdentityLabel(currentDataset)}`);
+    statusParts.push("Incomplete preview");
+    details.push({ label: "Preview", value: `Incomplete preview: ${datasetIdentityLabel(currentDataset)}` });
   }
-  if (fetchFailureState) statusParts.push(fetchFailureState);
+  if (fetchFailureState) {
+    if (currentDataset) statusParts.push("Sync failed; retained data");
+    else if (!base.summary.includes("Sync failed")) statusParts.push("Sync failed");
+    details.push({ label: "Sync failure", value: fetchFailureState });
+  }
+  if (scopeWarning) statusParts.push(scopeWarning);
   if (statusEl) statusEl.textContent = statusParts.filter(Boolean).join(" | ");
+  statusDisclosure.update(details);
 });
 
 // ── Build datasource <select> ────────────────────────────────────────
@@ -1208,7 +1350,11 @@ const lastRenderedDatasetByView = new Map();
 let healthTopologyViewModelCache = null;
 
 function renderCurrentView({ force = false } = {}) {
-  if (!currentDataset) return;
+  activateViewStatus(currentView, currentDataset);
+  if (!currentDataset) {
+    if (currentView === "insights") publishHealthInsightsStatus();
+    return;
+  }
   if (force) threadNetworkModelCache = null;
   updateHealthPresentationControls();
   renderNetworkInsights();
@@ -1218,7 +1364,6 @@ function renderCurrentView({ force = false } = {}) {
     if (view === "operations") renderOperationsSubview();
     return;
   }
-  activateViewStatus(view, currentDataset);
   const renderedState = lastRenderedDatasetByView.get(view);
   if (!force && renderedState?.dataset === currentDataset) {
     currentDataset.capabilities = renderedState.capabilities;
@@ -1327,14 +1472,6 @@ function getEffectivePhysicsProfileName(entry = getSelectedDatasetEntry()) {
   return PHYSICS_PROFILE_MESH_BASELINE;
 }
 
-function getPhysicsProfileStatusLabel(entry = getSelectedDatasetEntry()) {
-  const effective = getEffectivePhysicsProfileName(entry);
-  if (_physicsProfileName === PHYSICS_PROFILE_AUTO) {
-    return `Auto (${getPhysicsProfileLabel(effective)})`;
-  }
-  return getPhysicsProfileLabel(effective);
-}
-
 function setPhysicsProfile(profileName) {
   const key = typeof profileName === "string" ? profileName.toLowerCase() : "";
   _physicsProfileName = key === PHYSICS_PROFILE_AUTO || Object.prototype.hasOwnProperty.call(PHYSICS_PROFILES, key)
@@ -1350,10 +1487,6 @@ function setPhysicsProfile(profileName) {
     // Ignore localStorage failures (e.g., private mode policies)
   }
 
-  const statusEl = document.getElementById("view-status-line-content");
-  if (statusEl && !currentDataset) {
-    statusEl.textContent = `Showing: no dataset loaded. Select a dataset and click Sync. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
-  }
 }
 
 function initPhysicsProfileSelector() {
@@ -1507,6 +1640,9 @@ function switchView(newView) {
   const nextView = WORKSPACE_VIEWS.find(({ view }) => view === newView);
   if (!nextView) return;
   if (newView === currentView) return;
+  statusDisclosure.close();
+  clearInterval(healthStatusTimer);
+  healthStatusTimer = null;
   if (currentView === "operations") stopJobsPolling();
   if (currentView === "insights" && newView !== "insights") {
     healthInsightsViewState.detailsOpen = false;
@@ -1515,6 +1651,8 @@ function switchView(newView) {
     setContextDetailsMode("device");
   }
   currentView = newView;
+  activateViewStatus(newView, currentDataset);
+  if (newView === "insights") publishHealthInsightsStatus();
   updateHealthRefreshControls();
 
   WORKSPACE_VIEWS.forEach(({ view, buttonId, panelId }) => {
@@ -2586,7 +2724,33 @@ function renderNetworkInsightCondition(parent, condition, eligibleDeviceCount) {
   return itemEl;
 }
 
+function publishHealthInsightsStatus() {
+  const assessment = healthInsightsState.assessment;
+  const acceptedAssessment = assessment?.datasetId === currentDataset?.entry?.value
+    && (healthAssessmentHistoryState.mode !== "pinned"
+      || assessment?.assessmentId === healthAssessmentHistoryState.pinnedAssessmentId)
+    ? assessment : null;
+  if (currentView === "insights" && acceptedAssessment) {
+    if (healthStatusTimer === null) healthStatusTimer = setInterval(publishHealthInsightsStatus, 60_000);
+  } else if (healthStatusTimer !== null) {
+    clearInterval(healthStatusTimer);
+    healthStatusTimer = null;
+  }
+  const status = buildHealthInsightsStatus({
+    dataset: currentDataset,
+    assessment: acceptedAssessment,
+    loading: healthInsightsState.loading || Boolean(assessment && !acceptedAssessment),
+    error: healthInsightsState.error || healthAssessmentHistoryState.targetError,
+    mode: healthAssessmentHistoryState.mode,
+    pinnedAssessmentId: healthAssessmentHistoryState.pinnedAssessmentId,
+    refreshStatus: healthInsightsState.refreshStatus,
+    refreshDetail: healthInsightsState.refreshDetail,
+  });
+  publishViewStatus("insights", status, currentDataset);
+}
+
 function renderNetworkInsights() {
+  publishHealthInsightsStatus();
   const contentEl = document.getElementById("network-insights-content");
   const healthWorkspaceEl = document.getElementById("health-insights-workspace");
   const summaryEl = document.getElementById("health-insights-summary");
@@ -2594,9 +2758,8 @@ function renderNetworkInsights() {
   const tableWrapEl = document.getElementById("health-finding-table-wrap");
   if (!contentEl) return;
   const healthEligible = currentDataset?.entry?.healthEligible === true;
-  summaryEl?.toggleAttribute("hidden", !healthEligible || !healthInsightsState.assessment);
   navigationEl?.toggleAttribute("hidden", !healthEligible);
-  if (!healthEligible) summaryEl?.replaceChildren();
+  summaryEl?.replaceChildren();
   document.getElementById("health-insights-filters")?.toggleAttribute("hidden", !healthEligible);
   healthWorkspaceEl?.toggleAttribute("hidden", !healthEligible);
   contentEl.toggleAttribute("hidden", healthEligible);
@@ -2671,16 +2834,6 @@ function renderNetworkInsights() {
       restCoverageOpen: (open) => { healthInsightsViewState.restCoverageOpen = open; },
     });
     document.getElementById("health-findings-sort").value = healthInsightsViewState.sort.column;
-    const summary = summaryEl;
-    summary.replaceChildren();
-    if (assessment) {
-      appendNetworkInsightElement(summary, "strong",
-        `Selected assessment: ${assessment.status} · ${assessment.completeness} · ${assessment.confidence} confidence`);
-      const observedAt = appendNetworkInsightElement(summary, "span",
-        formatHealthAssessmentObservation(assessment.observedAt));
-      if (assessment.observedAt) observedAt.title = assessment.observedAt;
-      appendNetworkInsightElement(summary, "span", `${assessment.coverage?.deviceCount ?? "Unknown"} observed devices`);
-    }
     const findingCount = projectHealthSummaryRows(assessment?.findingGroups || [], healthInsightsViewState).length;
     document.getElementById("health-findings-count").textContent = String(findingCount);
     document.getElementById("health-tab-findings").setAttribute("aria-label",
@@ -5732,12 +5885,6 @@ document
       updateEstimatedFetchTime(null);
     }
 
-    if (_physicsProfileName === PHYSICS_PROFILE_AUTO && !currentDataset) {
-      const statusEl = document.getElementById("view-status-line-content");
-      if (statusEl) {
-        statusEl.textContent = `Showing: no dataset loaded. Select a dataset and click Sync. Physics profile: ${getPhysicsProfileStatusLabel(selectedDataset)}.`;
-      }
-    }
   });
 
 document.getElementById("node-filter").addEventListener("change", () => {
@@ -5882,8 +6029,7 @@ if (initialDatasetValue) {
 }
 
 // do not auto-load on startup; prompt the user instead.
-document.getElementById("view-status-line-content").textContent =
-  `Showing: no dataset loaded. Select a dataset and click Sync. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
+activateViewStatus(currentView, currentDataset);
 
 bindDeviceDetailsSectionFields();
 initDeviceSettings();
@@ -6049,6 +6195,7 @@ function handleDatasetFetchCancellation(selectedValue, fetchStartedAt) {
     } else {
       _setStatusSpans(_FETCH_STATUS_IDS, "—");
       _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+      activateViewStatus(currentView, currentDataset);
     }
   }
 }
@@ -6068,6 +6215,7 @@ function handleDatasetFetchError(err, selectedValue, selectedDataset, refreshInt
   fetchFailureState = currentDataset && sameDataset && refreshIntent
     ? `Refresh failed for ${datasetIdentityLabel(currentDataset)}; the prior snapshot remains displayed and freshness is unconfirmed.`
     : `Sync failed for ${attempted}. ${displayed}`;
+  fetchFailureState += ` ${err?.message || String(err)}`;
   if (currentDataset) {
     renderCurrentView();
     updateFetchStatusBar(fetchStartedAt);
@@ -6087,7 +6235,7 @@ function handleDatasetFetchError(err, selectedValue, selectedDataset, refreshInt
   const statusEl = document.getElementById("fetch-status-line-content");
   if (statusEl) statusEl.textContent = fetchFailureState;
   _pinFetchStatusLineMessage(fetchFailureState, Number.POSITIVE_INFINITY);
-  supersedeViewStatus(`Error loading "${selectedValue}": ${err?.message || String(err)}`);
+  if (!currentDataset) supersedeViewStatus({ summary: "Sync failed", details: [{ label: "Error", value: err?.message || String(err) }], state: "error" });
 }
 
 // Fetch dataset function
@@ -6109,7 +6257,7 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
   const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
   const attemptVersion = ++fetchAttemptVersion;
   const refreshIntent = forceFresh || document.getElementById("chk-force-fresh")?.checked === true;
-  supersedeViewStatus(`Loading ${selectedDataset?.label ?? selectedValue}…`);
+  statusDisclosure.close();
   recordWorkspaceActivity("dataset-sync", "Dataset sync started", {
     dataset: selectedValue,
     userInitiated,
@@ -6123,7 +6271,7 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     if (_incrementalRenderTimer !== null) clearTimeout(_incrementalRenderTimer);
     _incrementalRenderTimer = setTimeout(() => {
       _incrementalRenderTimer = null;
-      if (!currentDataset || currentDataset.entry?.value !== selectedValue) return;
+      if (attemptVersion !== fetchAttemptVersion || !currentDataset || currentDataset.entry?.value !== selectedValue) return;
       renderCurrentView();
       updateFetchStatusBar(_lastFetchStartedAt);
       if (currentDataset.isPartial) {
@@ -6148,6 +6296,7 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     if (["topology", "table"].includes(selectedDataset?.defaultView)) {
       switchView(selectedDataset.defaultView);
     }
+    supersedeViewStatus({ summary: `Loading ${selectedDataset?.label ?? selectedValue}…`, details: [], state: "loading" });
   }
 
   let loadedDataset = null;
@@ -6207,7 +6356,7 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     }
     if (fetchStatusEl) fetchStatusEl.textContent = fetchFailureState;
     _pinFetchStatusLineMessage(fetchFailureState, Number.POSITIVE_INFINITY);
-    supersedeViewStatus(currentDataset ? "Retained last complete dataset." : "No dataset loaded.");
+    if (!currentDataset) supersedeViewStatus({ summary: "Sync failed", details: [], state: "error" });
     recordWorkspaceActivity("dataset-sync", "Dataset sync produced no usable data", {
       dataset: selectedValue,
     });
@@ -6306,8 +6455,7 @@ document.getElementById("dataset-select").addEventListener("change", async () =>
 
 function applySearch() {
   if (!currentDataset) {
-    document.getElementById("view-status-line-content").textContent =
-      "No dataset loaded. Select a dataset and click Sync.";
+    activateViewStatus(currentView, currentDataset);
     return;
   }
 

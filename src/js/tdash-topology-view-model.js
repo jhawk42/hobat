@@ -554,21 +554,32 @@ export function buildTopologyDetails(viewModel, selectedId) {
 }
 
 export function buildTopologyStatus(viewModel, visibility, searchState, scale, options = {}) {
-  const neighborSuffix = isRouterNeighborDiagnosticMode(options.diagnosticMode)
-    ? ` Neighbor Match: targets ${visibility.matchedTargetNodeCount}, links ${visibility.forcedVisibleLinkCount}.`
-    : "";
-  const searchSuffix = searchState?.query
-    ? ` Search: "${searchState.query}" — ${searchState.matchingNodeIds.size} of ${viewModel.rawByIdForDetails.size} rows match.`
-    : "";
-  const stabilizationSuffix = Number.isFinite(options.stabilizationMs)
-    ? ` Stabilized: ${(options.stabilizationMs / 1000).toFixed(2)}s.`
-    : "";
+  const details = [
+    { label: "Visible nodes / links", value: `${visibility.visibleNodeCount} / ${visibility.visibleEdgeCount}` },
+    ...Object.entries(options.filterLabels ?? {}).map(([label, value]) => ({ label, value })),
+  ];
+  if (searchState?.query) details.push({
+    label: "Search",
+    value: `"${searchState.query}" — ${searchState.matchingNodeIds.size} of ${viewModel.rawByIdForDetails.size} rows match`,
+  });
+  if (isRouterNeighborDiagnosticMode(options.diagnosticMode)) details.push({
+    label: "Neighbor match",
+    value: `Targets ${visibility.matchedTargetNodeCount}, forced links ${visibility.forcedVisibleLinkCount}`,
+  });
+  if (options.resolvedLayout) details.push({ label: "Resolved layout", value: options.resolvedLayout });
+  if (Number.isFinite(options.stabilizationMs)) details.push({
+    label: "Stabilization", value: `${(options.stabilizationMs / 1000).toFixed(2)}s`,
+  });
   const scaleText = Number.isFinite(scale) ? `${scale.toFixed(2)}x` : "";
   return Object.freeze({
     visibleNodeCount: visibility.visibleNodeCount,
     visibleEdgeCount: visibility.visibleEdgeCount,
     scale: scaleText,
-    text: `Showing: ${visibility.visibleNodeCount} nodes, ${visibility.visibleEdgeCount} links. Physics profile: ${options.physicsProfileLabel || ""}.${stabilizationSuffix}${neighborSuffix}${searchSuffix}`,
+    presentation: {
+      summary: `${visibility.visibleNodeCount} nodes | ${visibility.visibleEdgeCount} links${options.filtered || searchState?.query ? " | Filtered" : ""}`,
+      details,
+      state: "ready",
+    },
   });
 }
 

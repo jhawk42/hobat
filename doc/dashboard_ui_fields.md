@@ -156,6 +156,29 @@ reapplies the current node, diagnostic, and search filters. Filter availability
 is restored from the destination view's capabilities; an unavailable selection
 returns to **All** rather than leaving stale results under the selected label.
 
+### View status
+
+The workspace toolbar summarizes the active view: Table shows displayed and
+loaded row counts and displayed columns; Topology shows visible nodes and links;
+Insights shows the selected health assessment's status, completeness, and
+observation age. `Filtered` indicates active restrictions or search. Incomplete
+previews, failed syncs, mixed networks, and unknown network scope remain visible.
+Settings and Operations do not show dataset status.
+In Insights, the pulse icon follows the status-details button; the redundant
+Insights heading is omitted while the navigation tab names the panel.
+The Details-panel toggle stays at the toolbar's right edge, beside the
+inspector when expanded. It remains right-aligned when narrow layouts wrap the
+other controls.
+
+Use **View status details** beside the summary for exact filters, search and
+sorting, available columns, network scope, and other view-specific context.
+Hover or focus previews the details; click or tap pins them, and Escape or the
+close button dismisses them. Tab enters the details without trapping focus.
+For Health, details describe the selected latest or pinned assessment, including
+its observation time, confidence, network ID, and observed population. The
+Comparison tab's two endpoints remain independent of that selection. Opening
+details does not fetch or process data.
+
 ### Thread Device Details
 
 The **Thread** section is immediately before **Matter**. It shows available

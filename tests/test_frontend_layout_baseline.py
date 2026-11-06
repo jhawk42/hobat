@@ -560,7 +560,7 @@ def test_health_insights_comparison_is_an_ordered_peer_tab() -> None:
     assert "ensureHealthComparisonLoaded();" in ui_text
 
 
-def test_health_insights_header_is_common_and_preserves_panel_ownership() -> None:
+def test_health_insights_toolbar_icon_preserves_panel_ownership() -> None:
     parser = _IdParentParser()
     html = _read_text(HTML)
     css = _read_text(CSS)
@@ -581,22 +581,23 @@ def test_health_insights_header_is_common_and_preserves_panel_ownership() -> Non
     assert "hidden" in parser.attributes_by_id["health-insights-workspace"]
     assert parser.attributes_by_id["health-findings-count"]["aria-hidden"] == "true"
     assert parser.attributes_by_id["health-roster-count"]["aria-hidden"] == "true"
-    assert re.search(
-        r'<div class="health-insights-heading-row">\s*'
-        r'<h2>Insights: Health\s*'
-        r'(<svg class="control-icon health-pulse-icon"[^>]*>\s*'
-        r'<path d="M2 13h4l3-8 5 14 3-8 2 2h3"/>\s*</svg>)\s*</h2>\s*'
-        r'<div id="health-insights-summary" hidden></div>\s*</div>',
-        html,
-    )
-    pulse = re.search(r'<svg class="control-icon health-pulse-icon"[^>]*>', html)
+    assert "health-insights-heading-row" not in html
+    assert "health-insights-heading-row" not in css
+    assert "<h2>Insights: Health" not in html
+    assert parser.parent_by_id["view-status-health-icon"] == "view-status-line-panel"
+    assert parser.attributes_by_id["view-insights"]["aria-labelledby"] == "btn-insights"
+    assert html.index('id="btn-view-status-details"') < html.index('id="view-status-health-icon"') < html.index('class="view-toggle-controls"')
+    pulse = re.search(r'<svg id="view-status-health-icon" class="control-icon health-pulse-icon"[^>]*>', html)
     assert pulse is not None
     for attribute in (
         'width="20" height="20"', 'stroke="currentColor" stroke-width="1.8"',
         'aria-hidden="true" focusable="false"',
+        'hidden',
     ):
         assert attribute in pulse[0]
     assert "#health-insights-summary[hidden] { display: none; }" in css
+    assert "#view-status-health-icon[hidden] { display: none; }" in css
+    assert 'toggleAttribute("hidden", currentView !== "insights")' in _read_text(UI_JS)
     assert "min-height: 44px;" in css[css.index("#health-insights-tabs button {"):]
 
 
@@ -679,10 +680,10 @@ def test_workspace_lifecycle_and_activity_contract() -> None:
 
     assert "const lastRenderedDatasetByView = new Map();" in ui_text
     assert "renderedState?.dataset === currentDataset" in ui_text
-    activation_index = ui_text.index("activateViewStatus(view, currentDataset);")
+    activation_index = ui_text.index("activateViewStatus(currentView, currentDataset);")
     cache_return_index = ui_text.index("renderedState?.dataset === currentDataset")
     assert activation_index < cache_return_index
-    assert "supersedeViewStatus(`Loading ${selectedDataset?.label ?? selectedValue}…`);" in ui_text
+    assert 'summary: `Loading ${selectedDataset?.label ?? selectedValue}…`' in ui_text
     assert "rendersDataset: true" in ui_text
     assert "onActivate: resizeAndFitTopology" in ui_text
     assert "network.setSize" in ui_text
@@ -704,6 +705,47 @@ def test_workspace_lifecycle_and_activity_contract() -> None:
     assert '"job-status"' in dataset_text
     assert "response.json()" in dataset_text
     assert "response.headers" not in ui_text[ui_text.index("function renderWorkspaceLogs"):ui_text.index("export function getSearchQuery")]
+
+
+def test_compact_view_status_dom_and_layout_contract() -> None:
+    html = _read_text(HTML)
+    css = _read_text(CSS)
+    ui = _read_text(UI_JS)
+    parser = _IdParentParser()
+    parser.feed(html)
+    assert parser.parent_by_id["view-status-line-content"] == "view-status-line-panel"
+    assert parser.parent_by_id["btn-view-status-details"] == "view-status-line-panel"
+    assert parser.attributes_by_id["view-status-line-content"]["aria-atomic"] == "true"
+    assert parser.attributes_by_id["btn-view-status-details"]["aria-controls"] == "view-status-details-popover"
+    assert parser.attributes_by_id["view-status-details-popover"]["role"] == "region"
+    assert parser.attributes_by_id["view-status-details-popover"]["tabindex"] == "-1"
+    assert parser.tag_by_id["topology-title"] == "h2"
+    assert "visually-hidden" in parser.attributes_by_id["topology-title"]["class"]
+    assert html.count('id="view-status-line-content"') == 1
+    assert html.index('id="btn-functions-panel-toggle"') < html.index('id="view-status-line-panel"') < html.index('id="table-column-category-label"')
+    assert 'class="view-toggle-controls"' in html
+    assert 'container: workspace / inline-size;' in css
+    assert '@container workspace (max-width: 680px)' in css
+    toolbar = re.search(r"\.view-toggle-bar\s*\{([^}]+)\}", css)
+    assert toolbar is not None
+    assert 'grid-template-columns: auto minmax(8rem, 1fr) minmax(0, max-content);' in toolbar[1]
+    controls = re.search(r"\.view-toggle-controls\s*\{([^}]+)\}", css)
+    assert controls is not None
+    assert 'grid-column: 3;' in controls[1]
+    assert 'min-width: 0;' in controls[1]
+    assert 'flex-wrap: wrap;' in controls[1]
+    assert '.view-toggle-controls #btn-details-panel-toggle { margin-left: auto; }' in css
+    control_markup = re.search(r'<div class="view-toggle-controls">(.*?)</div>', html, re.S)
+    assert control_markup is not None
+    control_buttons = re.findall(r'<button id="([^"]+)"', control_markup[1])
+    assert control_buttons[-1] == "btn-details-panel-toggle"
+    assert '.view-toggle-controls { grid-column: 1 / -1; }' in css
+    assert '.view-toggle-bar { grid-template-columns: auto minmax(0, 1fr); }' in css
+    assert 'grid-template-rows: auto minmax(0, 1fr);' in css
+    assert 'grid-row: 3;' not in css[css.index('#view-topology,\n#view-table'):css.index('.topology-canvas-wrap {')]
+    assert 'region.addEventListener("focusin", cancelClose)' in ui
+    assert 'event.key === "Escape"' in ui
+    assert 'setInterval(publishHealthInsightsStatus, 60_000)' in ui
 
 
 def test_workspace_cached_views_reapply_current_filters() -> None:

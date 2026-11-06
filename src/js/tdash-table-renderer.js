@@ -812,14 +812,25 @@ function updateTableStatus(visibleRowCount, columnCount, totalFilteredCount, sea
     fetchStatusEl.textContent = `Loaded: ${_tableDatasetLabel}`;
   }
   const totalColumnCount = Math.max(_tableColumns.length, columnCount);
-  let statusText =
-    `Total: ${_tableRows.length} rows, ${totalColumnCount} columns. ` +
-    `Showing: ${visibleRowCount} rows, ${columnCount} columns. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}.`;
-  if (searchQuery) {
-    statusText += ` Search: "${searchQuery}" — ${visibleRowCount} of ${totalFilteredCount} rows match.`;
-  }
-  statusText += " Activate a column header button to sort; empty values sort last and health status follows severity order.";
-  publishViewStatus("table", statusText, _tableDatasetToken);
+  const details = [
+    { label: "Rows shown / dataset total", value: `${visibleRowCount} / ${_tableRows.length}` },
+    { label: "Columns shown / available", value: `${columnCount} / ${totalColumnCount}` },
+    { label: "Category", value: getTableFilterLabel(document.getElementById("table-column-category"), _tableColumnCategory) },
+    { label: "More Info", value: _moreInfoEnabled ? "On" : "Off" },
+    { label: "Health columns", value: _tableHealthColumnsEnabled ? "On" : "Off" },
+    { label: "Node filter", value: nodeLabel },
+    { label: "Diagnostic filter", value: diagLabel },
+  ];
+  if (searchQuery) details.push({ label: "Search", value: `"${searchQuery}" — ${visibleRowCount} of ${totalFilteredCount} rows match` });
+  details.push({ label: "Sort", value: _tableSort
+    ? `${_tableSort.column}, ${_tableSort.direction}; empty values last, health status by severity`
+    : "Original order; activate a column header to sort" });
+  const filtered = (nodeFilterEl && nodeFilterEl.value !== "all") || (diagFilterEl && diagFilterEl.value !== "all") || searchQuery;
+  publishViewStatus("table", {
+    summary: `${visibleRowCount}/${_tableRows.length} rows | ${columnCount} columns${filtered ? " | Filtered" : ""}`,
+    details,
+    state: visibleRowCount ? "ready" : "empty",
+  }, _tableDatasetToken);
 }
 
 export function applyTableFilters({ preserveSelection = false } = {}) {

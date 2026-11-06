@@ -322,12 +322,19 @@ renderTableForDataset(matterDataset);
 setTableColumnCategory("matter-list");
 applyTableFilters();
 const matterTableStatus = publishedTableStatuses.at(-1);
-const matterTableStatusMatch = matterTableStatus?.match(
-  /Total: \d+ rows, (\d+) columns\. Showing: \d+ rows, (\d+) columns/,
-);
-assert.ok(matterTableStatusMatch);
-const matterTableStatusColumns = matterTableStatusMatch.slice(1).map(Number);
-assert.ok(matterTableStatusColumns[0] >= matterTableStatusColumns[1]);
+const matterTableStatusColumns = matterTableStatus.details
+  .find((item) => item.label === "Columns shown / available").value.split(" / ").map(Number);
+assert.ok(matterTableStatusColumns[1] >= matterTableStatusColumns[0]);
+assert.match(matterTableStatus.summary, /^1\/1 rows \| \d+ columns$/);
+assert.equal(matterTableStatus.details.find((item) => item.label === "More Info").value, "Off");
+selects["search-input"].value = "not-in-the-dataset";
+applyTableFilters();
+assert.match(publishedTableStatuses.at(-1).summary, /^0\/1 rows \| \d+ columns \| Filtered$/);
+assert.equal(publishedTableStatuses.at(-1).state, "empty");
+assert.match(publishedTableStatuses.at(-1).details.find((item) => item.label === "Search").value,
+  /0 of 1 rows match/);
+selects["search-input"].value = "";
+applyTableFilters();
 const matterColumnNames = thead.querySelectorAll("button.table-sort-button")
   .map((button) => button.dataset.sortColumn);
 const matterCellText = (column) => {

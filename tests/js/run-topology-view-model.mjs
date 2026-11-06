@@ -337,8 +337,16 @@ const status = buildTopologyStatus(viewModel, visibility, searchState, 1.234, {
   stabilizationMs: 1250,
 });
 assert.equal(status.scale, "1.23x");
-assert.match(status.text, /Showing: 2 nodes, 1 links/);
-assert.match(status.text, /Search: "desk" — 1 of 2 rows match/);
+assert.equal(status.visibleNodeCount, 2);
+assert.equal(status.visibleEdgeCount, 1);
+assert.equal(status.presentation.summary, "2 nodes | 1 links | Filtered");
+assert.equal(status.presentation.details.find((item) => item.label === "Search").value,
+  '"desk" — 1 of 2 rows match');
+assert.doesNotMatch(JSON.stringify(status.presentation), /Physics profile/);
+const noLinks = buildTopologyStatus(viewModel, {...visibility, visibleEdgeCount: 0},
+  null, 1, {diagnosticMode: "router-neighbor-err-rate-frame-low", filtered: true});
+assert.equal(noLinks.presentation.summary, "2 nodes | 0 links | Filtered");
+assert.ok(noLinks.presentation.details.some((item) => item.label === "Neighbor match"));
 
 const haNode = {
   id: "ha-reed",

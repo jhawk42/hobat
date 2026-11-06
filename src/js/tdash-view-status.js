@@ -1,3 +1,8 @@
+/**
+ * @typedef {{summary: string, details: Array<{label: string, value: string}>,
+ * state: "ready"|"loading"|"empty"|"error"}} ViewStatusPresentation
+ */
+
 export function resolveNetworkInstance(filenames, capabilities) {
   const instances = filenames
     .map((filename) => ({
@@ -60,7 +65,7 @@ export function createViewStatusOwner(presentStatus = () => {}) {
       setDataset(nextDatasetToken);
       activeView = view;
       const status = statusByView.get(view);
-      if (status !== undefined) presentStatus(status);
+      presentStatus(status);
       return status;
     },
     publish(view, status, sourceDatasetToken) {

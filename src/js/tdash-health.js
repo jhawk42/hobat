@@ -1004,6 +1004,52 @@ export function formatHealthAssessmentObservation(timestamp, now = Date.now()) {
   return `Observed ${formattedTimestamp} UTC · Age: ${formatElapsedInterval(elapsedSeconds)}`;
 }
 
+export function buildHealthInsightsStatus({ dataset = null, assessment = null, loading = false,
+  error = "", mode = "latest", pinnedAssessmentId = null, refreshStatus = "", refreshDetail = "",
+  now = Date.now() } = {}) {
+  const processing = refreshStatus === "error" ? "Health refresh failed"
+    : refreshStatus === "cancelled" ? "Health processing cancelled"
+      : refreshStatus === "completed" ? "Health processing completed"
+        : refreshStatus ? `Health processing: ${refreshStatus}` : "";
+  const details = [
+    { label: "Scope", value: "Selected health assessment; Comparison endpoints are independent" },
+    { label: "History", value: mode === "pinned" ? `Pinned: ${pinnedAssessmentId ?? "Unknown"}` : "Following latest" },
+    { label: "Dataset ID", value: dataset?.entry?.value ?? "Unknown" },
+  ];
+  if (!dataset) return { summary: "No dataset loaded", details, state: "empty" };
+  if (dataset.entry?.healthEligible !== true) return { summary: "Network insights", details, state: "ready" };
+  if (!assessment) {
+    let summary = loading ? "Loading health assessment"
+      : error ? `Health assessment failed: ${error}` : "Health assessment unavailable";
+    if (error) details.push({ label: "Assessment error", value: String(error) });
+    if (refreshStatus || refreshDetail) {
+      details.push({ label: "Health processing", value: [refreshStatus, refreshDetail].filter(Boolean).join(" — ") });
+      if (processing) summary += ` | ${processing}`;
+    }
+    return { summary, details, state: loading ? "loading" : error ? "error" : "empty" };
+  }
+  const age = formatComparisonTime(assessment.observedAt, now);
+  details.push(
+    { label: "Assessment ID", value: assessment.assessmentId ?? "Unknown" },
+    { label: "Network ID", value: assessment.networkId ?? "Unknown" },
+    { label: "Status", value: String(assessment.status ?? "Unknown") },
+    { label: "Completeness", value: String(assessment.completeness ?? "Unknown") },
+    { label: "Confidence", value: String(assessment.confidence ?? "Unknown") },
+    { label: "Observation", value: formatHealthAssessmentObservation(assessment.observedAt, now) },
+    { label: "Assessed", value: formatHealthHistoryTimestamp(assessment.assessedAt) },
+    { label: "Observed devices", value: String(assessment.coverage?.deviceCount ?? "Unknown") },
+  );
+  if (error) details.push({ label: "Assessment error", value: String(error) });
+  if (refreshStatus || refreshDetail) details.push({ label: "Health processing", value: [refreshStatus, refreshDetail].filter(Boolean).join(" — ") });
+  const summary = [
+    assessment.status ?? "Unknown", assessment.completeness ?? "Unknown",
+    age === "unknown" ? "Observed unknown" : `Observed ${age} ago`,
+    error && "Health refresh failed",
+    processing && !(error && processing === "Health refresh failed") && processing,
+  ].filter(Boolean).join(" | ");
+  return { summary, details, state: error ? "error" : "ready" };
+}
+
 export function formatHealthInsightsTabAccessibleName(label, count, unit) {
   if (count === null) return label;
   return `${label}, ${count} matching ${unit}${count === 1 ? "" : "s"}`;
@@ -2509,9 +2555,6 @@ function renderHealthAssessmentSummary(container, model, viewState, actions) {
   const allFindings = visibleGroups.flatMap((group) => group.findings || []);
   const header = document.createElement("div");
   header.className = "health-assessment-header";
-  appendText(header, "strong", assessment.status,
-    `health-status-state state-${assessment.status.toLowerCase()}`);
-  appendText(header, "span", `${assessment.completeness} · ${assessment.confidence} confidence`);
   appendText(header, "span",
     `${visibleGroups.length} finding groups · ${allFindings.length} attributed findings`);
   container.appendChild(header);
@@ -2523,9 +2566,6 @@ function renderHealthAssessmentSummary(container, model, viewState, actions) {
   const populations = document.createElement("p");
   populations.className = "health-population-summary";
   const populationParts = [];
-  if (Number.isInteger(assessment.coverage?.deviceCount)) {
-    populationParts.push(`${assessment.coverage.deviceCount} observed devices`);
-  }
   populationParts.push(`${affectedDevices} affected identities`);
   populationParts.push(`${affectedRelationships} affected relationships`);
   populations.textContent = populationParts.join(" · ");
