@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import re
@@ -31,6 +32,23 @@ def _parse(argv: list[str]):
 def _parse_known(argv: list[str]):
     """Lenient parse for command forwarding tests."""
     return td_cli.build_parser().parse_known_args(argv)
+
+
+def _structured_events(messages: list[str], event_name: str | None = None):
+    events = []
+    for message in messages:
+        fields = {}
+        for key, value in re.findall(
+            r'([A-Za-z0-9_]+)=("(?:\\.|[^"\\])*"|\S+)',
+            message,
+        ):
+            try:
+                fields[key] = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+        if "event" in fields and (event_name is None or fields["event"] == event_name):
+            events.append(fields)
+    return events
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +600,229 @@ class TestDispatchOtbrCli(unittest.TestCase):
                 [call([])],
             ],
         )
+
+    def test_topology_events_identify_all_seven_actual_steps(self):
+        order: list[str] = []
+        clock = iter(value for index in range(7) for value in (float(index), index + 0.01))
+
+        def _mark(name: str):
+            def _inner(argv):
+                order.append(name)
+                return 0
+            return _inner
+
+        with patch.object(td_cli.time, "monotonic", side_effect=lambda: next(clock)), \
+             patch.object(
+                 td_cli.otbr_cli_thread_network_info, "main",
+                 side_effect=_mark("thread-network-info"),
+             ), patch.object(
+                 td_cli.otbr_cli_router_table, "main", side_effect=_mark("router-table")
+             ), patch.object(
+                 td_cli.otbr_cli_meshdiag_topology, "main",
+                 side_effect=_mark("meshdiag topology"),
+             ), patch.object(
+                 td_cli.otbr_cli_networkdiag_topology, "main",
+                 side_effect=lambda argv: _mark(f"networkdiag {argv[0]}")(argv),
+             ), patch.object(
+                 td_cli.otbr_cli_meshdiag_routerneighbortable, "main",
+                 side_effect=_mark("meshdiag routerneighbortable"),
+             ), patch.object(
+                 td_cli.otbr_cli_meshdiag_childtable, "main",
+                 side_effect=_mark("meshdiag childtable"),
+             ), self.assertLogs(level="INFO") as captured:
+            rc = self._dispatch(["otbr-cli", "topology"])
+
+        self.assertEqual(rc, 0)
+        expected = [
+            "thread-network-info",
+            "router-table",
+            "meshdiag topology",
+            "networkdiag multicast-network",
+            "networkdiag fetch-all",
+            "meshdiag routerneighbortable",
+            "meshdiag childtable",
+        ]
+        self.assertEqual(order, expected)
+        starts = _structured_events(captured.output, "step_start")
+        ends = _structured_events(captured.output, "step_end")
+        self.assertEqual([event["step"] for event in starts], expected)
+        self.assertEqual([event["step"] for event in ends], expected)
+        self.assertEqual([event["index"] for event in starts], list(range(1, 8)))
+        self.assertEqual([event["index"] for event in ends], list(range(1, 8)))
+        self.assertTrue(all(event["total"] == 7 for event in starts + ends))
+        self.assertTrue(all(event["elapsed_ms"] == 10 for event in ends))
+        summary, = _structured_events(captured.output, "workflow_summary")
+        self.assertEqual(summary["steps_total"], 7)
+        self.assertEqual(summary["steps_executed"], 7)
+        self.assertEqual(summary["steps_not_run"], 0)
+        self.assertEqual(summary["steps_nonzero"], 0)
+        self.assertEqual(summary["exit_code"], 0)
+
+    def test_topology_success_inside_caller_exception_is_logged_as_returned(self):
+        with patch.object(
+            td_cli.otbr_cli_thread_network_info, "main", return_value=0
+        ), patch.object(
+            td_cli.otbr_cli_router_table, "main", return_value=0
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_topology, "main", return_value=0
+        ), patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0
+        ), self.assertLogs(level="INFO") as captured:
+            try:
+                raise ValueError("caller context")
+            except ValueError:
+                rc = self._dispatch(["otbr-cli", "topology"])
+
+        self.assertEqual(rc, 0)
+        starts = _structured_events(captured.output, "step_start")
+        ends = _structured_events(captured.output, "step_end")
+        self.assertEqual(len(starts), 7)
+        self.assertEqual(len(ends), 7)
+        self.assertTrue(all(event["state"] == "returned" for event in ends))
+        self.assertTrue(all("error_type" not in event for event in ends))
+        summary, = _structured_events(captured.output, "workflow_summary")
+        self.assertEqual(summary["state"], "returned")
+        self.assertEqual(summary["exit_code"], 0)
+        self.assertEqual(summary["steps_executed"], 7)
+        self.assertEqual(summary["steps_not_run"], 0)
+        self.assertNotIn("error_type", summary)
+
+    def test_topology_logs_every_nonzero_and_continues_after_step_exception(self):
+        order: list[str] = []
+
+        def run(name: str, result: int = 0):
+            def _inner(_argv):
+                order.append(name)
+                return result
+            return _inner
+
+        def raise_at_meshdiag(_argv):
+            order.append("meshdiag topology")
+            raise RuntimeError("step failed")
+
+        with patch.object(
+            td_cli.otbr_cli_thread_network_info, "main", side_effect=run("thread-network-info", 4)
+        ), patch.object(
+            td_cli.otbr_cli_router_table, "main", side_effect=run("router-table", 7)
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_topology, "main", side_effect=raise_at_meshdiag
+        ), patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main",
+            side_effect=lambda argv: run(f"networkdiag {argv[0]}")(argv),
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_routerneighbortable, "main",
+            side_effect=run("meshdiag routerneighbortable"),
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_childtable, "main",
+            side_effect=run("meshdiag childtable"),
+        ), self.assertLogs(level="INFO") as captured:
+            rc = self._dispatch(["otbr-cli", "topology"])
+
+        self.assertEqual(rc, 4)
+        self.assertEqual(len(order), 7)
+        self.assertEqual(order[-4:], [
+            "networkdiag multicast-network",
+            "networkdiag fetch-all",
+            "meshdiag routerneighbortable",
+            "meshdiag childtable",
+        ])
+        ends = _structured_events(captured.output, "step_end")
+        self.assertEqual(len(ends), 7)
+        self.assertEqual([event["rc"] for event in ends], [4, 7, 1, 0, 0, 0, 0])
+        self.assertEqual(ends[2]["state"], "raised")
+        failures = [
+            line for line in captured.output
+            if "topology step failed:" in line
+        ]
+        self.assertEqual(len(failures), 3)
+        summary, = _structured_events(captured.output, "workflow_summary")
+        self.assertEqual(summary["steps_total"], 7)
+        self.assertEqual(summary["steps_executed"], 7)
+        self.assertEqual(summary["steps_not_run"], 0)
+        self.assertEqual(summary["steps_nonzero"], 3)
+        self.assertEqual(summary["exit_code"], 4)
+
+    def test_topology_first_step_system_exit_ends_step_and_reports_unrun_steps(self):
+        with patch.object(
+            td_cli.otbr_cli_thread_network_info,
+            "main",
+            wraps=td_cli.otbr_cli_thread_network_info.main,
+        ) as first_step, patch.object(
+            td_cli.otbr_cli_router_table, "main"
+        ) as router_table, patch.object(
+            td_cli.otbr_cli_meshdiag_topology, "main"
+        ) as meshdiag, patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main"
+        ) as networkdiag, patch.object(
+            td_cli.otbr_cli_meshdiag_routerneighbortable, "main"
+        ) as neighbors, patch.object(
+            td_cli.otbr_cli_meshdiag_childtable, "main"
+        ) as childtable, self.assertLogs(level="INFO") as captured:
+            with self.assertRaises(SystemExit) as raised:
+                self._dispatch(["otbr-cli", "topology", "--unexpected-option"])
+
+        self.assertEqual(raised.exception.code, 2)
+        first_step.assert_called_once_with(["--unexpected-option"])
+        for step in (router_table, meshdiag, networkdiag, neighbors, childtable):
+            step.assert_not_called()
+        starts = _structured_events(captured.output, "step_start")
+        ends = _structured_events(captured.output, "step_end")
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(len(ends), 1)
+        self.assertEqual(ends[0]["state"], "raised")
+        self.assertEqual(ends[0]["error_type"], "SystemExit")
+        self.assertEqual(ends[0]["system_exit_code"], 2)
+        self.assertNotIn("rc", ends[0])
+        summary, = _structured_events(captured.output, "workflow_summary")
+        self.assertEqual(summary["steps_total"], 7)
+        self.assertEqual(summary["steps_executed"], 1)
+        self.assertEqual(summary["steps_not_run"], 6)
+        self.assertEqual(summary["steps_nonzero"], 1)
+        self.assertEqual(summary["exit_code"], 2)
+        self.assertEqual(summary["state"], "raised")
+
+    def test_topology_later_step_system_exit_reports_prior_and_unrun_steps(self):
+        exit_error = SystemExit(6)
+        with patch.object(
+            td_cli.otbr_cli_thread_network_info, "main", return_value=0
+        ) as first_step, patch.object(
+            td_cli.otbr_cli_router_table, "main", return_value=0
+        ) as second_step, patch.object(
+            td_cli.otbr_cli_meshdiag_topology, "main", side_effect=exit_error
+        ) as exiting_step, patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main"
+        ) as networkdiag, patch.object(
+            td_cli.otbr_cli_meshdiag_routerneighbortable, "main"
+        ) as neighbors, patch.object(
+            td_cli.otbr_cli_meshdiag_childtable, "main"
+        ) as childtable, self.assertLogs(level="INFO") as captured:
+            with self.assertRaises(SystemExit) as raised:
+                self._dispatch(["otbr-cli", "topology"])
+
+        self.assertIs(raised.exception, exit_error)
+        first_step.assert_called_once_with([])
+        second_step.assert_called_once_with([])
+        exiting_step.assert_called_once_with([])
+        for step in (networkdiag, neighbors, childtable):
+            step.assert_not_called()
+        starts = _structured_events(captured.output, "step_start")
+        ends = _structured_events(captured.output, "step_end")
+        self.assertEqual([event["index"] for event in starts], [1, 2, 3])
+        self.assertEqual([event["index"] for event in ends], [1, 2, 3])
+        self.assertEqual(ends[2]["state"], "raised")
+        self.assertEqual(ends[2]["system_exit_code"], 6)
+        self.assertNotIn("rc", ends[2])
+        summary, = _structured_events(captured.output, "workflow_summary")
+        self.assertEqual(summary["steps_total"], 7)
+        self.assertEqual(summary["steps_executed"], 3)
+        self.assertEqual(summary["steps_not_run"], 4)
+        self.assertEqual(summary["steps_nonzero"], 1)
+        self.assertEqual(summary["exit_code"], 6)
+        self.assertEqual(summary["state"], "raised")
 
     def test_topology_waits_for_each_step_to_persist_before_starting_next(self):
         events: list[str] = []

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -365,6 +365,7 @@ class OTBRIndeterminateEnqueueError(OTBRClientError):
 
 def _normalize_batch_devices(
     device_ids: Sequence[str | Mapping[str, Any]],
+    on_rejected: Callable[[object, float, str], None] | None = None,
 ) -> tuple[
     list[tuple[str, str | None, object | None, object | None]],
     list[dict[str, Any]],
@@ -374,6 +375,7 @@ def _normalize_batch_devices(
     seen_ids: set[str] = set()
 
     for device in device_ids:
+        started = time.monotonic() if on_rejected is not None else 0.0
         if isinstance(device, Mapping):
             device_id = device.get("id") or device.get("extAddress")
             role = device.get("role")
@@ -395,6 +397,8 @@ def _normalize_batch_devices(
                     "error": "device ID must be a 16-character hexadecimal extAddress",
                 }
             )
+            if on_rejected is not None:
+                on_rejected(device_id, time.monotonic() - started, "malformed")
             continue
         normalized_id = device_id.lower()
         if normalized_id in seen_ids:
@@ -406,6 +410,8 @@ def _normalize_batch_devices(
                     "error": "duplicate device ID",
                 }
             )
+            if on_rejected is not None:
+                on_rejected(device_id, time.monotonic() - started, "skipped")
             continue
         seen_ids.add(normalized_id)
         normalized_devices.append(
@@ -1761,6 +1767,7 @@ class OTBRRestApiClient:
         child_retry_enabled: bool = True,
         children_expand_by_rloc: bool = False,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
+        on_rejected_progress: Callable[[object, float, str], None] | None = None,
         on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
         on_pass_checkpoint: (
             Callable[[list[Any], int, int, str, str], None] | None
@@ -1813,7 +1820,9 @@ class OTBRRestApiClient:
         )
         started_at = datetime.now(timezone.utc).isoformat()
         results: list[Any] = []
-        normalized_devices, device_results = _normalize_batch_devices(device_ids)
+        normalized_devices, device_results = _normalize_batch_devices(
+            device_ids, on_rejected=on_rejected_progress
+        )
         all_targets_guarded = bool(normalized_devices) and all(
             _has_unresolved_extended_iid(ml_eid_iid, destination_type)
             for _device_id, _role, _mode, ml_eid_iid in normalized_devices
@@ -3094,6 +3103,7 @@ class OTBRRestApiClient:
         items_only: bool = False,
         progressive_fallback: bool = False,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
+        on_rejected_progress: Callable[[object, float, str], None] | None = None,
         on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
         raw: object = _RAW_UNSET,
     ) -> Any:
@@ -3114,7 +3124,9 @@ class OTBRRestApiClient:
         if not self._resolve_raw(raw):
             started_at = datetime.now(timezone.utc).isoformat()
             results: list[Any] = []
-            normalized_devices, device_results = _normalize_batch_devices(device_ids)
+            normalized_devices, device_results = _normalize_batch_devices(
+                device_ids, on_rejected=on_rejected_progress
+            )
 
             if clear_diagnostics:
                 self.delete_all_diagnostics()
@@ -3195,6 +3207,7 @@ class OTBRRestApiClient:
             clear_diagnostics=clear_diagnostics,
             items_only=items_only,
             on_progress=on_progress,
+            on_rejected_progress=on_rejected_progress,
             on_checkpoint=on_checkpoint,
             raw=raw,
         )
@@ -3991,6 +4004,7 @@ def emit_rest_payload_output(
     logger = None,
     *,
     raw: bool = False,
+    on_write: Callable[[bool], None] | None = None,
 ) -> None:
     """Save REST API payload to JSON file and log the operation.
     
@@ -4048,7 +4062,10 @@ def emit_rest_payload_output(
         else CollectionWriteOutcome.complete()
     )
     try:
-        if not save_final_json(payload_to_save, output_file, outcome):
+        written = save_final_json(payload_to_save, output_file, outcome)
+        if on_write is not None:
+            on_write(written)
+        if not written:
             return
         logger.info("Saved: %s", output_file)
         logger.debug(
@@ -4104,16 +4121,22 @@ def emit_rest_command_output(
     plain_text: bool = False,
     logger=None,
     raw: bool = False,
+    on_write: Callable[[bool], None] | None = None,
 ) -> Any:
     """Persist a command result when an output path is resolved, then return it."""
     if output_path is None:
         return payload
 
     if not plain_text:
-        if raw:
+        if raw and on_write is None:
             emit_rest_payload_output(payload, output_path, logger, raw=True)
+        elif raw:
+            emit_rest_payload_output(payload, output_path, logger, raw=True, on_write=on_write)
         else:
-            emit_rest_payload_output(payload, output_path, logger)
+            if on_write is None:
+                emit_rest_payload_output(payload, output_path, logger)
+            else:
+                emit_rest_payload_output(payload, output_path, logger, on_write=on_write)
         return payload
 
     from util_data import save_text_atomic
@@ -4129,11 +4152,77 @@ def emit_rest_command_output(
 
     output_file = Path(output_path)
     save_text_atomic(rendered, output_file)
+    if on_write is not None:
+        on_write(True)
     if logger is None:
         import logging
         logger = logging.getLogger(__name__)
     logger.info("Saved: %s", output_file)
     return payload
+
+
+def rest_payload_record_count(
+    payload: Any, *, single: bool = False
+) -> int | Literal["unavailable"]:
+    """Count only populations established by the payload or command schema."""
+    if isinstance(payload, list):
+        return len(payload)
+    if isinstance(payload, dict):
+        for key in ("items", "data"):
+            if isinstance(payload.get(key), list):
+                return len(payload[key])
+        if (single and isinstance(payload.get("data"), dict)
+                and any(key in payload["data"] for key in ("id", "type", "attributes"))):
+            return 1
+        if single and payload and not any(
+            key in payload for key in ("items", "data", "meta", "metadata", "links", "error", "errors")
+        ):
+            return 1
+    return "unavailable"
+
+
+def emit_rest_observed_output(
+    payload: Any,
+    output_path: str | Path | None,
+    *,
+    command: str,
+    stage: str,
+    raw: bool = False,
+    plain_text: bool = False,
+    single: bool = False,
+    logger=None,
+    emitter: Callable[..., Any] | None = None,
+) -> Any:
+    """Emit the existing output and report its final publication disposition."""
+    from td_logging import log_event
+
+    written: bool | None = None
+    returned = False
+
+    def on_write(value: bool) -> None:
+        nonlocal written
+        written = value
+
+    try:
+        result = (emitter or emit_rest_command_output)(
+            payload, output_path, plain_text=plain_text, logger=logger,
+            raw=raw, on_write=on_write,
+        )
+        returned = True
+        return result
+    finally:
+        disposition = (
+            "failed" if not returned else
+            "not_requested" if output_path is None else
+            "saved" if written is True else
+            "retained_previous" if written is False else "unavailable"
+        )
+        log_event(
+            "write", source="otbr-restapi", command=command, stage=stage,
+            output=str(output_path) if output_path is not None else "unavailable",
+            records=rest_payload_record_count(payload, single=single),
+            disposition=disposition,
+        )
 
 
 def exit_code_for_rest_exception(exc: Exception) -> int:

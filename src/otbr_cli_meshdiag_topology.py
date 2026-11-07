@@ -3,9 +3,12 @@ import subprocess
 import re
 import json
 import logging
+import sys
+import time
 from pathlib import Path
 from typing import Sequence
 
+from td_logging import log_event
 from td_const import (
     EXTADDR_DEVICE_LABEL_MAP_FILENAME,
     OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
@@ -369,65 +372,112 @@ def get_meshdiag_topology(
         Enriched topology data with decoded link IDs and additional fields
     """
 
-    topology_data_enhanced = []
+    started_at = time.monotonic()
+    normal_return = False
+    collection_elapsed_ms = None
+    router_records = None
+    child_entries = None
+    final = "not_requested" if output_path is None else "not_attempted"
+    try:
+        topology_data_enhanced = []
 
-    output = fetch_meshdiag_topology()
-    if output:
-        topology_data_enhanced = (
-            parse_meshdiag_topology_output(
-                output, extaddr_map
+        output = fetch_meshdiag_topology()
+        if output:
+            topology_data_enhanced = (
+                parse_meshdiag_topology_output(
+                    output, extaddr_map
+                )
+            )
+
+        # enhance links by decoding link IDs to objects with id and device_label
+        enhanced_links = (
+            enrich_topology_routers(
+                topology_data_enhanced, thread_network_info
             )
         )
+        collection_elapsed_ms = max(0, round((time.monotonic() - started_at) * 1000))
 
-    # enhance links by decoding link IDs to objects with id and device_label
-    enhanced_links = (
-        enrich_topology_routers(
-            topology_data_enhanced, thread_network_info
-        )
-    )
+        # routers counted by unique rloc16 values in the final enhanced topology data with links
+        routers_count = len(enhanced_links)
+        children_count = sum(router.get("total_children", 0)
+                             for router in enhanced_links)
+        router_records = routers_count
+        child_entries = children_count
+        total_devices_count = len(enhanced_links) + children_count
 
-    # routers counted by unique rloc16 values in the final enhanced topology data with links
-    routers_count = len(enhanced_links)
-    children_count = sum(router.get("total_children", 0)
-                         for router in enhanced_links)
-    total_devices_count = len(enhanced_links) + children_count
-
-    logging.info(
-        f"Meshdiag consolidation complete: {routers_count} unique routers, {children_count} unique children, and {total_devices_count} total devices found in topology map."
-    )
-
-    if output_path is not None:
         logging.info(
-            "Saving %d entries of meshdiag topology data into %s as JSON...",
-            len(enhanced_links),
-            output_path,
-        )
-        converted = [
-            convert_keys_to_camel_case(normalize_input_record(record, source="cli"))
-            for record in enhanced_links
-        ]
-        logging.info(
-            "Saved %d entries after converting keys to camel case for meshdiag topology data.",
-            len(converted),
-        )
-        save_final_json(
-            converted,
-            output_path,
-            CollectionWriteOutcome.complete(),
-            writer=save_json_atomic,
-        )
-        logging.debug(
-            "Saved meshdiag topology data into %s as JSON:\n%s",
-            output_path,
-            json.dumps(converted, indent=4),
-        )
-        logging.info(
-            "Saved meshdiag topology with %d entries into %s.",
-            len(converted),
-            output_path,
+            f"Meshdiag consolidation complete: {routers_count} unique routers, {children_count} unique children, and {total_devices_count} total devices found in topology map."
         )
 
-    return enhanced_links
+        if output_path is not None:
+            logging.info(
+                "Saving %d entries of meshdiag topology data into %s as JSON...",
+                len(enhanced_links),
+                output_path,
+            )
+            converted = [
+                convert_keys_to_camel_case(normalize_input_record(record, source="cli"))
+                for record in enhanced_links
+            ]
+            logging.info(
+                "Converted %d entries after converting keys to camel case for meshdiag topology data.",
+                len(converted),
+            )
+            write_returned = False
+            try:
+                written = save_final_json(
+                    converted,
+                    output_path,
+                    CollectionWriteOutcome.complete(),
+                    writer=save_json_atomic,
+                )
+                write_returned = True
+            finally:
+                if write_returned:
+                    final = "saved" if written else "retained_previous"
+                    log_event(
+                        "write", source="otbr-cli", command="meshdiag topology",
+                        stage="final", output=str(output_path),
+                        router_records=router_records, child_entries=child_entries,
+                        disposition=final,
+                    )
+                else:
+                    error = sys.exc_info()[1]
+                    final = "failed"
+                    log_event(
+                        "write", source="otbr-cli", command="meshdiag topology",
+                        stage="final", output=str(output_path),
+                        router_records=router_records, child_entries=child_entries,
+                        disposition="failed",
+                        error_type=type(error).__name__ if error is not None else None,
+                    )
+            if written:
+                logging.debug(
+                    "Saved meshdiag topology data into %s as JSON:\n%s",
+                    output_path,
+                    json.dumps(converted, indent=4),
+                )
+                logging.info(
+                    "Saved meshdiag topology with %d entries into %s.",
+                    len(converted),
+                    output_path,
+                )
+            else:
+                final = "retained_previous"
+
+        normal_return = True
+        return enhanced_links
+    finally:
+        log_event(
+            "collector_summary", source="otbr-cli", command="meshdiag topology",
+            stage="bulk", router_records=router_records, child_entries=child_entries,
+            collection_elapsed_ms=(
+                collection_elapsed_ms
+                if collection_elapsed_ms is not None
+                else max(0, round((time.monotonic() - started_at) * 1000))
+            ),
+            final=final, state="returned" if normal_return else "failed",
+        )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

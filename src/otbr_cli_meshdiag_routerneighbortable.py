@@ -9,6 +9,7 @@ from typing import Sequence
 from extaddr_device_label_map import load_extaddr_device_label_map
 from td_const import OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME
 from td_json_key_normalizer import convert_keys_to_camel_case
+from td_logging import log_event, redact_sensitive_text
 from otbr_cli_router_table import fetch_and_parse_router_table
 from otbr_cli_util import (
     add_meshdiag_table_evidence,
@@ -18,6 +19,7 @@ from otbr_cli_util import (
     collect_per_router,
     is_response_timeout_error,
     load_extaddr_map_or_empty,
+    log_meshdiag_summary,
     meshdiag_collection_outcome,
     parse_conn_time,
     parse_err_rate_metrics,
@@ -38,7 +40,7 @@ from util_data import (
 
 def _write_checkpoint_best_effort(payload, checkpoint_path: Path) -> None:
     try:
-        save_checkpoint_json(
+        written = save_checkpoint_json(
             convert_keys_to_camel_case(payload),
             checkpoint_path,
             CollectionWriteOutcome.partial(
@@ -49,17 +51,28 @@ def _write_checkpoint_best_effort(payload, checkpoint_path: Path) -> None:
             ),
             writer=save_json_atomic,
         )
-        logging.info(
-            "event=checkpoint_write command=otbr-cli meshdiag routerneighbortable checkpoint_file=%s records=%d stage=router",
-            checkpoint_path,
-            len(payload) if isinstance(payload, list) else 0,
+        if written:
+            logging.info(
+                "event=checkpoint_write command=otbr-cli meshdiag routerneighbortable checkpoint_file=%s records=%d stage=router",
+                json.dumps(redact_sensitive_text(str(checkpoint_path))),
+                len(payload) if isinstance(payload, list) else 0,
+            )
+        log_event(
+            "checkpoint", source="otbr-cli", command="meshdiag routerneighbortable",
+            stage="router", output=str(checkpoint_path), records=len(payload),
+            disposition="written" if written else "skipped_unusable",
         )
     except (OSError, ValueError, TypeError) as exc:
         logging.warning(
             "event=checkpoint_write_failed command=otbr-cli meshdiag routerneighbortable checkpoint_file=%s error_type=%s error=%s action=continue_best_effort",
-            checkpoint_path,
+            json.dumps(redact_sensitive_text(str(checkpoint_path))),
             type(exc).__name__,
-            exc,
+            json.dumps(redact_sensitive_text(str(exc))),
+        )
+        log_event(
+            "checkpoint", source="otbr-cli", command="meshdiag routerneighbortable",
+            stage="router", output=str(checkpoint_path), records=len(payload),
+            disposition="failed", error_type=type(exc).__name__,
         )
 
 
@@ -223,24 +236,38 @@ def fetch_all_meshdiag_router_neighbor_tables(
             command="meshdiag routerneighbortable",
         ),
     )
+    final = "not_requested"
     if output_path is not None:
         outcome = meshdiag_collection_outcome(results)
-        save_final_json(
-            convert_keys_to_camel_case(results),
-            output_path,
-            outcome,
-            writer=save_json_atomic,
+        try:
+            written = save_final_json(
+                convert_keys_to_camel_case(results), output_path, outcome,
+                writer=save_json_atomic,
+            )
+        except Exception as exc:
+            log_event(
+                "write", source="otbr-cli", command="meshdiag routerneighbortable",
+                stage="final", output=str(output_path), records=len(results),
+                disposition="failed", error_type=type(exc).__name__,
+            )
+            log_meshdiag_summary(results, "meshdiag routerneighbortable", "failed")
+            raise
+        final = "saved" if written else "retained_previous"
+        log_event(
+            "write", source="otbr-cli", command="meshdiag routerneighbortable",
+            stage="final", output=str(output_path), records=len(results),
+            disposition=final,
         )
-        logging.debug(
-            "Saved meshdiag routerneighbortables data into %s as JSON:\n%s",
-            output_path,
-            json.dumps(results, indent=4),
-        )
-        logging.info(
-            "Saved meshdiag routerneighbortables with %d entries into %s.",
-            len(results),
-            output_path,
-        )
+        if written:
+            logging.debug(
+                "Saved meshdiag routerneighbortables data into %s as JSON:\n%s",
+                output_path, json.dumps(results, indent=4),
+            )
+            logging.info(
+                "Saved meshdiag routerneighbortables with %d entries into %s.",
+                len(results), output_path,
+            )
+    log_meshdiag_summary(results, "meshdiag routerneighbortable", final)
     return results
 
 

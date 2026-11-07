@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import logging
 from unittest.mock import Mock
 
 import pytest
@@ -87,6 +88,77 @@ def test_network_prefix_fetchers_reject_invalid_ot_ctl_output(monkeypatch, fetch
         fetcher()
 
 
+@pytest.mark.parametrize(
+    ("output", "output_state"),
+    [
+        ("Done\n", "completion_only"),
+        ("", "empty"),
+        ("Error: command timed out after 30s", "invalid_prefix"),
+        ("network_key=not-for-events", "invalid_prefix"),
+    ],
+)
+def test_prefix_failure_events_explain_output_without_exposing_it(
+    monkeypatch, caplog, output, output_state
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        util_network.util_ot_ctl, "exec_ot_ctl",
+        lambda command: calls.append(command) or output,
+    )
+    caplog.set_level("INFO")
+
+    with pytest.raises(util_network.PrefixFetchError):
+        util_network.fetch_meshlocal_prefix()
+
+    assert calls == ["prefix meshlocal"]
+    assert 'event="operation_end"' in caplog.text
+    assert 'command="prefix meshlocal"' in caplog.text
+    assert 'state="raised"' in caplog.text
+    assert f'output_state="{output_state}"' in caplog.text
+    assert 'error_type="PrefixFetchError"' in caplog.text
+    assert "not-for-events" not in caplog.text
+
+
+def test_prefix_success_inside_handled_exception_reports_returned(monkeypatch, caplog):
+    monkeypatch.setattr(
+        util_network.util_ot_ctl, "exec_ot_ctl",
+        lambda _command: "fd00::/64\nDone",
+    )
+    caplog.set_level("INFO")
+    try:
+        raise RuntimeError("caller failure")
+    except RuntimeError:
+        assert util_network.fetch_meshlocal_prefix() == "fd00::/64"
+
+    assert 'state="returned"' in caplog.text
+    assert 'output_state="valid_prefix"' in caplog.text
+    assert 'error_type="RuntimeError"' not in caplog.text
+
+
+def test_prefix_transport_failure_propagates_with_correlated_event(monkeypatch, caplog):
+    failure = OSError("private transport detail")
+    calls = []
+
+    def execute(command):
+        calls.append(command)
+        raise failure
+
+    monkeypatch.setattr(util_network.util_ot_ctl, "exec_ot_ctl", execute)
+    monkeypatch.setenv("TD_RUN_CMD", "prefix-check")
+    caplog.set_level("INFO")
+
+    with pytest.raises(OSError) as caught:
+        util_network.fetch_meshlocal_prefix()
+
+    assert caught.value is failure
+    assert calls == ["prefix meshlocal"]
+    assert 'run_cmd="prefix-check"' in caplog.text
+    assert 'output_state="unavailable"' in caplog.text
+    assert 'state="raised"' in caplog.text
+    assert 'error_type="OSError"' in caplog.text
+    assert "private transport detail" not in caplog.text
+
+
 def test_network_helpers_extract_rloc16_from_thread_ipv6_addresses() -> None:
     assert util_network.extract_rloc16_from_ipv6_address(
         "fd3b:a255:4aa6:5483:0:ff:fe00:1c05"
@@ -144,7 +216,7 @@ def test_network_helpers_reject_invalid_or_ambiguous_child_rloc_derivation() -> 
 
 
 def test_ot_ctl_dispatch_selects_container_command_and_timeout(monkeypatch) -> None:
-    completed = Mock(stdout=" response\n")
+    completed = subprocess.CompletedProcess([], 0, stdout=" response\n", stderr="")
     run = Mock(return_value=completed)
     monkeypatch.setattr(util_ot_ctl.subprocess, "run", run)
     monkeypatch.setenv(util_ot_ctl.TD_OT_CTL_TIMEOUT_ENV, "9")
@@ -174,3 +246,111 @@ def test_ot_ctl_dispatch_reports_timeout_and_command_failure(monkeypatch) -> Non
         Mock(side_effect=subprocess.CalledProcessError(7, ["ot-ctl"], stderr="denied")),
     )
     assert util_ot_ctl.exec_ot_ctl_dispatch("state", None) == "Error: denied"
+
+
+@pytest.mark.parametrize("stdout", ["", " \n", "\u00e9\n", "PRIVATE_STDOUT\n"])
+def test_ot_ctl_dispatch_reports_zero_exit_stderr_without_changing_stdout(
+    monkeypatch, caplog, capsys, stdout
+):
+    stderr = 'warning: network_key=PRIVATE_KEY\nPSKc: PRIVATE_PSKC\n'
+    completed = subprocess.CompletedProcess([], 0, stdout=stdout, stderr=stderr)
+    run = Mock(return_value=completed)
+    monkeypatch.setattr(util_ot_ctl.subprocess, "run", run)
+    monkeypatch.setenv("TD_RUN_CMD", "transport-check")
+    monkeypatch.setenv("TD_LOG_THREAD_SECRETS", "1")
+    caplog.set_level(logging.INFO)
+
+    assert util_ot_ctl.exec_ot_ctl_dispatch("state", None) == stdout.strip()
+
+    record, = [
+        record for record in caplog.records
+        if 'event="transport_end"' in record.getMessage()
+    ]
+    message = record.getMessage()
+    assert record.levelno == logging.WARNING
+    assert 'run_cmd="transport-check"' in message
+    assert 'mode="local"' in message
+    assert 'state="returned"' in message
+    assert 'exit=0' in message
+    assert f"stdout_bytes={len(stdout.encode('utf-8'))}" in message
+    assert f"stderr_bytes={len(stderr.encode('utf-8'))}" in message
+    assert f'stdout_empty={str(not stdout.strip()).lower()}' in message
+    assert 'stderr_present=true' in message
+    assert "warning:" in message
+    assert "\n" not in message
+    assert "PRIVATE_KEY" not in caplog.text
+    assert "PRIVATE_PSKC" not in caplog.text
+    assert "PRIVATE_STDOUT" not in caplog.text
+    assert capsys.readouterr().out == ""
+    run.assert_called_once()
+
+
+@pytest.mark.parametrize("stdout", ["router\nDone\n", ""])
+def test_ot_ctl_dispatch_reports_empty_stdout_and_elapsed_without_stderr(
+    monkeypatch, caplog, stdout
+):
+    monkeypatch.setattr(
+        util_ot_ctl.subprocess, "run",
+        Mock(return_value=subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")),
+    )
+    ticks = iter([10.0, 10.25])
+    monkeypatch.setattr(util_ot_ctl.time, "monotonic", lambda: next(ticks))
+    caplog.set_level(logging.INFO)
+
+    assert util_ot_ctl.exec_ot_ctl_dispatch("state", "otbr-test") == stdout.strip()
+
+    record, = [r for r in caplog.records if 'event="transport_end"' in r.getMessage()]
+    assert record.levelno == (logging.INFO if stdout else logging.WARNING)
+    assert 'mode="docker"' in record.getMessage()
+    assert 'elapsed_s=0.25' in record.getMessage()
+    assert 'stderr_bytes=0' in record.getMessage()
+    assert 'stderr_present=false' in record.getMessage()
+
+
+@pytest.mark.parametrize(
+    ("failure", "state", "exit_code", "expected"),
+    [
+        (subprocess.CalledProcessError(
+            7, ["ot-ctl"], output="partial", stderr="token=PRIVATE_TOKEN"
+        ), "failed", "7", "Error: token=[Redacted]"),
+        (subprocess.TimeoutExpired(
+            ["ot-ctl"], 3, output=b"partial", stderr=b"token=PRIVATE_TOKEN"
+        ), "timeout", "null", "Error: command timed out after 3s"),
+    ],
+)
+def test_ot_ctl_dispatch_failure_metadata_preserves_existing_returns(
+    monkeypatch, caplog, failure, state, exit_code, expected
+):
+    monkeypatch.setenv(util_ot_ctl.TD_OT_CTL_TIMEOUT_ENV, "3")
+    monkeypatch.setattr(util_ot_ctl.subprocess, "run", Mock(side_effect=failure))
+    caplog.set_level(logging.INFO)
+
+    assert util_ot_ctl.exec_ot_ctl_dispatch("state", None) == expected
+
+    record, = [r for r in caplog.records if 'event="transport_end"' in r.getMessage()]
+    assert record.levelno == logging.ERROR
+    assert f'state="{state}"' in record.getMessage()
+    assert f'exit={exit_code}' in record.getMessage()
+    assert 'stdout_bytes=7' in record.getMessage()
+    assert 'stderr_present=true' in record.getMessage()
+    assert "PRIVATE_TOKEN" not in caplog.text
+
+
+def test_ot_ctl_dispatch_unavailable_capture_is_not_reported_as_empty(
+    monkeypatch, caplog
+):
+    failure = OSError("transport unavailable")
+    monkeypatch.setattr(util_ot_ctl.subprocess, "run", Mock(side_effect=failure))
+    caplog.set_level(logging.INFO)
+
+    with pytest.raises(OSError) as caught:
+        util_ot_ctl.exec_ot_ctl_dispatch("state")
+
+    assert caught.value is failure
+    record, = [r for r in caplog.records if 'event="transport_end"' in r.getMessage()]
+    assert 'state="raised"' in record.getMessage()
+    assert 'exit=null' in record.getMessage()
+    assert 'stdout_bytes=null' in record.getMessage()
+    assert 'stderr_bytes=null' in record.getMessage()
+    assert 'stdout_empty=null' in record.getMessage()
+    assert 'stderr_present=null' in record.getMessage()

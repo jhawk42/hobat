@@ -50,6 +50,7 @@ from ha_matter_ws_thread import (
     validate_border_router_entries,
     validate_thread_diagnostics_batches,
 )
+from td_logging import format_event, log_event
 from td_const import (
     HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
     HA_MATTER_WS_DASHBOARD_FILENAME,
@@ -368,7 +369,7 @@ def build_dashboard_snapshot(collection: MatterCollection) -> dict[str, Any]:
 
 
 def make_checkpoint_callback(
-    output_paths: Mapping[str, Path], *, show_progress: bool
+    output_paths: Mapping[str, Path], *, show_progress: bool, command: str = "collection"
 ) -> Callable[[int, int, MatterCollection], None]:
     """Return a best-effort callback for incomplete per-node normalization."""
 
@@ -404,17 +405,172 @@ def make_checkpoint_callback(
                         }
                     )
             try:
-                save_checkpoint_json(
+                written = save_checkpoint_json(
                     payload,
                     partial_path,
                     CollectionWriteOutcome.partial(has_usable_data=completed > 0),
                     add_trailing_newline=True,
                     writer=save_json_atomic,
                 )
-            except (OSError, TypeError, ValueError):
-                logging.warning("Unable to write Matter checkpoint %s", partial_path)
+                log_event(
+                    "checkpoint",
+                    source="ha-matter-ws",
+                    command=command,
+                    stage="checkpoint",
+                    dataset=name,
+                    output=partial_path.name,
+                    records=(
+                        len(payload.get("records", []))
+                        if isinstance(payload.get("records"), list)
+                        else len(payload.get("devices", []))
+                        if isinstance(payload.get("devices"), list)
+                        else 1
+                    ),
+                    disposition="written" if written else "skipped_unusable",
+                )
+            except Exception as exc:
+                log_event(
+                    "checkpoint",
+                    source="ha-matter-ws",
+                    command=command,
+                    stage="checkpoint",
+                    dataset=name,
+                    output=partial_path.name,
+                    records=completed,
+                    disposition="failed",
+                )
+                if isinstance(exc, (OSError, TypeError, ValueError)):
+                    logging.warning(
+                        "Unable to write Matter checkpoint %s", partial_path
+                    )
+                else:
+                    raise
 
     return checkpoint
+
+
+def _save_final_artifact(
+    payload: Any,
+    output_path: Path,
+    *,
+    dataset: str,
+    records: int,
+    command: str,
+    valid_empty_reason: str | None = None,
+) -> bool:
+    try:
+        written = save_final_json(
+            payload,
+            output_path,
+            CollectionWriteOutcome.complete(
+                valid_empty_reason=valid_empty_reason
+            ),
+            add_trailing_newline=True,
+            writer=save_json_atomic,
+        )
+    except Exception:
+        log_event(
+            "write",
+            source="ha-matter-ws",
+            command=command,
+            stage="final",
+            dataset=dataset,
+            output=output_path.name,
+            records=records,
+            disposition="failed",
+        )
+        raise
+    log_event(
+        "write",
+        source="ha-matter-ws",
+        command=command,
+        stage="final",
+        dataset=dataset,
+        output=output_path.name,
+        records=records,
+        disposition="saved" if written else "retained_previous",
+    )
+    return written
+
+
+def _save_checkpoint_artifact(
+    payload: Any,
+    output_path: Path,
+    *,
+    dataset: str,
+    records: int,
+    command: str,
+    has_usable_data: bool | None = None,
+) -> bool:
+    try:
+        written = save_checkpoint_json(
+            payload,
+            output_path,
+            CollectionWriteOutcome.partial(
+                has_usable_data=(
+                    records > 0 if has_usable_data is None else has_usable_data
+                )
+            ),
+            add_trailing_newline=True,
+            writer=save_json_atomic,
+        )
+    except Exception:
+        log_event(
+            "checkpoint",
+            source="ha-matter-ws",
+            command=command,
+            stage="checkpoint",
+            dataset=dataset,
+            output=output_path.name,
+            records=records,
+            disposition="failed",
+        )
+        raise
+    log_event(
+        "checkpoint",
+        source="ha-matter-ws",
+        command=command,
+        stage="checkpoint",
+        dataset=dataset,
+        output=output_path.name,
+        records=records,
+        disposition="written" if written else "skipped_unusable",
+    )
+    return written
+
+
+def _save_atomic_artifact(
+    payload: Any,
+    output_path: Path,
+    *,
+    dataset: str,
+    records: int,
+    command: str,
+) -> None:
+    try:
+        save_json_atomic(payload, output_path, add_trailing_newline=True)
+    except Exception:
+        log_event(
+            "write",
+            source="ha-matter-ws",
+            command=command,
+            stage="final",
+            dataset=dataset,
+            output=output_path.name,
+            records=records,
+            disposition="failed",
+        )
+        raise
+    log_event(
+        "write",
+        source="ha-matter-ws",
+        command=command,
+        stage="final",
+        dataset=dataset,
+        output=output_path.name,
+        records=records,
+        disposition="saved",
+    )
 
 
 def _coverage_summary(diagnostics: Sequence[dict[str, Any]]) -> dict[str, Any]:
@@ -706,21 +862,20 @@ def _run_native_thread_command(
             payload=records,
             observed_at=observed_at,
         )
-        save_final_json(
+        _save_final_artifact(
             wrapper,
             final_path,
-            CollectionWriteOutcome.complete(
-                valid_empty_reason=(
-                    "completed-passive-discovery"
-                    if path == ("thread", "border-routers")
-                    else "completed-cache-list"
-                )
+            dataset=payload_name,
+            records=len(records),
+            command=" ".join(path),
+            valid_empty_reason=(
+                "completed-passive-discovery"
+                if path == ("thread", "border-routers")
+                else "completed-cache-list"
             ),
-            add_trailing_newline=True,
-            writer=save_json_atomic,
         )
         node_count = sum(len(batch["nodes"]) for batch in records) if payload_name == "batches" else 0
-        save_json_atomic(
+        _save_atomic_artifact(
             _native_thread_outcome(
                 path=path,
                 uri=resolved_uri,
@@ -733,11 +888,13 @@ def _run_native_thread_command(
                 metadata=metadata,
             ),
             outcome_path,
-            add_trailing_newline=True,
+            dataset="outcome",
+            records=1,
+            command=" ".join(path),
         )
         return EXIT_OK
     except (MatterWsTransportError, MatterWsContractError) as exc:
-        save_json_atomic(
+        _save_atomic_artifact(
             _native_thread_outcome(
                 path=path,
                 uri=uri,
@@ -747,7 +904,9 @@ def _run_native_thread_command(
                 error=_native_error_classification(exc),
             ),
             outcome_path,
-            add_trailing_newline=True,
+            dataset="outcome",
+            records=1,
+            command=" ".join(path),
         )
         raise
 
@@ -845,14 +1004,14 @@ def _run_native_topology(
             payload=topology,
             observed_at=datetime.now(timezone.utc).isoformat(),
         )
-        save_final_json(
+        _save_final_artifact(
             wrapper,
             final_path,
-            CollectionWriteOutcome.complete(),
-            add_trailing_newline=True,
-            writer=save_json_atomic,
+            dataset="topology",
+            records=len(topology.get("nodes", [])),
+            command="network-topology",
         )
-        save_json_atomic(
+        _save_atomic_artifact(
             _native_topology_outcome(
                 uri=resolved_uri,
                 started_at=started_at,
@@ -863,11 +1022,13 @@ def _run_native_topology(
                 server_info=server_info,
             ),
             outcome_path,
-            add_trailing_newline=True,
+            dataset="outcome",
+            records=1,
+            command="network-topology",
         )
         return EXIT_OK
     except asyncio.CancelledError:
-        save_json_atomic(
+        _save_atomic_artifact(
             _native_topology_outcome(
                 uri=uri,
                 started_at=started_at,
@@ -877,11 +1038,13 @@ def _run_native_topology(
                 error="cancelled",
             ),
             outcome_path,
-            add_trailing_newline=True,
+            dataset="outcome",
+            records=1,
+            command="network-topology",
         )
         raise
     except (MatterWsTransportError, MatterWsContractError) as exc:
-        save_json_atomic(
+        _save_atomic_artifact(
             _native_topology_outcome(
                 uri=uri,
                 started_at=started_at,
@@ -891,7 +1054,9 @@ def _run_native_topology(
                 error=_native_error_classification(exc),
             ),
             outcome_path,
-            add_trailing_newline=True,
+            dataset="outcome",
+            records=1,
+            command="network-topology",
         )
         raise
 
@@ -978,12 +1143,13 @@ def _run_selected_thread_diagnostics(
         )
         wrapper["partial"] = True
         assert_snapshot_safe(wrapper)
-        save_checkpoint_json(
+        _save_checkpoint_artifact(
             wrapper,
             partial_path,
-            CollectionWriteOutcome.partial(has_usable_data=True),
-            add_trailing_newline=True,
-            writer=save_json_atomic,
+            dataset="thread_diagnostics",
+            records=len(batch.get("nodes", [])),
+            command="thread diagnostics get",
+            has_usable_data=True,
         )
 
     try:
@@ -1031,18 +1197,18 @@ def _run_selected_thread_diagnostics(
                 payload=[result.batch],
                 observed_at=datetime.now(timezone.utc).isoformat(),
             )
-            save_final_json(
+            _save_final_artifact(
                 wrapper,
                 final_path,
-                CollectionWriteOutcome.complete(),
-                add_trailing_newline=True,
-                writer=save_json_atomic,
+                dataset="thread_diagnostics",
+                records=len(result.batch.get("nodes", [])),
+                command="thread diagnostics get",
             )
             partial_path.unlink(missing_ok=True)
             exit_code = EXIT_OK
         else:
             exit_code = EXIT_CONNECTION if result.status == "timeout" else EXIT_PARTIAL
-        save_json_atomic(
+        _save_atomic_artifact(
             _selected_diagnostics_outcome(
                 uri=resolved_uri,
                 started_at=started_at,
@@ -1055,11 +1221,13 @@ def _run_selected_thread_diagnostics(
                 server_info=server_info,
             ),
             outcome_path,
-            add_trailing_newline=True,
+            dataset="outcome",
+            records=1,
+            command="thread diagnostics get",
         )
         return exit_code
     except asyncio.CancelledError:
-        save_json_atomic(
+        _save_atomic_artifact(
             _selected_diagnostics_outcome(
                 uri=uri,
                 started_at=started_at,
@@ -1072,7 +1240,9 @@ def _run_selected_thread_diagnostics(
                 error="cancelled",
             ),
             outcome_path,
-            add_trailing_newline=True,
+            dataset="outcome",
+            records=1,
+            command="thread diagnostics get",
         )
         raise
     except (asyncio.TimeoutError, MatterWsTransportError, MatterWsContractError) as exc:
@@ -1081,7 +1251,7 @@ def _run_selected_thread_diagnostics(
             if isinstance(exc, (asyncio.TimeoutError, MatterWsRequestTimeoutError))
             else "failed"
         )
-        save_json_atomic(
+        _save_atomic_artifact(
             _selected_diagnostics_outcome(
                 uri=uri,
                 started_at=started_at,
@@ -1094,7 +1264,9 @@ def _run_selected_thread_diagnostics(
                 error=_native_error_classification(exc),
             ),
             outcome_path,
-            add_trailing_newline=True,
+            dataset="outcome",
+            records=1,
+            command="thread diagnostics get",
         )
         if isinstance(exc, asyncio.TimeoutError):
             raise MatterWsRequestTimeoutError("selected diagnostics deadline expired") from exc
@@ -1346,15 +1518,52 @@ def _run(args: argparse.Namespace) -> int:
         }
     progress_callback = (
         make_checkpoint_callback(
-            checkpoint_outputs, show_progress=not args.no_progress
+            checkpoint_outputs,
+            show_progress=not args.no_progress,
+            command=" ".join(path),
         )
         if checkpoint_outputs
         else None
     )
+    command_name = " ".join(path)
+
+    def report_node_progress(
+        completed: int, total: int, node_id: int, elapsed: float
+    ) -> None:
+        print(
+            format_event(
+                "target_progress",
+                source="ha-matter-ws",
+                command=command_name,
+                stage="normalize",
+                progress=f"[{completed}/{total}]",
+                current=completed,
+                completed=completed,
+                total=total,
+                target=node_id,
+                status="completed",
+                elapsed_s=round(elapsed, 6),
+            ),
+            file=sys.stderr,
+        )
+
     collection = asyncio.run(
         collect_devices(
-            **_collection_kwargs(args), progress_callback=progress_callback
+            **_collection_kwargs(args),
+            progress_callback=progress_callback,
+            target_progress_callback=(
+                None if args.no_progress else report_node_progress
+            ),
         )
+    )
+    log_event(
+        "collector_summary",
+        source="ha-matter-ws",
+        command=command_name,
+        stage="normalize",
+        nodes=collection.node_count,
+        completed=len(collection.devices),
+        records=len(collection.devices),
     )
     if len(collection.devices) != collection.node_count:
         raise MatterPartialCollectionError(
@@ -1364,28 +1573,49 @@ def _run(args: argparse.Namespace) -> int:
     if path == ("all",):
         outputs = [
             (
+                "server_info",
                 collection.server_info,
                 resolve_data_file_path(HA_MATTER_WS_SERVER_INFO_FILENAME, data_dir),
+                1,
             ),
-            (list(collection.devices), checkpoint_outputs["devices"]),
-            (list(collection.diagnostics), checkpoint_outputs["diagnostics"]),
             (
+                "devices",
+                list(collection.devices),
+                checkpoint_outputs["devices"],
+                len(collection.devices),
+            ),
+            (
+                "diagnostics",
+                list(collection.diagnostics),
+                checkpoint_outputs["diagnostics"],
+                len(collection.diagnostics),
+            ),
+            (
+                "mesh_diagnostics",
                 list(collection.mesh_diagnostics),
                 checkpoint_outputs["mesh_diagnostics"],
+                len(collection.mesh_diagnostics),
             ),
-            (list(collection.topology), checkpoint_outputs["topology"]),
             (
+                "topology",
+                list(collection.topology),
+                checkpoint_outputs["topology"],
+                len(collection.topology),
+            ),
+            (
+                "dashboard",
                 build_dashboard_snapshot(collection),
                 checkpoint_outputs["dashboard"],
+                len(collection.devices),
             ),
         ]
-        for payload, output_path in outputs:
-            save_final_json(
+        for dataset, payload, output_path, record_count in outputs:
+            _save_final_artifact(
                 payload,
                 output_path,
-                CollectionWriteOutcome.complete(),
-                add_trailing_newline=True,
-                writer=save_json_atomic,
+                dataset=dataset,
+                records=record_count,
+                command=command_name,
             )
         artifact_observations = None
         if collection.source_observed_at is not None:
@@ -1395,20 +1625,22 @@ def _run(args: argparse.Namespace) -> int:
                     output_path,
                     source_observed_at=collection.source_observed_at,
                 )
-                for payload, output_path in outputs[1:]
+                for _, payload, output_path, _ in outputs[1:]
             }
         outcome_path = resolve_data_file_path(
             HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME, data_dir
         )
-        save_json_atomic(
+        _save_atomic_artifact(
             _outcome(
                 collection,
                 started_at=started_at,
-                final_paths=[output_path for _, output_path in outputs],
+                final_paths=[output_path for _, _, output_path, _ in outputs],
                 artifact_observations=artifact_observations,
             ),
             outcome_path,
-            add_trailing_newline=True,
+            dataset="collection_outcome",
+            records=1,
+            command=command_name,
         )
         return EXIT_OK
 
@@ -1419,14 +1651,25 @@ def _run(args: argparse.Namespace) -> int:
     elif fixed_filename:
         output_path = resolve_data_file_path(fixed_filename, data_dir)
     else:
+        log_event(
+            "write",
+            source="ha-matter-ws",
+            command=command_name,
+            stage="final",
+            dataset=path[-1],
+            output="stdout",
+            records=len(payload) if isinstance(payload, list) else 1,
+            disposition="not_requested",
+        )
         print(json.dumps(payload, indent=2))
         return EXIT_OK
-    save_final_json(
+    dataset_name = path[-2] if path[-1] == "fetch-all" else path[-1]
+    _save_final_artifact(
         payload,
         output_path,
-        CollectionWriteOutcome.complete(),
-        add_trailing_newline=True,
-        writer=save_json_atomic,
+        dataset=dataset_name,
+        records=len(payload) if isinstance(payload, list) else 1,
+        command=command_name,
     )
     return EXIT_OK
 

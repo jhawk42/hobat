@@ -8,7 +8,7 @@ import time
 import logging
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Literal, Sequence
 
@@ -37,6 +37,10 @@ from util_data import (
     save_json_atomic,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
+from td_logging import log_event
+from td_collection_outcomes import (
+    CollectionAttempt, CollectionOutcome, Status, log_outcome_summary, summarize_outcomes,
+)
 from td_device_fields import (
     get_canonical_ext_address,
     get_canonical_rloc16,
@@ -646,6 +650,13 @@ def fetch_network_diag_multicast(
             f"Multicast attempt {attempt_idx + 1}: {len(parsed)} responses, "
             f"{len(consolidated)} unique devices so far"
         )
+        log_event(
+            "multicast_attempt", source="otbr-cli",
+            command=f"networkdiag {capture_stage}", stage="multicast",
+            attempt=attempt_idx + 1, attempts=attempts_max,
+            tlv_level=tlv_detail_level, tlvs=tlv_values,
+            responses=len(parsed), unique_devices=len(consolidated),
+        )
 
         # Save checkpoint if filepath provided
         if checkpoint_filepath:
@@ -661,12 +672,7 @@ def fetch_network_diag_multicast(
                 checkpoint_filepath,
                 checkpoint=True,
                 include_otbr_role_evidence=capture_stage == "multicast-network",
-            )
-            logging.info(
-                "event=checkpoint_write command=otbr-cli networkdiag multicast checkpoint_file=%s records=%d stage=multicast",
-                checkpoint_filepath,
-                len(checkpoint_result) if isinstance(
-                    checkpoint_result, dict) else 0,
+                stage="multicast",
             )
 
         # Sleep before next retry (but not after the last retry)
@@ -730,15 +736,17 @@ def fetch_network_diag_topology_multicast_network(
             checkpoint_filepath,
             checkpoint=True,
             include_otbr_role_evidence=True,
-        )
-        logging.info(
-            "event=checkpoint_write command=otbr-cli networkdiag multicast-network checkpoint_file=%s records=%d stage=final",
-            checkpoint_filepath,
-            len(result),
+            stage="multicast",
         )
     if final_output_path is not None:
         save_topology_to_json_file(
             result, final_output_path, include_otbr_role_evidence=True
+        )
+    else:
+        log_event(
+            "collector_summary", source="otbr-cli",
+            command="networkdiag multicast-network", stage="final",
+            records=len(result), final="not_requested",
         )
     return result
 
@@ -780,14 +788,17 @@ def fetch_network_diag_topology_multicast_neighbors(
         capture_stage="multicast-neighbors",
     )
     if checkpoint_filepath is not None:
-        save_topology_to_json_file(result, checkpoint_filepath, checkpoint=True)
-        logging.info(
-            "event=checkpoint_write command=otbr-cli networkdiag multicast-neighbors checkpoint_file=%s records=%d stage=final",
-            checkpoint_filepath,
-            len(result),
+        save_topology_to_json_file(
+            result, checkpoint_filepath, checkpoint=True, stage="multicast"
         )
     if final_output_path is not None:
         save_topology_to_json_file(result, final_output_path)
+    else:
+        log_event(
+            "collector_summary", source="otbr-cli",
+            command="networkdiag multicast-neighbors", stage="final",
+            records=len(result), final="not_requested",
+        )
     return result
 
 
@@ -1147,6 +1158,7 @@ def fetch_network_diag_topology_router_table(
         checkpoint_filepath,
         checkpoint=True,
         include_otbr_role_evidence=True,
+        stage="router-roster",
     )
 
     return router_table_data, router_rlocs, router_table_by_router_id
@@ -1215,6 +1227,7 @@ def fetch_network_diag_topology_meshdiag_topology(
             checkpoint_filepath,
             checkpoint=True,
             include_otbr_role_evidence=True,
+            stage="mesh-topology",
         )
     else:
         logging.warning(
@@ -1290,11 +1303,25 @@ def fetch_network_diag_topology_multicast(
             checkpoint_filepath,
             checkpoint=True,
             include_otbr_role_evidence=True,
+            stage="multicast",
         )
     else:
         logging.warning("Multicast topology map is empty or None")
 
     return network_topology_map_multicast
+
+
+def _log_networkdiag_views(views: list[CollectionOutcome], stage: str) -> None:
+    for view in views:
+        log_event(
+            "target_outcome", source=view.source, command=view.command,
+            stage=view.stage, **view.event_fields(),
+        )
+    for phase in ("initial", "effective"):
+        log_outcome_summary(
+            views, source="otbr-cli", command="networkdiag fetch-all",
+            stage=stage, status_phase=phase,
+        )
 
 
 def fetch_network_diag_topology_detail_routers(
@@ -1312,7 +1339,14 @@ def fetch_network_diag_topology_detail_routers(
     """Fetches per-router diagnostics and merges results into the topology map."""
     if collection_context is None:
         collection_context = create_diagnostic_collection_context()
-    for rloc16 in router_rlocs:
+    log_event(
+        "stage_start", source="otbr-cli", command="networkdiag fetch-all",
+        stage="router", targets=len(router_rlocs),
+    )
+    views: list[CollectionOutcome] = []
+    for current, rloc16 in enumerate(router_rlocs, 1):
+        verified_attempts: list[CollectionAttempt] = []
+        started_at = time.monotonic()
         parsed_record_start = (
             len(collection_context.get("parsed_records", []))
             if collection_context is not None else 0
@@ -1428,6 +1462,11 @@ def fetch_network_diag_topology_detail_routers(
                         if collection_context is not None else {}
                     ),
                 )
+                verified_attempts.append(CollectionAttempt(
+                    "initial" if attempt_idx == 0 else "request_fallback",
+                    "completed" if network_topology_node is not None else "failed",
+                    evidence_ref=f"direct-router:{rloc16}:{attempt_idx}",
+                ))
                 if network_topology_node is not None:
                     break
                 logging.info(
@@ -1466,6 +1505,7 @@ def fetch_network_diag_topology_detail_routers(
                         checkpoint_filepath,
                         checkpoint=True,
                         include_otbr_role_evidence=True,
+                        stage="router",
                     )
 
         if network_topology_node is None:
@@ -1500,6 +1540,7 @@ def fetch_network_diag_topology_detail_routers(
                     checkpoint_filepath,
                     checkpoint=True,
                     include_otbr_role_evidence=True,
+                    stage="router",
                 )
         else:
             _merge_tlv_response_history(
@@ -1549,7 +1590,56 @@ def fetch_network_diag_topology_detail_routers(
                     checkpoint_filepath,
                     checkpoint=True,
                     include_otbr_role_evidence=True,
+                    stage="router",
                 )
+        status: Status = "skipped" if record_exists else (
+            "completed" if network_topology_node is not None else "failed"
+        )
+        views.append(CollectionOutcome(
+            source="otbr-cli", command="networkdiag fetch-all", stage="router",
+            target=str(rloc16),
+            initial_status=verified_attempts[0].status if verified_attempts else status,
+            effective_status=status, attempts=tuple(verified_attempts),
+            response="observed" if status == "completed" else "unknown",
+            response_evidence="direct" if status == "completed" else "unknown",
+            recovery_state=(
+                "recovered" if len(verified_attempts) > 1 and status == "completed" else
+                "attempted" if len(verified_attempts) > 1 else "none"
+            ),
+            recovery_kind="request_fallback" if len(verified_attempts) > 1 else "none",
+            original_reason_code=(
+                "already_collected" if record_exists
+                else "diagnostic-result-missing"
+                if any(attempt.status == "failed" for attempt in verified_attempts)
+                else None
+            ),
+        ))
+        log_event(
+            "target_progress", source="otbr-cli", command="networkdiag fetch-all",
+            stage="router", progress=f"[{current}/{len(router_rlocs)}]",
+            current=current, total=len(router_rlocs), target=rloc16,
+            status="skipped" if record_exists else (
+                "completed" if network_topology_node is not None else "failed"
+            ), elapsed_s=time.monotonic() - started_at,
+        )
+    log_event(
+        "collector_summary", source="otbr-cli", command="networkdiag fetch-all",
+        stage="router", targets=len(router_rlocs), processed=len(router_rlocs),
+        records=len(network_topology_map),
+    )
+    _log_networkdiag_views(views, "router")
+    summary = summarize_outcomes(views)
+    if summary.terminal_statuses["failed"]:
+        logging.warning(
+            "Router diagnostic collection incomplete: %d/%d routers completed direct queries; "
+            "%d returned no matching parsed result; "
+            "%d skipped direct queries using existing multicast results. "
+            "Topology currently contains %d records; "
+            "record count does not establish diagnostic coverage.",
+            summary.terminal_statuses["completed"], summary.population,
+            summary.terminal_statuses["failed"], summary.terminal_statuses["skipped"],
+            len(network_topology_map),
+        )
 
 
 @dataclass(frozen=True)
@@ -1618,6 +1708,87 @@ class ChildPingOutcome:
     status: Literal["reply", "no-reply", "unavailable", "error", "not-attempted"]
     target_address: str | None = None
     result: otbr_cli_device.PingResult | None = None
+
+
+def child_fetch_outcome_view(
+    outcome: ChildFetchOutcome, ping: ChildPingOutcome | None = None,
+    *, previous_outcomes: Sequence[ChildFetchOutcome] = (),
+) -> CollectionOutcome:
+    responded = {
+        row["last_attempt_responded"] for row in outcome.observations
+        if type(row.get("last_attempt_responded")) is int
+    }
+    history_known = len(responded) == len(outcome.observations) and responded.issubset(
+        {attempt.index for attempt in outcome.attempted}
+    )
+    attempts: list[CollectionAttempt] = []
+    previous: ChildFetchAttempt | None = None
+    for attempt in outcome.attempted if history_known else ():
+        kind = (
+            "initial" if previous is None else
+            "same_set_retry" if attempts[-1].status == "failed"
+            and attempt.tlv_values == previous.tlv_values else
+            "request_fallback" if attempts[-1].status == "failed" else "unknown"
+        )
+        attempts.append(CollectionAttempt(
+            kind, "completed" if attempt.index in responded else "failed",
+            evidence_ref=f"direct-child-{outcome.policy_mode}:{outcome.target.child_rloc16}:{attempt.index}",
+        ))
+        previous = attempt
+    statuses: dict[str, Status] = {
+        "responded": "completed", "exhausted": "failed",
+        "already-satisfied": "skipped", "retained-prior": "partial",
+    }
+    status = statuses[outcome.terminal_reason]
+    recovery = attempts[-1] if attempts and attempts[-1].kind in {
+        "same_set_retry", "request_fallback",
+    } else None
+    response = "observed" if outcome.observations else "unknown"
+    evidence = "direct" if outcome.observations else "unknown"
+    if not outcome.observations and ping is not None and ping.target == outcome.target:
+        if ping.status in {"reply", "no-reply"}:
+            response = "observed" if ping.status == "reply" else "not_observed"
+            evidence = "ping"
+    view = CollectionOutcome(
+        source="otbr-cli", command="networkdiag fetch-all", stage="child",
+        target=outcome.target.child_rloc16,
+        initial_status=attempts[0].status if attempts else status,
+        effective_status=status, original_effective_status=outcome.terminal_reason,
+        response=response, response_evidence=evidence, attempts=tuple(attempts),
+        recovery_state=(
+            "recovered" if recovery and recovery.status == "completed" else
+            "attempted" if recovery else "unknown"
+        ),
+        recovery_kind=recovery.kind if recovery else "unknown",
+        original_reason_code="already_collected" if status == "skipped" else None,
+    )
+    if not previous_outcomes:
+        return view
+    if any(previous.target != outcome.target for previous in previous_outcomes):
+        raise ValueError("Child outcome history contains different targets")
+    previous_views = [child_fetch_outcome_view(previous) for previous in previous_outcomes]
+    history = tuple(attempt for prior in previous_views for attempt in prior.attempts)
+    detail_attempts = tuple(
+        replace(attempt, kind="child_detail")
+        if index == 0 and outcome.policy_mode == "detail" else attempt
+        for index, attempt in enumerate(view.attempts)
+    )
+    observed_before = any(prior.response == "observed" for prior in previous_views)
+    detail_recovery = outcome.policy_mode == "detail" and bool(view.attempts) and any(
+        prior.effective_status == "failed" and prior.attempts for prior in previous_views
+    )
+    return replace(
+        view, initial_status=previous_views[0].initial_status,
+        original_status=previous_views[0].original_status,
+        attempts=history + detail_attempts,
+        response="observed" if observed_before else view.response,
+        response_evidence="direct" if observed_before else view.response_evidence,
+        recovery_state=(
+            ("recovered" if view.effective_status == "completed" else "attempted")
+            if detail_recovery else view.recovery_state
+        ),
+        recovery_kind="child_detail" if detail_recovery else view.recovery_kind,
+    )
 
 
 def build_child_fetch_policies(
@@ -1920,6 +2091,10 @@ def fetch_network_diag_topology_expand_children(
 ) -> None:
     """Expands child-node diagnostics and merges child records into the topology map."""
     if not expand_children:
+        log_event(
+            "stage_skip", source="otbr-cli", command="networkdiag fetch-all",
+            stage="child", reason="disabled",
+        )
         return
     if collection_context is None:
         collection_context = create_diagnostic_collection_context()
@@ -1928,9 +2103,18 @@ def fetch_network_diag_topology_expand_children(
         child_fetch_fast_mode_default, child_fetch_detail_mode_default
     )
     targets = collect_child_fetch_targets(router_rlocs, network_topology_map)
-
-    for target in targets:
+    log_event(
+        "stage_start", source="otbr-cli", command="networkdiag fetch-all",
+        stage="child", parents=len(router_rlocs), targets=len(targets),
+    )
+    views: list[CollectionOutcome] = []
+    policy_views: dict[str, list[CollectionOutcome]] = {
+        policy.mode: [] for policy in policies
+    }
+    for current, target in enumerate(targets, 1):
+        started_at = time.monotonic()
         final_outcome = None
+        policy_outcomes: list[ChildFetchOutcome] = []
         for policy in policies:
             prior_state = network_topology_map.get(target.child_rloc16, {})
             if not isinstance(prior_state, dict):
@@ -1968,6 +2152,10 @@ def fetch_network_diag_topology_expand_children(
                 time.sleep,
             )
             final_outcome = outcome
+            policy_outcomes.append(outcome)
+            policy_views[policy.mode].append(replace(
+                child_fetch_outcome_view(outcome), stage=f"child.{policy.mode}",
+            ))
             if collection_context is not None:
                 for captured_record in collection_context.get("parsed_records", [])[parsed_record_start:]:
                     captured_rloc16 = get_canonical_rloc16(captured_record)
@@ -1987,6 +2175,7 @@ def fetch_network_diag_topology_expand_children(
                             checkpoint_filepath,
                             checkpoint=True,
                             include_otbr_role_evidence=True,
+                            stage="child",
                         )
             if outcome.terminal_reason == "exhausted":
                 if _refresh_response_histories(network_topology_map, collection_context):
@@ -1995,6 +2184,7 @@ def fetch_network_diag_topology_expand_children(
                         checkpoint_filepath,
                         checkpoint=True,
                         include_otbr_role_evidence=True,
+                        stage="child",
                     )
                 continue
             mutation = reconcile_child_fetch_outcome(
@@ -2031,12 +2221,32 @@ def fetch_network_diag_topology_expand_children(
             )
 
         if final_outcome is None or final_outcome.terminal_reason != "exhausted":
+            views.append(
+                child_fetch_outcome_view(
+                    final_outcome, previous_outcomes=policy_outcomes[:-1],
+                ) if final_outcome is not None else
+                CollectionOutcome(
+                    source="otbr-cli", command="networkdiag fetch-all", stage="child",
+                    target=target.child_rloc16, initial_status="skipped",
+                    effective_status="skipped",
+                )
+            )
+            log_event(
+                "target_progress", source="otbr-cli", command="networkdiag fetch-all",
+                stage="child", progress=f"[{current}/{len(targets)}]",
+                current=current, total=len(targets), target=target.child_rloc16,
+                status=final_outcome.terminal_reason if final_outcome else "skipped",
+                elapsed_s=time.monotonic() - started_at,
+            )
             continue
         ping_outcome = (
             ping_child_after_diagnostic_exhaustion(target, network_topology_map)
             if children_ping_fallback
             else None
         )
+        views.append(child_fetch_outcome_view(
+            final_outcome, ping_outcome, previous_outcomes=policy_outcomes[:-1],
+        ))
         mutation = reconcile_child_fetch_outcome(
             final_outcome,
             network_topology_map,
@@ -2070,6 +2280,21 @@ def fetch_network_diag_topology_expand_children(
             mutation, network_topology_map, checkpoint_filepath,
             save_topology_to_json_file,
         )
+        log_event(
+            "target_progress", source="otbr-cli", command="networkdiag fetch-all",
+            stage="child", progress=f"[{current}/{len(targets)}]",
+            current=current, total=len(targets), target=target.child_rloc16,
+            status=final_outcome.terminal_reason,
+            elapsed_s=time.monotonic() - started_at,
+        )
+    log_event(
+        "collector_summary", source="otbr-cli", command="networkdiag fetch-all",
+        stage="child", targets=len(targets), processed=len(targets),
+        records=len(network_topology_map),
+    )
+    _log_networkdiag_views(views, "child")
+    for mode, population in policy_views.items():
+        _log_networkdiag_views(population, f"child.{mode}")
 
 
 def fetch_network_diag_topology(
@@ -2227,6 +2452,11 @@ def fetch_network_diag_topology(
             final_output_path,
             include_otbr_role_evidence=True,
         )
+    else:
+        log_event(
+            "collector_summary", source="otbr-cli", command="networkdiag fetch-all",
+            stage="final", records=len(network_topology_map), final="not_requested",
+        )
 
     return network_topology_map
 
@@ -2304,13 +2534,29 @@ def print_network_diag_topology(topology):
 
 def save_topology_to_json_file(
     data,
-    filename=OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    filename: str | os.PathLike[str] | None = OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
     *,
     checkpoint: bool = False,
     include_otbr_role_evidence: bool = False,
+    stage: str | None = None,
 ):
     """Converts dict format to list format and saves to JSON."""
+    checkpoint_event = checkpoint or (
+        filename is not None and Path(filename).name.endswith(".partial.json")
+    )
+    event_stage = stage or ("checkpoint" if checkpoint_event else "final")
+    filename_key = Path(filename).name.replace(".partial.json", ".json") if filename else ""
+    command = {
+        OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME: "networkdiag fetch-all",
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME: "networkdiag multicast-network",
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME: "networkdiag multicast-neighbors",
+    }.get(filename_key, "networkdiag")
     if filename is None:
+        log_event(
+            "checkpoint" if checkpoint_event else "write", source="otbr-cli",
+            command=command, stage=event_stage,
+            output=None, records=len(data), disposition="not_requested",
+        )
         return
 
     network_map = []
@@ -2407,32 +2653,50 @@ def save_topology_to_json_file(
         )
         for record in data.values()
     )
-    if checkpoint:
-        save_checkpoint_json(
-            payload,
-            filename,
-            CollectionWriteOutcome.partial(
-                has_usable_data=bool(network_map)
-            ),
-            writer=save_json_atomic,
+    try:
+        if checkpoint:
+            written = save_checkpoint_json(
+                payload, filename,
+                CollectionWriteOutcome.partial(has_usable_data=bool(network_map)),
+                writer=save_json_atomic,
+            )
+        else:
+            written = save_final_json(
+                payload, filename,
+                CollectionWriteOutcome.partial(has_usable_data=bool(network_map))
+                if has_failures else CollectionWriteOutcome.complete(),
+                writer=save_json_atomic,
+            )
+    except Exception as exc:
+        log_event(
+            "checkpoint" if checkpoint_event else "write", source="otbr-cli",
+            command=command, stage=event_stage,
+            output=str(filename), records=len(payload), disposition="failed",
+            error_type=type(exc).__name__,
         )
-    else:
-        save_final_json(
-            payload,
-            filename,
-            (
-                CollectionWriteOutcome.partial(
-                    has_usable_data=bool(network_map)
-                )
-                if has_failures
-                else CollectionWriteOutcome.complete()
-            ),
-            writer=save_json_atomic,
+        raise
+    log_event(
+        "checkpoint" if checkpoint_event else "write", source="otbr-cli",
+        command=command, stage=event_stage,
+        output=str(filename), records=len(payload),
+        disposition=("written" if written else "skipped_unusable") if checkpoint_event
+        else ("saved" if written else "retained_previous"),
+    )
+    if not checkpoint_event:
+        log_event(
+            "collector_summary", source="otbr-cli", command=command,
+            stage=event_stage, records=len(payload),
+            final="saved" if written else "retained_previous",
         )
-    logging.info(
-        f"Successfully exported {len(network_map)} records for topology to {filename}")
-    logging.debug("Saved topology data into %s as JSON:\n%s",
-                  filename, json.dumps(network_map, indent=4))
+    if written:
+        logging.info(
+            "Successfully exported %d records for topology to %s",
+            len(network_map), filename,
+        )
+        logging.debug(
+            "Saved topology data into %s as JSON:\n%s",
+            filename, json.dumps(network_map, indent=4),
+        )
 
 
 def main_multicast_network(argv: Sequence[str] | None = None) -> int:
@@ -2524,7 +2788,28 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
     else:
         extaddr_map = {}
 
-    thread_network_info = util_network.fetch_thread_network_info()
+    preflight_started_at = time.monotonic()
+    preflight_returned = False
+    log_event(
+        "step_start", source="otbr-cli", command="networkdiag multicast-neighbors",
+        stage="preflight", step="thread-network-info", current=1, total=1,
+    )
+    try:
+        thread_network_info = util_network.fetch_thread_network_info()
+        preflight_returned = True
+    finally:
+        error = None if preflight_returned else sys.exc_info()[1]
+        log_event(
+            "step_end", source="otbr-cli", command="networkdiag multicast-neighbors",
+            stage="preflight", step="thread-network-info", current=1, total=1,
+            state="returned" if preflight_returned else "raised",
+            elapsed_s=max(0.0, time.monotonic() - preflight_started_at),
+            error_type=type(error).__name__ if error is not None else None,
+            reason_code=(
+                "invalid-prefix-output"
+                if isinstance(error, util_network.PrefixFetchError) else None
+            ),
+        )
 
     # Get all active routers (potential parents)
     router_table_data = fetch_and_parse_router_table(extaddr_map)

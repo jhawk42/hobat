@@ -3,9 +3,11 @@ import sys
 import subprocess
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Sequence
 
+from td_logging import log_event
 from td_const import (
     EXTADDR_DEVICE_LABEL_MAP_FILENAME,
     OTBR_CLI_ROUTER_TABLE_FILENAME,
@@ -155,28 +157,72 @@ def fetch_and_parse_router_table(extaddr_map=None, output_path: Path | None = No
     Raises:
         Exception: If retrieving or parsing router table fails
     """
-    raw_output = fetch_router_table()
-    if not raw_output:
-        raise ValueError("Router table output is empty")
-    router_table_data = parse_router_table(raw_output, extaddr_map)
-    if output_path is not None:
-        save_final_json(
-            convert_keys_to_camel_case(router_table_data),
-            output_path,
-            CollectionWriteOutcome.complete(),
-            writer=save_json_atomic,
+    started_at = time.monotonic()
+    normal_return = False
+    collection_elapsed_ms = None
+    router_records = None
+    final = "not_requested" if output_path is None else "not_attempted"
+    try:
+        raw_output = fetch_router_table()
+        if not raw_output:
+            raise ValueError("Router table output is empty")
+        router_table_data = parse_router_table(raw_output, extaddr_map)
+        router_records = len(router_table_data)
+        collection_elapsed_ms = max(0, round((time.monotonic() - started_at) * 1000))
+        if output_path is not None:
+            converted = convert_keys_to_camel_case(router_table_data)
+            write_returned = False
+            try:
+                written = save_final_json(
+                    converted,
+                    output_path,
+                    CollectionWriteOutcome.complete(),
+                    writer=save_json_atomic,
+                )
+                write_returned = True
+            finally:
+                if write_returned:
+                    final = "saved" if written else "retained_previous"
+                    log_event(
+                        "write", source="otbr-cli", command="router-table",
+                        stage="final", output=str(output_path),
+                        router_records=router_records, disposition=final,
+                    )
+                else:
+                    error = sys.exc_info()[1]
+                    final = "failed"
+                    log_event(
+                        "write", source="otbr-cli", command="router-table",
+                        stage="final", output=str(output_path),
+                        router_records=router_records, disposition="failed",
+                        error_type=type(error).__name__ if error is not None else None,
+                    )
+            if written:
+                logging.debug(
+                    "Saved router-table data into %s as JSON:\n%s",
+                    output_path,
+                    json.dumps(router_table_data, indent=4),
+                )
+                logging.info(
+                    "Saved router table with %d entries into %s.",
+                    len(router_table_data),
+                    output_path,
+                )
+            else:
+                final = "retained_previous"
+        normal_return = True
+        return router_table_data
+    finally:
+        log_event(
+            "collector_summary", source="otbr-cli", command="router-table",
+            stage="bulk", router_records=router_records,
+            collection_elapsed_ms=(
+                collection_elapsed_ms
+                if collection_elapsed_ms is not None
+                else max(0, round((time.monotonic() - started_at) * 1000))
+            ),
+            final=final, state="returned" if normal_return else "failed",
         )
-        logging.debug(
-            "Saved router-table data into %s as JSON:\n%s",
-            output_path,
-            json.dumps(router_table_data, indent=4),
-        )
-        logging.info(
-            "Saved router table with %d entries into %s.",
-            len(router_table_data),
-            output_path,
-        )
-    return router_table_data
 
 
 def main(argv: Sequence[str] | None = None) -> int:

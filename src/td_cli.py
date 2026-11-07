@@ -45,7 +45,7 @@ import ha_matter_ws_cli
 
 import merge_dataset
 import merge_extaddr_device_label_map
-from td_logging import configure_logging, redact_sensitive_text
+from td_logging import configure_logging, log_event, redact_sensitive_text
 
 class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
     """Formatter with a wider help column for long command names."""
@@ -871,30 +871,108 @@ def _dispatch_otbr_cli(
         if getattr(args, "children_ping_fallback", False):
             fetch_all_argv.append("--children-ping-fallback")
         step_calls = [
-            ("otbr_cli_thread_network_info.main", otbr_cli_thread_network_info.main, None),
-            ("otbr_cli_router_table.main", otbr_cli_router_table.main, None),
-            ("otbr_cli_meshdiag_topology.main", otbr_cli_meshdiag_topology.main, None),
-            ("otbr_cli_networkdiag_topology.main", otbr_cli_networkdiag_topology.main, ["multicast-network"]),
-            ("otbr_cli_networkdiag_topology.main", otbr_cli_networkdiag_topology.main, fetch_all_argv),
-            ("otbr_cli_meshdiag_routerneighbortable.main", otbr_cli_meshdiag_routerneighbortable.main, None),
-            ("otbr_cli_meshdiag_childtable.main", otbr_cli_meshdiag_childtable.main, None),
+            ("thread-network-info", "otbr_cli_thread_network_info.main", otbr_cli_thread_network_info.main, None),
+            ("router-table", "otbr_cli_router_table.main", otbr_cli_router_table.main, None),
+            ("meshdiag topology", "otbr_cli_meshdiag_topology.main", otbr_cli_meshdiag_topology.main, None),
+            ("networkdiag multicast-network", "otbr_cli_networkdiag_topology.main", otbr_cli_networkdiag_topology.main, ["multicast-network"]),
+            ("networkdiag fetch-all", "otbr_cli_networkdiag_topology.main", otbr_cli_networkdiag_topology.main, fetch_all_argv),
+            ("meshdiag routerneighbortable", "otbr_cli_meshdiag_routerneighbortable.main", otbr_cli_meshdiag_routerneighbortable.main, None),
+            ("meshdiag childtable", "otbr_cli_meshdiag_childtable.main", otbr_cli_meshdiag_childtable.main, None),
         ]
         first_nonzero_rc = 0
-        for module_name, step_main, step_argv in step_calls:
-            try:
+        steps_executed = 0
+        steps_nonzero = 0
+        total_steps = len(step_calls)
+        workflow_state = "returned"
+        workflow_exit_code = first_nonzero_rc
+        workflow_returned = False
+        try:
+            for index, (step_name, module_name, step_main, step_argv) in enumerate(step_calls, 1):
                 forwarded_argv = list(step_argv) if step_argv is not None else list(extra_args)
-                raw_rc = step_main(_forward_with_datadir(args, forwarded_argv))
-            except Exception as exc:
-                logging.error(
-                    "topology step raised an exception: %s: %s",
-                    module_name,
-                    redact_sensitive_text(str(exc)),
+                forwarded_argv = _forward_with_datadir(args, forwarded_argv)
+                started_at = time.monotonic()
+                log_event(
+                    "step_start", source="otbr-cli", command="topology",
+                    stage="workflow", step=step_name, index=index, total=total_steps,
                 )
-                raw_rc = 1
-            normalized_rc = _normalize_module_rc(raw_rc, module_name)
-            if first_nonzero_rc == 0 and normalized_rc != 0:
-                first_nonzero_rc = normalized_rc
-                logging.error("topology step failed: %s rc=%s", module_name, normalized_rc)
+                steps_executed += 1
+                step_raised = False
+                step_completed = False
+                normalized_rc = None
+                try:
+                    try:
+                        raw_rc = step_main(forwarded_argv)
+                    except Exception as exc:
+                        step_raised = True
+                        logging.error(
+                            "topology step raised an exception: %s: %s",
+                            module_name,
+                            redact_sensitive_text(str(exc)),
+                        )
+                        raw_rc = 1
+                    normalized_rc = _normalize_module_rc(raw_rc, module_name)
+                    if normalized_rc != 0:
+                        steps_nonzero += 1
+                        logging.error(
+                            "topology step failed: %s rc=%s", step_name, normalized_rc
+                        )
+                        if first_nonzero_rc == 0:
+                            first_nonzero_rc = normalized_rc
+                    workflow_exit_code = first_nonzero_rc
+                    step_completed = True
+                finally:
+                    step_exception = (
+                        None if step_completed else sys.exc_info()[1]
+                    )
+                    step_fields = {
+                        "state": (
+                            "raised"
+                            if step_raised or step_exception
+                            else "returned"
+                        ),
+                        "elapsed_ms": max(
+                            0, round((time.monotonic() - started_at) * 1000)
+                        ),
+                    }
+                    if normalized_rc is not None:
+                        step_fields["rc"] = normalized_rc
+                    if step_exception is not None:
+                        step_fields["error_type"] = type(step_exception).__name__
+                        if isinstance(step_exception, SystemExit):
+                            step_fields["system_exit_code"] = step_exception.code
+                            if step_exception.code not in (None, 0):
+                                steps_nonzero += 1
+                            workflow_exit_code = step_exception.code
+                        workflow_state = "raised"
+                    log_event(
+                        "step_end", source="otbr-cli", command="topology",
+                        stage="workflow", step=step_name, index=index,
+                        total=total_steps, **step_fields,
+                    )
+            workflow_returned = True
+        finally:
+            active_exception = (
+                None if workflow_returned else sys.exc_info()[1]
+            )
+            summary_fields = {
+                "steps_total": total_steps,
+                "steps_executed": steps_executed,
+                "steps_not_run": total_steps - steps_executed,
+                "steps_nonzero": steps_nonzero,
+                "exit_code": workflow_exit_code,
+                "state": workflow_state,
+            }
+            if isinstance(active_exception, SystemExit):
+                summary_fields["exit_code"] = active_exception.code
+                summary_fields["state"] = "raised"
+            elif active_exception is not None:
+                summary_fields["error_type"] = type(active_exception).__name__
+                summary_fields["state"] = "raised"
+                summary_fields["exit_code"] = None
+            log_event(
+                "workflow_summary", source="otbr-cli", command="topology",
+                stage="workflow", **summary_fields,
+            )
         return first_nonzero_rc
 
     if cli_command == "meshdiag":

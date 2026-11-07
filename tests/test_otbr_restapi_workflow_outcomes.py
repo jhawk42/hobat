@@ -23,6 +23,111 @@ from otbr_restapi_util import (
 )
 
 
+_SINGLE_READ_OPERATIONS = [
+    ("diagnostics", "list", "list_diagnostics"),
+    ("diagnostics", "get", "get_diagnostic"),
+    ("diagnostics", "fetch", "fetch_device_diagnostics"),
+    ("mesh-diagnostics", "children", "fetch_mesh_diagnostics"),
+    ("mesh-diagnostics", "child-ipv6", "fetch_mesh_diagnostics"),
+    ("mesh-diagnostics", "router-neighbors", "fetch_mesh_diagnostics"),
+    ("mesh-diagnostics", "fetch", "fetch_mesh_diagnostics"),
+]
+
+
+def _single_read(client, group, kind, output_path):
+    from types import SimpleNamespace
+    import otbr_restapi_diagnostics as diagnostics
+    import otbr_restapi_mesh_diagnostics as mesh
+
+    args = SimpleNamespace(
+        diagnostics_command=kind, mesh_diag_command=kind, with_meta=False,
+        diagnostics_id="diagnostic-one", device_id="1111111111111111",
+        destination_type="extended", task_timeout=2, poll_interval=1,
+        poll_timeout=5, types=None, preset=None, no_fallback=True,
+        no_enrich_mac_counters=True, resolved_output_path=output_path,
+    )
+    return (
+        diagnostics.dispatch_diagnostics(client, args, True, None)
+        if group == "diagnostics" else
+        mesh.dispatch_mesh_diagnostics(client, args, True)
+    )
+
+
+@pytest.mark.parametrize("group,kind,method", _SINGLE_READ_OPERATIONS)
+@pytest.mark.parametrize("disposition", ["saved", "retained_previous", "not_requested", "failed"])
+def test_single_reads_observe_output_without_more_requests(
+    tmp_path, monkeypatch, caplog, capsys, group, kind, method, disposition,
+):
+    import logging
+    import util_data
+
+    client = MagicMock()
+    payload = [{"id": "diagnostic-one"}] if kind == "list" else {"id": "diagnostic-one"}
+    getattr(client, method).return_value = payload
+    path = None if disposition == "not_requested" else tmp_path / "output.json"
+    if disposition == "retained_previous":
+        path.write_text('["previous"]')
+        monkeypatch.setattr(util_data, "save_final_json", MagicMock(return_value=False))
+    if disposition == "failed":
+        monkeypatch.setattr(util_data, "save_final_json", MagicMock(side_effect=OSError("write failed")))
+    with caplog.at_level(logging.INFO):
+        if disposition == "failed":
+            with pytest.raises(OSError, match="write failed"):
+                _single_read(client, group, kind, path)
+        else:
+            assert _single_read(client, group, kind, path) == payload
+    getattr(client, method).assert_called_once()
+    assert len(client.mock_calls) == 1
+    writes = [r.message for r in caplog.records if r.message.startswith('event="write"')]
+    assert len(writes) == 1
+    assert f'command="{group} {kind}"' in writes[0]
+    assert f'disposition="{disposition}"' in writes[0]
+    assert 'records=1' in writes[0]
+    operations = [r.message for r in caplog.records if r.message.startswith('event="operation_end"')]
+    assert len(operations) == 1
+    assert capsys.readouterr().out == ""
+    if disposition == "retained_previous":
+        assert path.read_text() == '["previous"]'
+
+
+@pytest.mark.parametrize("group,kind,method", _SINGLE_READ_OPERATIONS)
+def test_single_read_client_error_remains_raised_without_save(
+    tmp_path, caplog, group, kind, method,
+):
+    import logging
+
+    client = MagicMock()
+    getattr(client, method).side_effect = ValueError("invalid result")
+    with caplog.at_level(logging.INFO), pytest.raises(ValueError, match="invalid result"):
+        _single_read(client, group, kind, tmp_path / "output.json")
+    assert 'state="raised"' in caplog.text
+    assert 'event="write"' not in caplog.text
+    getattr(client, method).assert_called_once()
+
+
+def test_common_outcome_events_escape_and_redact_raw_unknown_fields(caplog):
+    from copy import deepcopy
+    import logging
+    from otbr_restapi_diagnostics import _log_diagnostic_facts
+
+    outcome = {"deviceResults": [{
+        "deviceId": "node-A\nforged-event",
+        "status": "future\nnetworkKey=0123456789abcdef0123456789abcdef",
+        "reasonCode": "pskc=abcdef0123456789abcdef0123456789",
+    }]}
+    original = deepcopy(outcome)
+    with caplog.at_level(logging.INFO):
+        _log_diagnostic_facts(outcome)
+    events = [r.message for r in caplog.records if r.message.startswith('event="target_outcome"')]
+    assert len(events) == 1
+    assert '\n' not in events[0]
+    assert 'initial_status="other"' in events[0]
+    assert 'reason_code="unknown"' in events[0]
+    assert "0123456789abcdef0123456789abcdef" not in caplog.text
+    assert "abcdef0123456789abcdef0123456789" not in caplog.text
+    assert outcome == original
+
+
 def completed_action(action_id: str = "action-1", diagnostic_id: str | None = None):
     action = {"id": action_id, "status": ActionStatus.COMPLETED}
     if diagnostic_id is not None:
@@ -268,6 +373,83 @@ def test_diagnostic_sweep_records_roles_duplicates_malformed_and_failures(monkey
     assert child_call["task_timeout"] == 30
     assert reed_call["task_timeout"] == 15
     delete_all.assert_called_once_with()
+
+
+@pytest.mark.parametrize("devices,expected", [
+    ([], []),
+    ([{"id": "1111111111111111", "mlEidIid": "0000000000000000"},
+      {"id": "1111111111111111"}, {"id": "invalid"}],
+     [(1, 3, "skipped"), (2, 3, "malformed"), (3, 3, "skipped")]),
+])
+def test_diagnostic_progress_uses_fixed_input_denominator(monkeypatch, devices, expected, capsys, caplog):
+    import logging
+    import otbr_restapi_diagnostics as diagnostics
+
+    client = OTBRRestApiClient(base_url="http://example.test")
+    monkeypatch.setattr(client, "list_devices", lambda **kwargs: devices)
+    fetch = MagicMock()
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+    delete = MagicMock()
+    monkeypatch.setattr(client, "delete_all_diagnostics", delete)
+    args = cli_module.build_parser().parse_args([
+        "diagnostics", "fetch-all", "--no-update-devices", "--preserve-diagnostics",
+        "--items-only",
+    ])
+    with caplog.at_level(logging.INFO):
+        assert diagnostics.dispatch_diagnostics(client, args, False, None) == []
+    events = capsys.readouterr()
+    assert events.out == ""
+    progress = events.err.splitlines()
+    assert len(progress) == len(expected)
+    for line, (current, total, status) in zip(progress, expected):
+        assert f"current={current}" in line and f"total={total}" in line
+        assert f'status="{status}"' in line and 'stage="initial"' in line
+    assert f"input={len(devices)}" in caplog.text
+    assert f"terminal_results={len(devices)}" in caplog.text
+    fetch.assert_not_called()
+    delete.assert_not_called()
+
+
+def test_rest_progress_uses_separate_expansion_stage_and_redacts(capsys, monkeypatch):
+    from otbr_restapi_diagnostics import make_progress_fn
+
+    monkeypatch.setenv("TD_RUN_CMD", "unit")
+    progress = make_progress_fn(1, True)
+    progress(1, 1, "rloc:00382a", 0.125, "completed")
+    progress(1, 1, "password=secret", 0.25, "skipped")
+    out = capsys.readouterr()
+    assert not out.out
+    assert 'stage="expansion"' in out.err and 'run_cmd="unit"' in out.err
+    assert 'stage="initial"' in out.err and "secret" not in out.err
+
+
+def test_mesh_progress_includes_rejected_targets_without_more_requests(monkeypatch, capsys):
+    from types import SimpleNamespace
+    import otbr_restapi_mesh_diagnostics as mesh
+
+    client = OTBRRestApiClient(base_url="http://example.test")
+    monkeypatch.setattr(client, "list_devices", lambda **kwargs: [
+        {"id": "1111111111111111"}, {"id": "1111111111111111"}, {"id": "bad"},
+    ])
+    attempt = SimpleNamespace(
+        item=None, status="failed", attempted_types=[["children"]],
+        successful_types=[], mesh_coverage=[], responsive=False,
+        basic_responsive=False, diagnostic_ids=[], actions=[],
+        attempt_errors=[], elapsed=0.25,
+    )
+    fetch = MagicMock(return_value=attempt)
+    monkeypatch.setattr(client, "_fetch_mesh_diagnostics_for_device", fetch)
+    args = cli_module.build_parser().parse_args([
+        "mesh-diagnostics", "fetch-all", "--no-update-devices",
+        "--preserve-diagnostics", "--all-devices",
+    ])
+    result = mesh.dispatch_mesh_diagnostics(client, args, False)
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 3
+    assert all('stage="device"' in line and "total=3" in line for line in lines)
+    assert ['current=1' in lines[0], 'current=2' in lines[1], 'current=3' in lines[2]] == [True] * 3
+    assert [record["status"] for record in result["deviceResults"]] == ["skipped", "malformed", "failed"]
+    fetch.assert_called_once()
 
 
 @pytest.mark.parametrize("policy", ["legacy", "mode-aware"])

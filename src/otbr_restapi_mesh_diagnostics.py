@@ -9,7 +9,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from otbr_restapi_diagnostics import make_progress_fn
+from otbr_restapi_diagnostics import (
+    make_progress_fn, make_batch_progress_fns, _safe_legacy_field, _write_event,
+)
+from td_logging import log_event
+from otbr_restapi_outcomes import mesh_outcome_views, responsiveness_outcome_views
+from td_collection_outcomes import log_outcome_summary
 from td_restapi_mesh_evidence import (
     ORIGIN, POLICY, RESPONSIVENESS_VERSION, classify_mesh_probe_eligibility,
     sanitize_context, scope_identity, select_child_witness,
@@ -33,12 +38,14 @@ from otbr_restapi_util import (
     OTBRUsageError,
     collection_outcome_path,
     emit_rest_command_output,
+    emit_rest_observed_output,
     write_rest_collection_outcome,
 )
 
 CLI_MESH_TASK_TIMEOUT_DEFAULT = 15
 ROUTER_RLOC16_MASK = 0x03FF
 ROUTER_RLOC16_VALUE = 0
+_COMMAND = "mesh-diagnostics fetch-all"
 
 
 def _utc_now() -> str:
@@ -76,7 +83,7 @@ def _capture_child_witness(output_path: object, scope: dict) -> tuple[list, dict
         return [], {}, []
 
 
-def _attach_responsiveness(client, outcome, devices, scope_before, tables, bindings, captured, output_path, destination_type):
+def _attach_responsiveness(client, outcome, devices, scope_before, tables, bindings, captured, output_path, destination_type, *, progress_enabled=False):
     from td_restapi_mesh_evidence import witness_identifiers
     evidence = {
         "contractVersion": RESPONSIVENESS_VERSION, "enabled": True, "origin": ORIGIN,
@@ -88,9 +95,15 @@ def _attach_responsiveness(client, outcome, devices, scope_before, tables, bindi
     for record in outcome.get("deviceResults", []):
         used_ids.extend(record.get("diagnosticIds", []))
         used_ids.extend(error.get("actionId") for error in record.get("attemptErrors", []))
-    for record in outcome.get("deviceResults", []):
-        if record.get("status") == "completed":
-            continue
+    candidates = [
+        record for record in outcome.get("deviceResults", [])
+        if isinstance(record, dict) and record.get("status") != "completed"
+    ]
+    progress = make_progress_fn(len(candidates), progress_enabled,
+                                command=_COMMAND, stage="responsiveness",
+                                expansion_stage=None)
+    for index, record in enumerate(candidates, 1):
+        target_clock = time.monotonic()
         started = _utc_now()
         identity, identity_reason = select_router_identity(record["deviceId"], devices)
         reason = classify_mesh_probe_eligibility(record, destination_type) or identity_reason
@@ -105,6 +118,9 @@ def _attach_responsiveness(client, outcome, devices, scope_before, tables, bindi
         }
         evidence["targets"].append(target)
         if reason is not None:
+            if progress:
+                progress(index, len(candidates), record["deviceId"],
+                         time.monotonic() - target_clock, "not-attempted")
             continue
         request = {"destination": record["deviceId"], "destinationType": "extended", "types": list(POLICY["types"]), "timeout": 15}
         check = {"status": "response", "request": request, "startedAt": started}
@@ -129,6 +145,9 @@ def _attach_responsiveness(client, outcome, devices, scope_before, tables, bindi
             if reason:
                 check["status"] = "invalid-response"
             used_ids.extend([check["action"].get("id"), check["diagnostic"].get("id")])
+        if progress:
+            progress(index, len(candidates), record["deviceId"],
+                     time.monotonic() - target_clock, check["status"])
     evidence["scopeAfter"] = _observe_scope(client)
     if evidence["scopeAfter"].get("extPanId") != scope_before.get("extPanId"):
         reason = "scope-changed" if evidence["scopeAfter"].get("extPanId") and scope_before.get("extPanId") else "scope-unavailable"
@@ -144,28 +163,97 @@ def _attach_responsiveness(client, outcome, devices, scope_before, tables, bindi
             for target in evidence["targets"]:
                 target["check"]["reasonCode"] = "witness-binding-mismatch"
     outcome["meshResponsiveness"] = evidence
+    log_event(
+        "collector_summary", source="otbr-restapi", command=_COMMAND,
+        stage="responsiveness", targets=len(candidates),
+        checks=sum(target["check"]["status"] != "not-attempted" for target in evidence["targets"]),
+    )
+    views = responsiveness_outcome_views(outcome)
+    for view in views:
+        log_event(
+            "target_outcome", source=view.source, command=view.command,
+            stage=view.stage, **view.event_fields(),
+        )
+    log_outcome_summary(
+        views, source="otbr-restapi", command=_COMMAND, stage="responsiveness",
+    )
 
 
 def _write_checkpoint_best_effort(payload: Any, checkpoint_path: Path) -> None:
     try:
-        save_checkpoint_json(
+        written = save_checkpoint_json(
             convert_keys_to_camel_case(payload),
             checkpoint_path,
             CollectionWriteOutcome.partial(has_usable_data=bool(payload)),
             writer=save_json_atomic,
         )
-        logging.info(
-            "event=checkpoint_write command=otbr-restapi mesh-diagnostics fetch-all checkpoint_file=%s records=%d stage=device",
-            checkpoint_path,
-            len(payload) if isinstance(payload, list) else 0,
-        )
+        if written:
+            logging.info(
+                "event=checkpoint_write command=otbr-restapi mesh-diagnostics fetch-all checkpoint_file=%s records=%d stage=device",
+                _safe_legacy_field(checkpoint_path),
+                len(payload) if isinstance(payload, list) else 0,
+            )
+        log_event("checkpoint", source="otbr-restapi", command=_COMMAND, stage="device",
+                  output=str(checkpoint_path),
+                  records=len(payload) if isinstance(payload, list) else 0,
+                  disposition="written" if written else "skipped_unusable")
     except (OSError, ValueError, TypeError) as exc:
+        log_event("checkpoint", source="otbr-restapi", command=_COMMAND, stage="device",
+                  output=str(checkpoint_path),
+                  records=len(payload) if isinstance(payload, list) else 0,
+                  disposition="failed", error_type=type(exc).__name__)
         logging.warning(
             "event=checkpoint_write_failed command=otbr-restapi mesh-diagnostics fetch-all checkpoint_file=%s error_type=%s error=%s action=continue_best_effort",
-            checkpoint_path,
+            _safe_legacy_field(checkpoint_path),
             type(exc).__name__,
-            exc,
+            _safe_legacy_field(exc),
         )
+
+
+def _log_qualification(outcome, output_path, outcome_path, tables, bindings, captured):
+    qualification = None
+    from td_restapi_mesh_evidence import qualify_rest_mesh_outcome, witness_identifiers
+    from td_unified_dataset import UnifiedDatasetError, _recheck
+    from util_data import read_network_scope
+
+    fields = {"availability": "unavailable"}
+    try:
+        _recheck(Path(output_path).parent, captured)
+        final_scope, _ = read_network_scope(output_path)
+        outcome_scope, _ = read_network_scope(outcome_path)
+        network = scope_identity(final_scope)
+        if network is not None and network == scope_identity(outcome_scope):
+            qualification = qualify_rest_mesh_outcome(
+                outcome, outcome["items"], tables, bindings, network,
+                witness_identifiers([json.loads(item.content) for item in captured if item.content is not None]),
+            )
+            counts = qualification["counts"]
+            fields = {
+                "availability": "available", "answered": counts["answered"],
+                "not_provided": counts["notProvided"], "unanswered": counts["unanswered"],
+                "guard_passed": counts["answered"] > 0,
+                "complete": qualification["complete"],
+            }
+    except (UnifiedDatasetError, OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        qualification = None
+        fields = {
+            "availability": "unavailable", "reason": "qualification_error",
+            "error_type": type(exc).__name__,
+        }
+    log_event("coverage", source="otbr-restapi", command=_COMMAND,
+              stage="qualification", **fields)
+    views = mesh_outcome_views(
+        outcome, stage="qualification", qualification=qualification,
+    )
+    for view in views:
+        log_event(
+            "target_outcome", source=view.source, command=view.command,
+            stage=view.stage, **view.event_fields(),
+        )
+    log_outcome_summary(
+        views if qualification is not None else None,
+        source="otbr-restapi", command=_COMMAND, stage="qualification",
+    )
 
 
 def filter_router_device_ids(devices: list[Any], device_ids: list[str]) -> list[str]:
@@ -237,6 +325,26 @@ def parse_mesh_diag_types(types: list[str]) -> list[str]:
 
 
 def dispatch_mesh_diagnostics(
+    client: OTBRRestApiClient, args: argparse.Namespace, raw_arg: object,
+) -> Any:
+    if args.mesh_diag_command == "fetch-all":
+        return _dispatch_mesh_diagnostics(client, args, raw_arg)
+    started = time.monotonic()
+    returned = False
+    try:
+        result = _dispatch_mesh_diagnostics(client, args, raw_arg)
+        returned = True
+        return result
+    finally:
+        log_event(
+            "operation_end", source="otbr-restapi",
+            command=f"mesh-diagnostics {args.mesh_diag_command}", stage="operation",
+            state="returned" if returned else "raised",
+            elapsed_s=time.monotonic() - started,
+        )
+
+
+def _dispatch_mesh_diagnostics(
     client: OTBRRestApiClient,
     args: argparse.Namespace,
     raw_arg: object,
@@ -249,7 +357,11 @@ def dispatch_mesh_diagnostics(
     output_path = getattr(args, "resolved_output_path", None)
 
     def finish(result: Any) -> Any:
-        return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
+        return emit_rest_observed_output(
+            result, output_path, command=f"mesh-diagnostics {cmd}", stage="final",
+            single=True, logger=logging.getLogger(__name__),
+            emitter=emit_rest_command_output,
+        )
 
     if cmd == "children":
         return finish(client.fetch_mesh_diagnostics(
@@ -331,7 +443,10 @@ def dispatch_mesh_diagnostics(
                 return
             _write_checkpoint_best_effort(results, checkpoint_path)
 
-        progress_fn = make_progress_fn(len(device_ids), not getattr(args, "no_progress", False))
+        progress_fn, rejected_progress_fn = make_batch_progress_fns(
+            len(device_ids), not getattr(args, "no_progress", False),
+            command=_COMMAND, stage="router" if routers_only else "device",
+        )
         outcome = client.fetch_mesh_diagnostics_all_devices(
             device_ids,
             types=types,
@@ -343,20 +458,98 @@ def dispatch_mesh_diagnostics(
             items_only=False,
             progressive_fallback=not getattr(args, "no_fallback", False),
             on_progress=progress_fn,
+            on_rejected_progress=rejected_progress_fn,
             on_checkpoint=_on_checkpoint,
             raw=raw_arg,
         )
+        results = outcome.get("deviceResults")
+        log_event(
+            "collector_summary", source="otbr-restapi", command=_COMMAND,
+            stage="router" if routers_only else "device",
+            input=outcome.get("inputCount", "unavailable"),
+            normalized=outcome.get("queriedCount", "unavailable"),
+            attempted=(
+                sum(isinstance(record, dict) and record.get("attempts", 0) > 0 for record in results)
+                if isinstance(results, list) and all(
+                    isinstance(record, dict) and "attempts" in record
+                    for record in results
+                ) else "unavailable"
+            ),
+            terminal_results=len(results) if isinstance(results, list) else "unavailable",
+        )
+        for record in results if isinstance(results, list) else []:
+            if isinstance(record, dict):
+                log_event(
+                    "target_result", source="otbr-restapi", command=_COMMAND,
+                    stage="router" if routers_only else "device",
+                    target=record.get("deviceId"), status=record.get("status", "unavailable"),
+                )
         if response_fallback:
             _attach_responsiveness(
                 client, outcome, devices, scope_before, tables, bindings, captured,
                 output_path, dest_type,
+                progress_enabled=not getattr(args, "no_progress", False),
             )
+        views = mesh_outcome_views(
+            outcome, stage="router" if routers_only else "device",
+        )
+        for view in views:
+            log_event(
+                "target_outcome", source=view.source, command=view.command,
+                stage=view.stage, **view.event_fields(),
+            )
+        log_outcome_summary(
+            views if isinstance(results, list) else None,
+            source="otbr-restapi", command=_COMMAND,
+            stage="router" if routers_only else "device",
+        )
+        records = len(outcome["items"])
+        outcome_records = len(results) if isinstance(results, list) else 0
         if output_path is not None:
-            write_rest_collection_outcome(
-                outcome, collection_outcome_path(output_path),
-                raw=raw_arg is True, command_name="otbr-restapi mesh-diagnostics fetch-all",
-            )
+            outcome_path = collection_outcome_path(output_path)
+            try:
+                write_rest_collection_outcome(
+                    outcome, outcome_path,
+                    raw=raw_arg is True, command_name="otbr-restapi mesh-diagnostics fetch-all",
+                )
+            except Exception as exc:
+                _write_event(_COMMAND, "outcome", outcome_path, outcome_records, "failed",
+                             error_type=type(exc).__name__)
+                raise
+            _write_event(_COMMAND, "outcome", outcome_path, outcome_records, "saved")
+        else:
+            _write_event(_COMMAND, "outcome", None, outcome_records, "not_requested")
         payload = outcome["items"] if getattr(args, "items_only", False) else outcome
-        return finish(payload)
+        written = None
+
+        def on_write(value):
+            nonlocal written
+            written = value
+            _write_event(_COMMAND, "final", output_path, records,
+                         "saved" if value else "retained_previous")
+
+        try:
+            if output_path is None:
+                _write_event(_COMMAND, "final", None, records, "not_requested")
+                result = payload
+            else:
+                result = emit_rest_command_output(
+                    payload, output_path, logger=logging.getLogger(__name__),
+                    on_write=on_write,
+                )
+        except Exception as exc:
+            _write_event(_COMMAND, "final", output_path, records, "failed",
+                         error_type=type(exc).__name__)
+            raise
+
+        if response_fallback and written is True and bindings and captured:
+            _log_qualification(outcome, output_path, outcome_path, tables, bindings, captured)
+        else:
+            log_event("coverage", source="otbr-restapi", command=_COMMAND,
+                      stage="qualification", availability="unavailable")
+            log_outcome_summary(
+                None, source="otbr-restapi", command=_COMMAND, stage="qualification",
+            )
+        return result
 
     raise ValueError("Unsupported mesh-diagnostics command")

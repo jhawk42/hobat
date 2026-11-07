@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +16,8 @@ import otbr_cli_meshdiag_topology as meshdiag_topology
 import otbr_cli_networkdiag_topology as networkdiag
 import otbr_cli_router_table as router_table
 import otbr_cli_thread_network_info as thread_info
+import otbr_cli_bbr as bbr
+import util_data
 from otbr_cli_util import (
     classify_meshdiag_router_table,
     meshdiag_collection_outcome,
@@ -50,6 +54,25 @@ COLLECTOR_CASES = (
     CollectorCase(childtable, "fetch_all_meshdiag_child_tables", OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME, [{"router_child_table_count": 1}], [{"childTableCount": 1}]),
     CollectorCase(childip6, "fetch_all_meshdiag_child_ip6_tables", OTBR_CLI_MESHDIAG_ROUTER_CHILDIP6_FILENAME, [{"router_child_ip6_table_count": 1}], [{"childIp6TableCount": 1}]),
 )
+
+
+def _structured_events(caplog, name=None):
+    events = []
+    for record in caplog.records:
+        if record.levelno != logging.INFO:
+            continue
+        fields = {}
+        for key, value in re.findall(
+            r'([A-Za-z0-9_]+)=("(?:\\.|[^"\\])*"|\S+)',
+            record.getMessage(),
+        ):
+            try:
+                fields[key] = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+        if "event" in fields and (name is None or fields["event"] == name):
+            events.append(fields)
+    return events
 
 
 def _prepare_collector(monkeypatch, case: CollectorCase, events: list[str]):
@@ -819,6 +842,40 @@ def test_networkdiag_multicast_collector_checkpoint_final_and_return_order(monke
     assert events == ["collect", checkpoint_path, output_path, "returned"]
 
 
+def test_multicast_neighbors_prefix_failure_reports_preflight_and_keeps_final(
+    monkeypatch, tmp_path, caplog
+):
+    output = tmp_path / OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME
+    output.write_text('[{"previous": true}]\n')
+    calls = []
+    monkeypatch.setattr(
+        networkdiag.util_ot_ctl, "exec_ot_ctl",
+        lambda command: calls.append(command) or "Done",
+    )
+    monkeypatch.setattr(
+        networkdiag, "fetch_and_parse_router_table",
+        lambda *_a, **_kw: pytest.fail("router collection must not start"),
+    )
+    caplog.set_level(logging.INFO)
+
+    with pytest.raises(networkdiag.util_network.PrefixFetchError):
+        networkdiag.main_multicast_neighbors(["--datadir", str(tmp_path)])
+
+    assert calls == ["prefix meshlocal"]
+    assert output.read_text() == '[{"previous": true}]\n'
+    assert not list(tmp_path.glob("*.partial.json"))
+    operation, = _structured_events(caplog, "operation_end")
+    assert operation["output_state"] == "completion_only"
+    started, = _structured_events(caplog, "step_start")
+    ended, = _structured_events(caplog, "step_end")
+    assert started["step"] == ended["step"] == "thread-network-info"
+    assert ended["state"] == "raised"
+    assert ended["error_type"] == "PrefixFetchError"
+    assert ended["reason_code"] == "invalid-prefix-output"
+    assert ended["elapsed_s"] >= 0
+    assert not _structured_events(caplog, "write")
+
+
 @pytest.mark.parametrize("multicast_addr", ["ff03::1", "ff02::1"])
 def test_multicast_networkdiag_request_metadata_matches_commands(monkeypatch, multicast_addr):
     commands = []
@@ -1070,3 +1127,322 @@ def test_cli_mains_no_longer_contain_final_save_calls():
         source = inspect.getsource(main_fn)
         assert "save_json_atomic(" not in source
         assert "save_topology_to_json_file(" not in source
+
+
+@pytest.mark.parametrize(
+    "records",
+    [[{"router_id": "0x01"}], []],
+    ids=["records", "empty"],
+)
+def test_router_table_bulk_summary_counts_records_and_preserves_return(
+    monkeypatch, tmp_path, caplog, records
+):
+    caplog.set_level(logging.INFO)
+    clock = iter((12.0, 12.25))
+    monkeypatch.setattr(router_table.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(router_table, "fetch_router_table", lambda: "raw")
+    monkeypatch.setattr(router_table, "parse_router_table", lambda *_args: records)
+    monkeypatch.setattr(router_table, "save_final_json", lambda *_args, **_kwargs: True)
+    output = tmp_path / "nested" / "router-table.json"
+
+    result = router_table.fetch_and_parse_router_table({}, output_path=output)
+
+    assert result is records
+    summaries = _structured_events(caplog, "collector_summary")
+    assert len(summaries) == 1
+    assert summaries[0]["command"] == "router-table"
+    assert summaries[0]["stage"] == "bulk"
+    assert summaries[0]["router_records"] == len(records)
+    assert summaries[0]["collection_elapsed_ms"] == 250
+    assert summaries[0]["final"] == "saved"
+
+
+def test_router_table_empty_raw_output_logs_one_failed_summary(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    clock = iter((1.0, 1.1))
+    monkeypatch.setattr(router_table.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(router_table, "fetch_router_table", lambda: "")
+
+    with pytest.raises(ValueError, match="output is empty"):
+        router_table.fetch_and_parse_router_table()
+
+    summary, = _structured_events(caplog, "collector_summary")
+    assert summary["state"] == "failed"
+    assert summary["router_records"] is None
+    assert summary["final"] == "not_requested"
+
+
+def test_router_table_without_output_reports_collection_without_write(
+    monkeypatch, caplog
+):
+    caplog.set_level(logging.INFO)
+    records = [{"router_id": "0x01"}]
+    monkeypatch.setattr(router_table, "fetch_router_table", lambda: "raw")
+    monkeypatch.setattr(router_table, "parse_router_table", lambda *_args: records)
+    monkeypatch.setattr(
+        router_table,
+        "save_final_json",
+        lambda *_args, **_kwargs: pytest.fail("unexpected save"),
+    )
+
+    assert router_table.fetch_and_parse_router_table() is records
+
+    summary, = _structured_events(caplog, "collector_summary")
+    assert summary["router_records"] == 1
+    assert summary["final"] == "not_requested"
+    assert not _structured_events(caplog, "write")
+
+
+def test_router_table_writer_false_is_retained_and_conversion_failure_is_summarized(
+    monkeypatch, caplog, tmp_path
+):
+    caplog.set_level(logging.INFO)
+    records = [{"router_id": "0x01"}]
+    monkeypatch.setattr(router_table, "fetch_router_table", lambda: "raw")
+    monkeypatch.setattr(router_table, "parse_router_table", lambda *_args: records)
+    monkeypatch.setattr(router_table, "save_final_json", lambda *_args, **_kwargs: False)
+
+    assert router_table.fetch_and_parse_router_table(
+        {}, output_path=tmp_path / "nested" / "router.json"
+    ) is records
+    summary, = _structured_events(caplog, "collector_summary")
+    write, = _structured_events(caplog, "write")
+    assert summary["final"] == "retained_previous"
+    assert write["disposition"] == "retained_previous"
+    assert not any("Saved router table" in record.getMessage() for record in caplog.records)
+
+    caplog.clear()
+    monkeypatch.setattr(
+        router_table,
+        "convert_keys_to_camel_case",
+        lambda *_args: (_ for _ in ()).throw(ValueError("conversion failed")),
+    )
+    with pytest.raises(ValueError, match="conversion failed"):
+        router_table.fetch_and_parse_router_table({}, output_path=tmp_path / "router.json")
+    summary, = _structured_events(caplog, "collector_summary")
+    assert summary["state"] == "failed"
+    assert summary["router_records"] == 1
+    assert summary["final"] == "not_attempted"
+    assert not _structured_events(caplog, "write")
+
+
+def test_router_table_writer_exception_is_logged(monkeypatch, caplog, tmp_path):
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(router_table, "fetch_router_table", lambda: "raw")
+    monkeypatch.setattr(router_table, "parse_router_table", lambda *_args: [])
+    monkeypatch.setattr(
+        router_table,
+        "save_final_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TypeError("serialization failed")),
+    )
+    with pytest.raises(TypeError, match="serialization failed"):
+        router_table.fetch_and_parse_router_table({}, output_path=tmp_path / "one.json")
+    write, = _structured_events(caplog, "write")
+    assert write["disposition"] == "failed"
+    assert write["error_type"] == "TypeError"
+
+
+def test_meshdiag_bulk_summary_reports_child_entries_and_false_write(
+    monkeypatch, caplog, tmp_path
+):
+    caplog.set_level(logging.INFO)
+    clock = iter((3.0, 3.125))
+    monkeypatch.setattr(meshdiag_topology.time, "monotonic", lambda: next(clock))
+    records = [{"router_id": "0x01", "total_children": 2}, {"total_children": 1}]
+    monkeypatch.setattr(meshdiag_topology, "fetch_meshdiag_topology", lambda: "raw")
+    monkeypatch.setattr(meshdiag_topology, "parse_meshdiag_topology_output", lambda *_args: records)
+    monkeypatch.setattr(meshdiag_topology, "enrich_topology_routers", lambda *_args: records)
+    monkeypatch.setattr(meshdiag_topology, "save_final_json", lambda *_args, **_kwargs: False)
+
+    result = meshdiag_topology.get_meshdiag_topology({}, {}, tmp_path / "nested" / "topology.json")
+
+    assert result is records
+    summary, = _structured_events(caplog, "collector_summary")
+    write, = _structured_events(caplog, "write")
+    assert summary["command"] == "meshdiag topology"
+    assert summary["stage"] == "bulk"
+    assert summary["router_records"] == 2
+    assert summary["child_entries"] == 3
+    assert summary["collection_elapsed_ms"] == 125
+    assert summary["final"] == "retained_previous"
+    assert write["disposition"] == "retained_previous"
+    assert any("Converted 2 entries" in record.getMessage() for record in caplog.records)
+    assert not any("Saved 2 entries after converting" in record.getMessage() for record in caplog.records)
+
+
+def test_meshdiag_conversion_failure_reports_collection_but_no_write(
+    monkeypatch, caplog, tmp_path
+):
+    caplog.set_level(logging.INFO)
+    records = [{"total_children": 2}]
+    monkeypatch.setattr(meshdiag_topology, "fetch_meshdiag_topology", lambda: "raw")
+    monkeypatch.setattr(meshdiag_topology, "parse_meshdiag_topology_output", lambda *_args: records)
+    monkeypatch.setattr(meshdiag_topology, "enrich_topology_routers", lambda *_args: records)
+    monkeypatch.setattr(
+        meshdiag_topology,
+        "convert_keys_to_camel_case",
+        lambda *_args: (_ for _ in ()).throw(ValueError("conversion failed")),
+    )
+    monkeypatch.setattr(
+        meshdiag_topology,
+        "save_final_json",
+        lambda *_args, **_kwargs: pytest.fail("write after conversion failure"),
+    )
+
+    with pytest.raises(ValueError, match="conversion failed"):
+        meshdiag_topology.get_meshdiag_topology(
+            {}, {}, tmp_path / "nested" / "topology.json"
+        )
+
+    summary, = _structured_events(caplog, "collector_summary")
+    assert summary["state"] == "failed"
+    assert summary["router_records"] == 1
+    assert summary["child_entries"] == 2
+    assert summary["final"] == "not_attempted"
+    assert not _structured_events(caplog, "write")
+
+
+@pytest.mark.parametrize(
+    ("module", "invoke", "prepare"),
+    [
+        (
+            router_table,
+            lambda output: router_table.fetch_and_parse_router_table({}, output_path=output),
+            lambda monkeypatch: (
+                monkeypatch.setattr(router_table, "fetch_router_table", lambda: "raw"),
+                monkeypatch.setattr(router_table, "parse_router_table", lambda *_args: []),
+            ),
+        ),
+        (
+            meshdiag_topology,
+            lambda output: meshdiag_topology.get_meshdiag_topology({}, {}, output_path=output),
+            lambda monkeypatch: (
+                monkeypatch.setattr(meshdiag_topology, "fetch_meshdiag_topology", lambda: "raw"),
+                monkeypatch.setattr(meshdiag_topology, "parse_meshdiag_topology_output", lambda *_args: []),
+                monkeypatch.setattr(meshdiag_topology, "enrich_topology_routers", lambda *_args: []),
+            ),
+        ),
+    ],
+    ids=["router-table", "meshdiag-topology"],
+)
+def test_bulk_companion_write_failure_is_reported_without_swallowing(
+    monkeypatch, caplog, tmp_path, module, invoke, prepare
+):
+    caplog.set_level(logging.INFO)
+    prepare(monkeypatch)
+    monkeypatch.setattr(
+        util_data,
+        "write_network_scope",
+        lambda *_args: (_ for _ in ()).throw(OSError("companion failed")),
+    )
+    output = tmp_path / "nested" / "td-otbr-cli-snapshot.json"
+    output.parent.mkdir()
+
+    with pytest.raises(OSError, match="companion failed"):
+        invoke(output)
+
+    write, = _structured_events(caplog, "write")
+    summary, = _structured_events(caplog, "collector_summary")
+    assert write["disposition"] == "failed"
+    assert write["error_type"] == "OSError"
+    assert summary["final"] == "failed"
+    assert output.exists()
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_fields"),
+    [({"network_name": "secret-value"}, 1), ({}, 0)],
+    ids=["normal", "empty"],
+)
+def test_thread_network_info_logs_fields_only_and_preserves_ext_pan_id(
+    monkeypatch, caplog, tmp_path, payload, expected_fields
+):
+    caplog.set_level(logging.INFO)
+    clock = iter((7.0, 7.5))
+    monkeypatch.setattr(thread_info.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(thread_info.util_network, "fetch_thread_network_info", lambda: payload)
+    writes = []
+    monkeypatch.setattr(
+        thread_info,
+        "save_final_json",
+        lambda *args, **kwargs: writes.append((args, kwargs)) or True,
+    )
+    output = tmp_path / "nested" / "metadata.json"
+
+    result = thread_info.collect_thread_network_info(output, ext_pan_id="0x1234")
+
+    assert result is payload
+    assert writes[0][0][1] == output
+    assert writes[0][1]["ext_pan_id"] == "0x1234"
+    summary, = _structured_events(caplog, "collector_summary")
+    assert summary["command"] == "thread-network-info"
+    assert summary["stage"] == "metadata"
+    assert summary["fields"] == expected_fields
+    assert summary["elapsed_ms"] == 500
+    assert "secret-value" not in caplog.text
+
+
+def test_thread_network_info_without_output_reports_not_requested(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    clock = iter((4.0, 4.1))
+    payload = {"network_name": "not-logged"}
+    monkeypatch.setattr(thread_info.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(thread_info.util_network, "fetch_thread_network_info", lambda: payload)
+    monkeypatch.setattr(
+        thread_info,
+        "save_final_json",
+        lambda *_args, **_kwargs: pytest.fail("unexpected save"),
+    )
+
+    assert thread_info.collect_thread_network_info() is payload
+
+    summary, = _structured_events(caplog, "collector_summary")
+    assert summary["fields"] == 1
+    assert summary["final"] == "not_requested"
+    assert "not-logged" not in caplog.text
+
+
+def test_meshdiag_empty_parsed_output_keeps_empty_result_policy(monkeypatch, caplog, tmp_path):
+    caplog.set_level(logging.INFO)
+    records = []
+    monkeypatch.setattr(meshdiag_topology, "fetch_meshdiag_topology", lambda: "raw")
+    monkeypatch.setattr(meshdiag_topology, "parse_meshdiag_topology_output", lambda *_args: records)
+    monkeypatch.setattr(meshdiag_topology, "enrich_topology_routers", lambda *_args: records)
+    writes = []
+    monkeypatch.setattr(
+        meshdiag_topology,
+        "save_final_json",
+        lambda payload, path, *_args, **_kwargs: writes.append((payload, path)) or True,
+    )
+
+    result = meshdiag_topology.get_meshdiag_topology({}, {}, tmp_path / "empty.json")
+
+    assert result is records
+    assert writes == [(records, tmp_path / "empty.json")]
+    summary, = _structured_events(caplog, "collector_summary")
+    assert summary["router_records"] == 0
+    assert summary["child_entries"] == 0
+    assert summary["final"] == "saved"
+
+
+def test_bbr_nested_router_table_emits_separate_summaries_and_one_request(
+    monkeypatch, caplog
+):
+    caplog.set_level(logging.INFO)
+    requests = []
+    records = [{"router_id": "0x01"}]
+    monkeypatch.setattr(
+        router_table, "fetch_router_table", lambda: requests.append("router table") or "raw"
+    )
+    monkeypatch.setattr(router_table, "parse_router_table", lambda *_args: records)
+    monkeypatch.setattr(bbr.util_ot_ctl, "exec_ot_ctl", lambda command: "Done")
+
+    result = bbr.collect_primary_bbr()
+
+    assert requests == ["router table"]
+    assert list(result) == ["bbr", "routers"]
+    events = _structured_events(caplog, "collector_summary")
+    assert [event["command"] for event in events] == ["router-table", "bbr"]
+    assert events[0]["router_records"] == 1
+    assert events[1]["router_records"] == 1
+    assert events[1]["primary_bbr_present"] is False

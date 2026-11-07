@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -14,6 +15,78 @@ def _target() -> topology.ChildFetchTarget:
         child_rloc16="0x1001",
         child_record={"rloc16": "0x1001"},
     )
+
+
+@pytest.mark.parametrize("responses,expected,kinds", [
+    ([None, {"extaddr": "child"}], "completed", ["initial", "same_set_retry"]),
+    ([None, None, {"extaddr": "child"}], "completed", ["initial", "same_set_retry", "request_fallback"]),
+    ([None, None, None], "failed", ["initial", "same_set_retry", "request_fallback"]),
+])
+def test_common_child_view_keeps_verified_attempts_and_ping_separate(responses, expected, kinds):
+    fast, = topology.build_child_fetch_policies(True, False)
+    inputs = iter(responses)
+    outcome = topology.fetch_child_with_retries(
+        _target(), fast, {}, lambda *_args: next(inputs), lambda _seconds: None,
+    )
+    view = topology.child_fetch_outcome_view(
+        outcome, topology.ChildPingOutcome(_target(), "reply"),
+    )
+    assert view.initial_status == "failed"
+    assert view.effective_status == expected
+    assert [attempt.kind for attempt in view.attempts] == kinds
+    assert view.response == "observed"
+    assert view.response_evidence == ("direct" if expected == "completed" else "ping")
+    assert view.recovery_state == ("recovered" if expected == "completed" else "attempted")
+    assert view.coverage == "unknown"
+    assert view.table_class == "unavailable"
+    assert view.original_effective_status == outcome.terminal_reason
+
+
+def test_common_child_already_satisfied_view_has_no_actual_attempts():
+    fast, = topology.build_child_fetch_policies(True, False)
+    outcome = topology.fetch_child_with_retries(
+        _target(), fast, {"last_attempt_tlv_detail_level": fast.satisfied_detail_level},
+        lambda *_args: pytest.fail("unexpected request"), lambda _seconds: None,
+    )
+    view = topology.child_fetch_outcome_view(outcome)
+    assert view.initial_status == view.effective_status == "skipped"
+    assert view.attempts == ()
+    assert view.response == "unknown"
+
+
+def test_common_child_view_keeps_fast_failures_before_detail_success():
+    fast, detail = topology.build_child_fetch_policies(True, True)
+    target = _target()
+    failed_fast = topology.fetch_child_with_retries(
+        target, fast, {}, lambda *_args: None, lambda _seconds: None,
+    )
+    successful_detail = topology.fetch_child_with_retries(
+        target, detail, {}, lambda *_args: {"extaddr": "child"}, lambda _seconds: None,
+    )
+    view = topology.child_fetch_outcome_view(
+        successful_detail, previous_outcomes=[failed_fast],
+    )
+    assert view.initial_status == "failed"
+    assert view.effective_status == "completed"
+    assert len(view.attempts) == len(failed_fast.attempted) + len(successful_detail.attempted) == 10
+    assert [attempt.status for attempt in view.attempts[:3]] == ["failed"] * 3
+    assert [attempt.status for attempt in view.attempts[3:]] == ["completed"] * 7
+    assert view.attempts[3].kind == "child_detail"
+    assert (view.recovery_state, view.recovery_kind) == ("recovered", "child_detail")
+    assert view.response_evidence == "direct"
+
+
+def test_common_child_history_rejects_another_target():
+    fast, = topology.build_child_fetch_policies(True, False)
+    first = topology.fetch_child_with_retries(
+        _target(), fast, {}, lambda *_args: None, lambda _seconds: None,
+    )
+    other = topology.ChildFetchOutcome(
+        topology.ChildFetchTarget("0x2000", "0x2001", {}),
+        "detail", (), (), "already-satisfied",
+    )
+    with pytest.raises(ValueError, match="different targets"):
+        topology.child_fetch_outcome_view(other, previous_outcomes=[first])
 
 
 def test_child_fetch_policies_preserve_attempts_and_delays() -> None:
@@ -40,6 +113,240 @@ def test_child_fetch_policies_preserve_attempts_and_delays() -> None:
         topology.ChildFetchAttempt(0, 8, "0 1 2 8", None)
     with pytest.raises(ValueError, match="TLVs"):
         topology.ChildFetchAttempt(0, 170, "invalid", None)
+
+
+@pytest.mark.parametrize("response", [None, {"rloc16": "0x1001", "extaddr": "child-ext"}])
+def test_child_progress_measures_fixed_population(monkeypatch, caplog, response):
+    ticks = iter([1.0, 1.75])
+    monkeypatch.setattr(topology.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
+    calls = []
+    monkeypatch.setattr(
+        topology, "fetch_network_diag_for_device",
+        lambda *_args, **_kwargs: calls.append(1) or response,
+    )
+    monkeypatch.setattr(topology, "save_topology_to_json_file", lambda *_a, **_k: None)
+    caplog.set_level(logging.INFO)
+    topology.fetch_network_diag_topology_expand_children(
+        True, ["0x1000"], {"0x1000": {"children": [
+            {"rloc16": "0x1001"}, {"rloc16": "0x1001"},
+        ]}}, {}, {}, {}, None, None, {}, None,
+    )
+    progress = [
+        record.getMessage() for record in caplog.records
+        if 'event="target_progress"' in record.getMessage()
+    ]
+    assert len(progress) == 1
+    assert 'stage="child"' in progress[0]
+    assert 'progress="[1/1]"' in progress[0]
+    assert 'elapsed_s=0.75' in progress[0]
+    assert f'status="{"responded" if response else "exhausted"}"' in progress[0]
+    assert len(calls) == (1 if response else 3)
+    summaries = [
+        r.message for r in caplog.records if 'event="outcome_summary"' in r.message
+        and 'stage="child"' in r.message and 'status_phase="effective"' in r.message
+    ]
+    assert len(summaries) == 1
+    assert 'population=1' in summaries[0]
+    statuses = json.JSONDecoder().raw_decode(summaries[0].split("terminal_statuses=", 1)[1])[0]
+    attempts = json.JSONDecoder().raw_decode(summaries[0].split("verified_attempt_kinds=", 1)[1])[0]
+    assert sum(statuses.values()) == 1
+    assert statuses["completed" if response else "failed"] == 1
+    assert sum(attempts.values()) == len(calls)
+
+
+def test_router_progress_reports_multicast_skip_and_empty_stage(monkeypatch, caplog):
+    ticks = iter([1.0, 1.125])
+    monkeypatch.setattr(topology.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(topology, "summarize_tlv_response_values", lambda _history: "0 1 2 8")
+    monkeypatch.setattr(topology, "fetch_network_diag_for_device", lambda *_a, **_k: pytest.fail("unexpected request"))
+    monkeypatch.setattr(topology, "save_topology_to_json_file", lambda *_a, **_k: None)
+    caplog.set_level(logging.INFO)
+    topology.fetch_network_diag_topology_detail_routers(
+        ["0x1000"], {"0x1000": {
+            "rloc16": "0x1000", "tlv_response_history": [{"existing": True}],
+        }}, {}, {}, {}, None, None, {}, None,
+    )
+    assert 'progress="[1/1]"' in caplog.text
+    assert 'status="skipped"' in caplog.text
+    assert 'reason_code="already_collected"' in caplog.text
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "elapsed_s=0.125" in caplog.text
+    caplog.clear()
+    topology.fetch_network_diag_topology_detail_routers([], {}, {}, {}, {}, None, None, {}, None)
+    topology.fetch_network_diag_topology_expand_children(
+        True, [], {}, {}, {}, {}, None, None, {}, None,
+    )
+    assert caplog.text.count("targets=0") == 4
+    assert 'event="target_progress"' not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("responses", "expected_status", "reason"),
+    [
+        ([None, None], "failed", "diagnostic-result-missing"),
+        ([None, {"rloc16": "0x1000", "extaddr": "0011223344556677"}],
+         "completed", "diagnostic-result-missing"),
+        ([{"rloc16": "0x1000", "extaddr": "0011223344556677"}],
+         "completed", "unknown"),
+    ],
+)
+def test_router_missing_result_reason_preserves_attempts_and_unknown_coverage(
+    monkeypatch, caplog, responses, expected_status, reason
+):
+    remaining = iter(responses)
+    calls = []
+    views = []
+    log_views = topology._log_networkdiag_views
+
+    def fetch(*_args, **_kwargs):
+        calls.append(1)
+        return next(remaining)
+
+    def capture_views(outcomes, stage):
+        views.extend(outcomes)
+        log_views(outcomes, stage)
+
+    monkeypatch.setattr(topology, "fetch_network_diag_for_device", fetch)
+    monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(topology, "save_topology_to_json_file", lambda *_a, **_k: None)
+    monkeypatch.setattr(topology, "_log_networkdiag_views", capture_views)
+    caplog.set_level(logging.INFO)
+
+    topology.fetch_network_diag_topology_detail_routers(
+        ["0x1000"], {}, {}, {}, {}, None, None, {}, None,
+    )
+
+    view, = views
+    assert len(calls) == len(responses) == len(view.attempts)
+    assert view.effective_status == expected_status
+    assert view.reason_code == reason
+    assert view.coverage == "unknown"
+    assert view.table_class == "unavailable"
+    assert f'reason_code="{reason}"' in caplog.text
+    assert f'"{reason}":1' in caplog.text
+    if expected_status == "failed":
+        assert view.response == "unknown"
+        assert view.recovery_state == "attempted"
+    elif len(responses) > 1:
+        assert view.initial_status == "failed"
+        assert view.recovery_state == "recovered"
+    warnings = [
+        record.getMessage() for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.getMessage().startswith("Router diagnostic collection incomplete:")
+    ]
+    assert len(warnings) == (1 if expected_status == "failed" else 0)
+
+
+def test_router_collection_warning_reports_actual_coverage_not_saved_records(
+    monkeypatch, caplog
+):
+    routers = [f"0x{index * 1024:04x}" for index in range(1, 20)]
+    calls = []
+
+    def fetch(rloc16, _prefix, _labels, _routers, _addresses, detail, **_kwargs):
+        calls.append((rloc16, detail))
+        index = routers.index(rloc16)
+        if index < 2 or (index < 4 and detail == 490):
+            return {"rloc16": rloc16, "extaddr": f"{index + 1:016x}"}
+        return None
+
+    monkeypatch.setattr(topology, "fetch_network_diag_for_device", fetch)
+    monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(topology, "save_topology_to_json_file", lambda *_a, **_k: None)
+    caplog.set_level(logging.INFO)
+    records = {}
+
+    topology.fetch_network_diag_topology_detail_routers(
+        routers, records, {}, {}, {}, None, None, {}, None,
+    )
+
+    warning, = [
+        record.getMessage() for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.getMessage().startswith("Router diagnostic collection incomplete:")
+    ]
+    assert "4/19 routers completed direct queries" in warning
+    assert "15 returned no matching parsed result" in warning
+    assert "0 skipped direct queries" in warning
+    assert "Topology currently contains 19 records" in warning
+    assert "record count does not establish diagnostic coverage" in warning
+    assert "saved" not in warning.lower()
+    assert len(calls) == 36
+    assert len(records) == 19
+
+
+def test_router_collection_warning_separates_multicast_skips_and_other_records(
+    monkeypatch, caplog
+):
+    monkeypatch.setattr(topology, "summarize_tlv_response_values", lambda _history: "0 1 2 8")
+    monkeypatch.setattr(topology, "fetch_network_diag_for_device", lambda *_a, **_k: None)
+    monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(topology, "save_topology_to_json_file", lambda *_a, **_k: None)
+    records = {
+        "0x1000": {"rloc16": "0x1000", "tlv_response_history": [{"existing": True}]},
+        "0x1001": {"rloc16": "0x1001"},
+    }
+    caplog.set_level(logging.INFO)
+
+    topology.fetch_network_diag_topology_detail_routers(
+        ["0x1000", "0x2000"], records, {}, {}, {}, None, None, {}, None,
+    )
+
+    warning, = [
+        record.getMessage() for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.getMessage().startswith("Router diagnostic collection incomplete:")
+    ]
+    assert "0/2 routers completed direct queries" in warning
+    assert "1 returned no matching parsed result" in warning
+    assert "1 skipped direct queries using existing multicast results" in warning
+    assert "Topology currently contains 3 records" in warning
+
+
+def test_networkdiag_write_events_follow_actual_results(monkeypatch, caplog, tmp_path):
+    caplog.set_level(logging.INFO)
+    topology.save_topology_to_json_file({}, tmp_path / "empty.partial.json", checkpoint=True)
+    assert 'disposition="skipped_unusable"' in caplog.text
+    assert not (tmp_path / "empty.partial.json").exists()
+    topology.save_topology_to_json_file({}, tmp_path / "empty.json")
+    assert 'disposition="saved"' in caplog.text
+    monkeypatch.setattr(
+        topology, "save_final_json",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("scope companion failed")),
+    )
+    caplog.clear()
+    with pytest.raises(OSError):
+        topology.save_topology_to_json_file({}, tmp_path / "failure.json")
+    assert 'disposition="failed"' in caplog.text
+    assert 'disposition="saved"' not in caplog.text
+
+
+def test_multicast_events_separate_attempt_responses_and_unique_devices(monkeypatch, caplog):
+    requests = []
+    monkeypatch.setattr(
+        topology.util_ot_ctl, "exec_ot_ctl",
+        lambda command: requests.append(command) or "Done",
+    )
+    monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        topology, "parse_multicast_diag_output",
+        lambda *_a, **_k: {
+            "first": {"extaddr": "0011223344556677", "rloc16": "0x1000"},
+            "duplicate": {"extaddr": "0011223344556677", "rloc16": "0x1000"},
+        },
+    )
+    caplog.set_level(logging.INFO)
+    result = topology.fetch_network_diag_multicast("ff03::2")
+    attempts = [
+        record.getMessage() for record in caplog.records
+        if 'event="multicast_attempt"' in record.getMessage()
+    ]
+    assert len(requests) == len(attempts) == 4
+    assert len(result) == 1
+    assert all("responses=2" in event and "unique_devices=1" in event for event in attempts)
+    assert all("tlvs=" in event and f"attempt={index}" in event for index, event in enumerate(attempts, 1))
 
 
 def test_collect_child_targets_is_stable_deduplicated_and_non_mutating() -> None:

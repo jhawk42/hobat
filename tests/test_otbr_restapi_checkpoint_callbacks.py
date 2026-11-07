@@ -183,7 +183,7 @@ def test_topology_wires_fast_pass_checkpoint_to_canonical_snapshot(tmp_path) -> 
     ) as checkpoint_write, patch.object(
         topology_module,
         "emit_rest_payload_output",
-        side_effect=lambda payload, *_args, **_kwargs: payload,
+        wraps=topology_module.emit_rest_payload_output,
     ):
         topology_module.dispatch_topology(client, args, raw_arg=False)
 
@@ -191,8 +191,8 @@ def test_topology_wires_fast_pass_checkpoint_to_canonical_snapshot(tmp_path) -> 
     payload, checkpoint_path, command_name, stage = checkpoint_write.call_args.args
     assert payload == [{"id": "diag-fast"}]
     assert checkpoint_path == tmp_path / "td-otbr-restapi-diagnostics-fetch-all.partial.json"
-    assert command_name == "otbr-restapi topology diagnostics"
-    assert stage == "pass:fast"
+    assert command_name == "topology"
+    assert stage == "diagnostics.pass:fast"
 
 
 def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_resolved(tmp_path) -> None:
@@ -270,6 +270,43 @@ def test_best_effort_checkpoint_write_failures_warn_and_continue(
 
     assert "checkpoint_write_failed" in caplog.text
     assert "action=continue_best_effort" in caplog.text
+
+
+@pytest.mark.parametrize("module,extra", [
+    (diagnostics_module, ("diagnostics fetch-all", "initial")),
+    (mesh_module, ()),
+])
+@pytest.mark.parametrize("payload,disposition", [
+    ([], "skipped_unusable"), ([{"id": "one"}], "written"),
+])
+def test_rest_checkpoint_reports_actual_write(tmp_path, caplog, module, extra, payload, disposition):
+    import logging
+
+    path = tmp_path / "checkpoint.json"
+    with caplog.at_level(logging.INFO):
+        module._write_checkpoint_best_effort(payload, path, *extra)
+    assert f'disposition="{disposition}"' in caplog.text
+    assert path.exists() is bool(payload)
+
+
+@pytest.mark.parametrize("module,extra", [
+    (diagnostics_module, ("diagnostics fetch-all", "initial")),
+    (mesh_module, ()),
+])
+def test_rest_checkpoint_failure_event_is_safe(tmp_path, caplog, module, extra):
+    import logging
+
+    with caplog.at_level(logging.INFO), patch.object(
+        module, "save_checkpoint_json", side_effect=OSError("networkKey=sentinel-secret")
+    ):
+        module._write_checkpoint_best_effort(
+            [{"id": "one"}], tmp_path / "password=path-secret\ncheckpoint.json", *extra
+        )
+    event = next(record.message for record in caplog.records if record.message.startswith('event="checkpoint"'))
+    assert 'disposition="failed"' in event
+    assert "sentinel-secret" not in caplog.text
+    assert "path-secret" not in caplog.text
+    assert "\ncheckpoint.json" not in caplog.text
 
 
 def test_rest_fetch_dispatchers_do_not_checkpoint_without_output_path() -> None:

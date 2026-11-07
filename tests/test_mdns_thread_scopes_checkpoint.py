@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import mdns_thread_scopes as mdns
 import util_network
+import util_data
 
 
 class TestMDNSCheckpointSnapshots(unittest.TestCase):
@@ -84,6 +85,7 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
             include_matter_tcp_supported=True,
             omr_ipv6addr_prefix=None,
             checkpoint_output_file=self.data_dir.resolve() / "td-mdns-scopes-thread.partial.json",
+            command="thread",
         )
         browsed_types = [call.args[1] for call in service_browser.call_args_list]
         self.assertEqual(
@@ -132,6 +134,145 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
             {mdns.MDNS_SCOPE_FILENAMES[name] for name in ("thread", "br", "hap", "matter")},
         )
         self.assertTrue(all(call.args[0] == [] for call in save_final_json.call_args_list))
+
+    def test_scoped_browse_passes_scope_to_checkpoint_events(self) -> None:
+        listener_class, _, _ = self._run_mocked_thread_browse(["br"], [])
+        self.assertEqual(listener_class.call_args.kwargs["command"], "br")
+
+        listener = mdns.MDNSDumpListener(
+            checkpoint_output_file=self.data_dir / "br.partial.json",
+            command="br",
+        )
+        events = []
+        with patch.object(mdns, "save_checkpoint_json", return_value=True), patch.object(
+            mdns,
+            "log_event",
+            side_effect=lambda event, **fields: events.append((event, fields)),
+        ):
+            listener._write_checkpoint_snapshot()
+        self.assertEqual(events[0][1]["command"], "br")
+        self.assertEqual(events[0][0], "checkpoint")
+
+    def test_browse_summary_uses_elapsed_time_and_dynamic_record_count(self) -> None:
+        records = [self._scope_record("_meshcop._udp.local.", f"br-{i}.local.") for i in range(3)]
+        events = []
+        with patch.object(mdns, "_resolve_optional_omr_ipv6addr_prefix", return_value=None), patch.object(
+            mdns, "MDNSDumpListener"
+        ) as listener_class, patch.object(mdns, "Zeroconf"), patch.object(
+            mdns, "ServiceBrowser"
+        ), patch.object(mdns.threading, "Thread"), patch.object(
+            mdns, "save_final_json", return_value=True
+        ), patch.object(mdns.time, "monotonic", side_effect=(10.0, 12.75)), patch.object(
+            mdns, "log_event", side_effect=lambda event, **fields: events.append((event, fields))
+        ):
+            listener_class.return_value.get_records.return_value = records
+            mdns.main(["thread", "--datadir", str(self.data_dir)])
+
+        summary = next(fields for event, fields in events if event == "collector_summary")
+        self.assertEqual(summary["elapsed_s"], 2.75)
+        self.assertEqual(summary["discovered_records"], 3)
+        self.assertNotIn("total", summary)
+        self.assertNotIn("targets", summary)
+
+    def test_later_scope_snapshot_failure_reports_each_final_disposition(self) -> None:
+        records = [
+            self._scope_record("_meshcop._udp.local.", "br.local."),
+            self._scope_record("_hap._udp.local.", "hap.local."),
+        ]
+        events = []
+        with patch.object(mdns, "_resolve_optional_omr_ipv6addr_prefix", return_value=None), patch.object(
+            mdns, "MDNSDumpListener"
+        ) as listener_class, patch.object(mdns, "Zeroconf"), patch.object(
+            mdns, "ServiceBrowser"
+        ), patch.object(mdns.threading, "Thread"), patch.object(
+            mdns, "save_final_json", side_effect=(True, OSError("scope companion failed"))
+        ), patch.object(mdns.time, "monotonic", side_effect=(1.0, 2.0)), patch.object(
+            mdns, "log_event", side_effect=lambda event, **fields: events.append((event, fields))
+        ):
+            listener_class.return_value.get_records.return_value = records
+            with self.assertRaisesRegex(OSError, "scope companion failed"):
+                mdns.main(
+                    [
+                        "thread",
+                        "--write-scope-snapshots",
+                        "--datadir",
+                        str(self.data_dir),
+                    ]
+                )
+
+        writes = [fields for event, fields in events if event == "write"]
+        self.assertEqual(
+            [entry["disposition"] for entry in writes], ["saved", "failed"]
+        )
+        self.assertEqual(writes[0]["output"], mdns.MDNS_SCOPE_FILENAMES["thread"])
+        self.assertEqual(writes[1]["output"], mdns.MDNS_SCOPE_FILENAMES["br"])
+        self.assertFalse(any(entry.get("disposition") == "all_saved" for entry in writes))
+
+    def test_checkpoint_reports_actual_skipped_and_failed_results(self) -> None:
+        checkpoint = self.data_dir / "empty.partial.json"
+        listener = mdns.MDNSDumpListener(checkpoint_output_file=checkpoint)
+        events = []
+        with patch.object(
+            mdns, "log_event", side_effect=lambda event, **fields: events.append((event, fields))
+        ):
+            listener._write_checkpoint_snapshot()
+        self.assertEqual(events[-1][1]["disposition"], "skipped_unusable")
+        self.assertEqual(events[-1][0], "checkpoint")
+
+        events.clear()
+        with patch.object(
+            mdns, "save_checkpoint_json", side_effect=OSError("checkpoint failed")
+        ), patch.object(
+            mdns, "log_event", side_effect=lambda event, **fields: events.append((event, fields))
+        ):
+            with self.assertRaisesRegex(OSError, "checkpoint failed"):
+                listener._write_checkpoint_snapshot()
+        self.assertEqual(events[-1][1]["disposition"], "failed")
+        self.assertEqual(events[-1][0], "checkpoint")
+
+    def test_retained_final_result_is_not_logged_as_saved(self) -> None:
+        events = []
+        with patch.object(mdns, "_resolve_optional_omr_ipv6addr_prefix", return_value=None), patch.object(
+            mdns, "MDNSDumpListener"
+        ) as listener_class, patch.object(mdns, "Zeroconf"), patch.object(
+            mdns, "ServiceBrowser"
+        ), patch.object(mdns.threading, "Thread"), patch.object(
+            mdns, "save_final_json", return_value=False
+        ), patch.object(mdns.time, "monotonic", side_effect=(1.0, 2.0)), patch.object(
+            mdns, "log_event", side_effect=lambda event, **fields: events.append((event, fields))
+        ), self.assertLogs(level="INFO") as captured:
+            listener_class.return_value.get_records.return_value = []
+            mdns.main(["thread", "--datadir", str(self.data_dir)])
+
+        write_events = [fields for event, fields in events if event == "write"]
+        self.assertEqual(write_events[0]["disposition"], "retained_previous")
+        self.assertIn("Retained previous mDNS scope data", "\n".join(captured.output))
+        self.assertNotIn("Saved 0 mDNS record(s)", "\n".join(captured.output))
+
+    def test_scope_companion_failure_is_reported_as_failed_after_primary_write(self) -> None:
+        records = [self._scope_record("_meshcop._udp.local.", "br.local.")]
+        events = []
+        with patch.object(mdns, "_resolve_optional_omr_ipv6addr_prefix", return_value=None), patch.object(
+            mdns, "MDNSDumpListener"
+        ) as listener_class, patch.object(mdns, "Zeroconf"), patch.object(
+            mdns, "ServiceBrowser"
+        ), patch.object(mdns.threading, "Thread"), patch.object(
+            mdns.time, "monotonic", side_effect=(1.0, 2.0)
+        ), patch.object(
+            mdns, "log_event", side_effect=lambda event, **fields: events.append((event, fields))
+        ), patch.object(
+            util_data, "write_network_scope", side_effect=OSError("companion failed")
+        ):
+            listener_class.return_value.get_records.return_value = records
+            with self.assertRaisesRegex(OSError, "companion failed"):
+                mdns.main(["thread", "--datadir", str(self.data_dir)])
+
+        output = self.data_dir / mdns.MDNS_SCOPE_FILENAMES["thread"]
+        self.assertTrue(output.exists())
+        self.assertEqual(
+            [fields["disposition"] for event, fields in events if event == "write"],
+            ["failed"],
+        )
 
     def test_thread_browse_resolves_relative_and_absolute_data_dirs(self) -> None:
         absolute_dir = self.data_dir.resolve()
@@ -373,6 +514,7 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
             include_matter_tcp_supported=False,
             omr_ipv6addr_prefix=None,
             checkpoint_output_file=self.data_dir.resolve() / "td-mdns-scopes-thread.partial.json",
+            command="thread",
         )
         save_final_json.assert_called_once()
 

@@ -14,6 +14,7 @@ import util_network
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 from td_json_key_normalizer import convert_keys_to_camel_case
+from td_logging import log_event
 from util_data import (
     CollectionWriteOutcome,
     create_checkpoint_filename,
@@ -113,6 +114,7 @@ class MDNSDumpListener(ServiceListener):
         include_matter_tcp_supported: bool = False,
         omr_ipv6addr_prefix: str = None,
         checkpoint_output_file=None,
+        command: str = "thread",
     ):
         self._last_update = time.time()
         self.idle_done = threading.Event()
@@ -121,6 +123,7 @@ class MDNSDumpListener(ServiceListener):
         self._include_matter_tcp_supported = include_matter_tcp_supported
         self._omr_ipv6addr_prefix = omr_ipv6addr_prefix
         self._checkpoint_output_file = checkpoint_output_file
+        self._command = command
         self._checkpoint_write_lock = threading.Lock()
         self._address_warning_categories = set()
 
@@ -339,18 +342,45 @@ class MDNSDumpListener(ServiceListener):
             return
         with self._checkpoint_write_lock:
             records = self.get_records()
-            save_checkpoint_json(
-                convert_keys_to_camel_case(records),
-                self._checkpoint_output_file,
-                CollectionWriteOutcome.partial(has_usable_data=bool(records)),
-                indent=2,
-                writer=save_json_atomic,
+            try:
+                written = save_checkpoint_json(
+                    convert_keys_to_camel_case(records),
+                    self._checkpoint_output_file,
+                    CollectionWriteOutcome.partial(has_usable_data=bool(records)),
+                    indent=2,
+                    writer=save_json_atomic,
+                )
+            except Exception:
+                log_event(
+                    "checkpoint",
+                    source="mdns",
+                    command=self._command,
+                    stage="checkpoint",
+                    output=self._checkpoint_output_file.name,
+                    records=len(records),
+                    disposition="failed",
+                )
+                raise
+            log_event(
+                "checkpoint",
+                source="mdns",
+                command=self._command,
+                stage="checkpoint",
+                output=self._checkpoint_output_file.name,
+                records=len(records),
+                disposition="written" if written else "skipped_unusable",
             )
-        logging.debug(
-            "Saved %d mDNS checkpoint record(s) to %s",
-            len(records),
-            self._checkpoint_output_file,
-        )
+        if written:
+            logging.debug(
+                "Saved %d mDNS checkpoint record(s) to %s",
+                len(records),
+                self._checkpoint_output_file,
+            )
+        else:
+            logging.debug(
+                "Skipped unusable mDNS checkpoint at %s",
+                self._checkpoint_output_file,
+            )
 
     def wait_for_idle(self, idle_timeout: float = 30.0, poll: float = 0.5):
         """Block until no service events have arrived for *idle_timeout* seconds,
@@ -578,11 +608,13 @@ options:
 
     omr_ipv6addr_prefix = _resolve_optional_omr_ipv6addr_prefix()
 
+    browse_started = time.monotonic()
     zeroconf = Zeroconf()
     listener = MDNSDumpListener(
         include_matter_tcp_supported=args.mattertcpsupported,
         omr_ipv6addr_prefix=omr_ipv6addr_prefix,
         checkpoint_output_file=checkpoint_file,
+        command=scope_tag,
     )
 
     # Start browsers for each scope
@@ -608,44 +640,100 @@ options:
         zeroconf.close()
 
         records = listener.get_records()
+        log_event(
+            "collector_summary",
+            source="mdns",
+            command=scope_tag,
+            stage="browse",
+            elapsed_s=round(max(0.0, time.monotonic() - browse_started), 6),
+            discovered_records=len(records),
+        )
         if args.write_scope_snapshots:
             records = _records_for_service_types(records, selected_scopes)
 
-        save_final_json(
+        output_written = _save_final_snapshot(
             convert_keys_to_camel_case(records),
             output_file,
-            CollectionWriteOutcome.complete(valid_empty_reason="completed-browse"),
-            indent=2,
-            writer=save_json_atomic,
+            command=scope_tag,
+            records=len(records),
+            dataset=scope_tag,
             ext_pan_id=args.ext_pan_id,
         )
 
         if args.write_scope_snapshots:
-            for scope_tag, service_types in MDNS_SPLIT_SCOPE_SERVICE_TYPES.items():
+            for dataset_tag, service_types in MDNS_SPLIT_SCOPE_SERVICE_TYPES.items():
                 scope_records = _records_for_service_types(records, service_types)
                 scope_output_file = resolve_data_file_path(
-                    MDNS_SCOPE_FILENAMES[scope_tag], td_data_dir
+                    MDNS_SCOPE_FILENAMES[dataset_tag], td_data_dir
                 )
-                save_final_json(
+                scope_written = _save_final_snapshot(
                     convert_keys_to_camel_case(scope_records),
                     scope_output_file,
-                    CollectionWriteOutcome.complete(
-                        valid_empty_reason="completed-browse"
-                    ),
-                    indent=2,
-                    writer=save_json_atomic,
+                    command=scope_tag,
+                    records=len(scope_records),
+                    dataset=dataset_tag,
                     ext_pan_id=args.ext_pan_id,
                 )
-                logging.info(
-                    "Saved %d mDNS record(s) to %s",
-                    len(scope_records),
-                    scope_output_file,
-                )
+                if scope_written:
+                    logging.info(
+                        "Saved %d mDNS record(s) to %s",
+                        len(scope_records),
+                        scope_output_file,
+                    )
+                else:
+                    logging.info("Retained previous mDNS scope data at %s", scope_output_file)
 
-        logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
+        if output_written:
+            logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
+        else:
+            logging.info("Retained previous mDNS scope data at %s", output_file)
         logging.debug(json.dumps(records, indent=2))
-        logging.debug("Saved mDNS scope data into %s as JSON:\n%s",
+        logging.debug("mDNS scope data for %s:\n%s",
                 output_file, json.dumps(records, indent=2))
+
+
+def _save_final_snapshot(
+    payload,
+    output_path,
+    *,
+    command: str,
+    records: int,
+    dataset: str | None = None,
+    ext_pan_id=None,
+) -> bool:
+    dataset = dataset or output_path.stem
+    try:
+        written = save_final_json(
+            payload,
+            output_path,
+            CollectionWriteOutcome.complete(valid_empty_reason="completed-browse"),
+            indent=2,
+            writer=save_json_atomic,
+            ext_pan_id=ext_pan_id,
+        )
+    except Exception:
+        log_event(
+            "write",
+            source="mdns",
+            command=command,
+            stage="final",
+            dataset=dataset,
+            output=output_path.name,
+            records=records,
+            disposition="failed",
+        )
+        raise
+    log_event(
+        "write",
+        source="mdns",
+        command=command,
+        stage="final",
+        dataset=dataset,
+        output=output_path.name,
+        records=records,
+        disposition="saved" if written else "retained_previous",
+    )
+    return written
 
 if __name__ == "__main__":
     sys.exit(main())

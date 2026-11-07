@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+import logging
 
 import pytest
 
@@ -12,6 +13,7 @@ import otbr_restapi_node as node_module
 import otbr_restapi_cli as cli_module
 from otbr_restapi_util import OTBRUsageError, emit_rest_command_output
 from otbr_restapi_util import _RAW_UNSET
+from otbr_restapi_util import rest_payload_record_count, emit_rest_observed_output
 from td_const import (
     OTBR_RESTAPI_DATASET_ACTIVE_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
@@ -36,6 +38,216 @@ def test_mesh_response_flag_rejects_children_before_requests():
     assert client.mock_calls == []
 
 
+@pytest.mark.parametrize("kind", ["diagnostics", "mesh-diagnostics"])
+@pytest.mark.parametrize("case", ["saved", "retained_previous", "not_requested", "outcome_failed", "final_failed"])
+def test_rest_batch_write_dispositions(tmp_path, monkeypatch, caplog, kind, case):
+    import logging
+    import util_data
+
+    client = Mock()
+    client.list_devices.return_value = []
+    outcome = {"items": [], "deviceResults": [], "partial": case == "retained_previous"}
+    client.fetch_all_devices_diagnostics.return_value = outcome
+    client.fetch_mesh_diagnostics_all_devices.return_value = outcome
+    args = cli_module.build_parser().parse_args([
+        "--no-progress", kind, "fetch-all", "--no-update-devices",
+    ])
+    path = None if case == "not_requested" else tmp_path / "output.json"
+    args.resolved_output_path = path
+    module = diagnostics_module if kind == "diagnostics" else mesh_module
+    dispatch = lambda: (
+        diagnostics_module.dispatch_diagnostics(client, args, False, None)
+        if kind == "diagnostics" else mesh_module.dispatch_mesh_diagnostics(client, args, False)
+    )
+    writer_name = "_write_guard_affected_outcome" if kind == "diagnostics" else "write_rest_collection_outcome"
+    if case == "outcome_failed":
+        monkeypatch.setattr(module, writer_name, Mock(side_effect=OSError("disk full")))
+    if case == "final_failed":
+        monkeypatch.setattr(util_data, "save_final_json", Mock(side_effect=OSError("disk full")))
+    with caplog.at_level(logging.INFO):
+        if case in {"outcome_failed", "final_failed"}:
+            with pytest.raises(OSError):
+                dispatch()
+        else:
+            dispatch()
+    events = [r.message for r in caplog.records if r.message.startswith('event="write"')]
+    if case == "outcome_failed":
+        assert any('stage="outcome"' in e and 'disposition="failed"' in e for e in events)
+        assert not any('stage="final"' in e for e in events)
+    else:
+        expected = "failed" if case == "final_failed" else case
+        assert any('stage="final"' in e and f'disposition="{expected}"' in e for e in events)
+        assert any('stage="outcome"' in e and (
+            'disposition="not_requested"' if case == "not_requested" else 'disposition="saved"'
+        ) in e for e in events)
+
+
+@pytest.mark.parametrize("kind", ["diagnostics", "mesh-diagnostics"])
+def test_final_companion_failure_is_not_reported_saved(tmp_path, monkeypatch, caplog, kind):
+    import logging
+    import util_data
+
+    client = Mock()
+    client.list_devices.return_value = []
+    outcome = {"items": [{"id": "one"}], "deviceResults": [], "partial": False}
+    client.fetch_all_devices_diagnostics.return_value = outcome
+    client.fetch_mesh_diagnostics_all_devices.return_value = outcome
+    args = cli_module.build_parser().parse_args([
+        "--no-progress", kind, "fetch-all", "--no-update-devices", "--items-only",
+    ])
+    args.resolved_output_path = tmp_path / "td-otbr-restapi-test.json"
+    original = util_data.write_network_scope
+    calls = []
+
+    def write_scope(*args, **kwargs):
+        calls.append(args[0])
+        if len(calls) == 2:
+            raise OSError("scope write failed")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(util_data, "write_network_scope", write_scope)
+    with caplog.at_level(logging.INFO), pytest.raises(OSError):
+        if kind == "diagnostics":
+            diagnostics_module.dispatch_diagnostics(client, args, False, None)
+        else:
+            mesh_module.dispatch_mesh_diagnostics(client, args, False)
+    events = [r.message for r in caplog.records if r.message.startswith('event="write"')]
+    assert args.resolved_output_path.exists()
+    assert any('stage="outcome"' in e and 'disposition="saved"' in e for e in events)
+    assert any('stage="final"' in e and 'disposition="failed"' in e for e in events)
+    assert not any('stage="final"' in e and 'disposition="saved"' in e for e in events)
+
+
+def test_responsiveness_progress_has_independent_fixed_population(monkeypatch, capsys, caplog):
+    import logging
+
+    client = Mock()
+    client.get_active_dataset.return_value = {"extPanId": "123456789abcdef0"}
+    outcome = {"deviceResults": [
+        {"deviceId": "1111111111111111", "status": "completed"},
+        {"deviceId": "2222222222222222", "status": "failed", "attemptErrors": []},
+        {"deviceId": "3333333333333333", "status": "failed", "attemptErrors": []},
+    ]}
+    with caplog.at_level(logging.INFO):
+        mesh_module._attach_responsiveness(
+            client, outcome, [], {"extPanId": "123456789abcdef0"}, [], {}, [], None,
+            "extended", progress_enabled=True,
+        )
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 2
+    assert all('stage="responsiveness"' in line and "total=2" in line for line in lines)
+    assert "current=1" in lines[0] and "current=2" in lines[1]
+    assert 'targets=2 checks=0' in caplog.text
+    client.fetch_device_diagnostics.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["diagnostics", "mesh-diagnostics"])
+@pytest.mark.parametrize("no_progress", [False, True])
+def test_items_only_stdout_keeps_existing_payload_and_status(monkeypatch, capsys, kind, no_progress):
+    client = Mock()
+    client.list_devices.return_value = [{"id": "1111111111111111", "role": "router"}]
+
+    def sweep(_devices, **kwargs):
+        if kwargs["on_progress"]:
+            kwargs["on_progress"](1, 1, "1111111111111111", 0.1, "completed")
+        return {"items": [{"id": "diagnostic"}], "deviceResults": [], "partial": False}
+
+    client.fetch_all_devices_diagnostics.side_effect = sweep
+    client.fetch_mesh_diagnostics_all_devices.side_effect = sweep
+    monkeypatch.setattr(cli_module, "build_client", lambda _args: client)
+    monkeypatch.setattr(cli_module, "_auto_output_path", lambda *_args: None)
+    args = (["--no-progress"] if no_progress else []) + [
+        kind, "fetch-all", "--no-update-devices", "--items-only",
+    ]
+    assert cli_module.main(args) == 0
+    output = capsys.readouterr()
+    payload, end = json.JSONDecoder().raw_decode(output.out)
+    assert payload == [{"id": "diagnostic"}]
+    assert output.out[end:].strip() == "Output written to stdout"
+    assert 'event="target_progress"' not in output.out
+    assert ('event="target_progress"' in output.err) is not no_progress
+
+
+@pytest.mark.parametrize("case,answered,not_provided,guard", [
+    ("valid", 18, 1, True),
+    ("no-answered-router", 0, 1, False),
+    ("scope-changed", 18, 0, True),
+    ("tampered-binding", 18, 0, True),
+    ("no-response", 18, 0, True),
+    ("children-uncovered", 18, 0, True),
+])
+def test_mesh_coverage_events_use_qualification_contract(tmp_path, monkeypatch, caplog, case, answered, not_provided, guard):
+    import logging
+    from test_td_unified_dataset import _seed_rest_mesh_response
+
+    _seed_rest_mesh_response(tmp_path, case)
+    original = json.loads((tmp_path / "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json").read_text())
+    client = Mock()
+    client.list_devices.return_value = []
+    client.fetch_mesh_diagnostics_all_devices.return_value = original
+    monkeypatch.setattr(mesh_module, "_observe_scope", lambda _: {"extPanId": "1234567890abcdef"})
+    monkeypatch.setattr(mesh_module, "_attach_responsiveness", lambda *_args, **_kwargs: None)
+    monkeypatch.setenv(TD_EXT_PAN_ID_ENV_VAR, "1234567890abcdef")
+    args = cli_module.build_parser().parse_args([
+        "--no-progress", "mesh-diagnostics", "fetch-all", "--no-update-devices",
+        "--diagnostic-response-fallback", "--items-only",
+    ])
+    args.resolved_output_path = tmp_path / "td-otbr-restapi-test-mesh.json"
+    with caplog.at_level(logging.INFO):
+        mesh_module.dispatch_mesh_diagnostics(client, args, False)
+    coverage = next(r.message for r in caplog.records if r.message.startswith('event="coverage"'))
+    if case == "scope-changed":
+        assert 'availability="unavailable"' in coverage
+        client.fetch_device_diagnostics.assert_not_called()
+        return
+    assert 'availability="available"' in coverage
+    assert f"answered={answered}" in coverage
+    assert f"not_provided={not_provided}" in coverage
+    assert f"guard_passed={str(guard).lower()}" in coverage
+    client.fetch_device_diagnostics.assert_not_called()
+
+
+@pytest.mark.parametrize("error", [
+        OSError("networkKey=sentinel-secret\nforged-event"),
+        ValueError("password=sentinel-secret"),
+])
+def test_mesh_qualification_errors_are_visible_and_sanitized(tmp_path, monkeypatch, caplog, error):
+    import logging
+    import td_unified_dataset
+
+    def fail(*_args):
+        raise error
+
+    monkeypatch.setattr(td_unified_dataset, "_recheck", fail)
+    with caplog.at_level(logging.INFO):
+        mesh_module._log_qualification({}, tmp_path / "mesh.json", tmp_path / "outcome.json", [], {}, [])
+    event = next(r.message for r in caplog.records if r.message.startswith('event="coverage"'))
+    assert 'availability="unavailable"' in event
+    assert 'reason="qualification_error"' in event
+    assert f'error_type="{type(error).__name__}"' in event
+    assert "sentinel-secret" not in caplog.text
+    assert "forged-event" not in caplog.text
+
+
+@pytest.mark.parametrize("items_only", [False, True])
+def test_mesh_raw_nonempty_final_preserves_existing_normalized_write(tmp_path, items_only):
+    from td_json_key_normalizer import convert_keys_to_camel_case
+
+    raw_item = {"data": {"id": "mesh-1", "attributes": {"some_raw_field": "value"}}}
+    outcome = {"items": [raw_item], "deviceResults": [], "partial": False}
+    client = Mock()
+    client.list_devices.return_value = []
+    client.fetch_mesh_diagnostics_all_devices.return_value = outcome
+    args = cli_module.build_parser().parse_args([
+        "--no-progress", "mesh-diagnostics", "fetch-all", "--no-update-devices",
+        *(["--items-only"] if items_only else []),
+    ])
+    args.resolved_output_path = tmp_path / "mesh.json"
+    payload = outcome["items"] if items_only else outcome
+    assert mesh_module.dispatch_mesh_diagnostics(client, args, True) == payload
+    assert client.fetch_mesh_diagnostics_all_devices.call_args.kwargs["raw"] is True
+    assert json.loads(args.resolved_output_path.read_text()) == convert_keys_to_camel_case(payload)
+    assert json.loads((tmp_path / "mesh.outcome.json").read_text()) == outcome
 @pytest.mark.parametrize("enabled", [False, True])
 def test_mesh_response_reuses_destination_and_preserves_raw_mesh(tmp_path, monkeypatch, enabled):
     from datetime import datetime, timezone
@@ -1417,3 +1629,245 @@ def test_incomplete_rloc_expansion_without_output_path_writes_nothing(tmp_path, 
 
     emit.assert_not_called()
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("payload", "single", "count"),
+    [
+        ([{}, {}], False, 2), ({"items": []}, False, 0),
+        ({"items": [{}, {}]}, False, 2), ({"data": [{}]}, False, 1),
+        ({"id": "device"}, True, 1), ({"data": {"id": "device"}}, True, 1),
+        ({"metadata": [1, 2]}, False, "unavailable"),
+        ({"metadata": [1, 2]}, True, "unavailable"),
+        ({"data": {"unknown": []}}, True, "unavailable"),
+        ("text", True, "unavailable"), ({}, True, "unavailable"),
+    ],
+)
+def test_rest_observed_record_count(payload, single, count):
+    assert rest_payload_record_count(payload, single=single) == count
+
+
+def test_rest_observed_no_path_and_text_callback(tmp_path, caplog, capsys):
+    caplog.set_level(logging.INFO)
+    callbacks = []
+    assert emit_rest_observed_output(
+        [{"id": 1}], None, command="devices list", stage="final"
+    ) == [{"id": 1}]
+    assert 'disposition="not_requested"' in caplog.text
+    path = tmp_path / "state.txt"
+    assert emit_rest_command_output("hello", path, plain_text=True, on_write=callbacks.append) == "hello"
+    assert callbacks == [True]
+    assert path.read_text() == "hello\n"
+    assert capsys.readouterr().out == ""
+
+
+def test_text_callback_not_called_on_save_failure(tmp_path, monkeypatch):
+    import util_data
+
+    callback = Mock()
+    monkeypatch.setattr(util_data, "save_text_atomic", Mock(side_effect=OSError("failure")))
+    with pytest.raises(OSError):
+        emit_rest_command_output("hello", tmp_path / "state.txt",
+                                 plain_text=True, on_write=callback)
+    callback.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("payload", "raw", "count"),
+    [([{"id": "a"}], False, 1), ({"items": []}, False, 0),
+     ({"data": [{"id": "a"}, {"id": "b"}]}, True, 2),
+     ({"unknown": [{"id": "a"}]}, True, "unavailable")],
+)
+def test_devices_list_reports_actual_population(payload, raw, count, caplog):
+    caplog.set_level(logging.INFO)
+    client = Mock()
+    client.list_devices.return_value = payload
+    args = SimpleNamespace(devices_command="list", with_meta=False, resolved_output_path=None)
+    assert devices_module.dispatch_devices(client, args, raw, None) == payload
+    expected = f'records="{count}"' if isinstance(count, str) else f"records={count}"
+    assert expected in caplog.text
+    assert 'disposition="not_requested"' in caplog.text
+
+
+def test_rest_observed_failed_serialization_and_scope(tmp_path, monkeypatch, caplog):
+    import util_data
+
+    caplog.set_level(logging.INFO)
+    with pytest.raises(TypeError):
+        emit_rest_observed_output([{"bad": object()}], tmp_path / "bad.json",
+                                  command="devices list", stage="final")
+    assert 'records=1 disposition="failed"' in caplog.text
+    caplog.clear()
+    monkeypatch.setattr(util_data, "write_network_scope", Mock(side_effect=OSError("scope failure")))
+    path = tmp_path / "td-otbr-restapi-devices.json"
+    with pytest.raises(OSError, match="scope failure"):
+        emit_rest_observed_output([{"id": "one"}], path,
+                                  command="devices list", stage="final")
+    assert json.loads(path.read_text()) == [{"id": "one"}]
+    assert 'disposition="failed"' in caplog.text
+    assert 'disposition="saved"' not in caplog.text
+
+
+@pytest.mark.parametrize("items,expected", [([{"id": "a"}, {"id": "b"}], "written"), ([], "skipped_unusable")])
+def test_devices_checkpoint_reports_structured_count(tmp_path, caplog, items, expected):
+    caplog.set_level(logging.INFO)
+    devices_module._write_checkpoint_best_effort(
+        {"partial": True, "items": items}, tmp_path / "checkpoint.json"
+    )
+    assert f'records={len(items)} disposition="{expected}"' in caplog.text
+
+
+def test_devices_checkpoint_failure_does_not_prevent_final(tmp_path, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(devices_module, "save_checkpoint_json", Mock(side_effect=OSError("failed")))
+    payload = {"partial": True, "items": [{"id": "a"}]}
+    client = Mock()
+    client.fetch_device_collection.return_value = payload
+    args = SimpleNamespace(
+        devices_command="fetch", device_count=1, max_age=None, max_retries=1,
+        task_timeout=1, poll_interval=1, poll_timeout=1, structured_outcome=True,
+        resolved_output_path=tmp_path / "devices.json",
+    )
+    assert devices_module.dispatch_devices(client, args, False, None) == payload
+    assert json.loads(args.resolved_output_path.read_text()) == payload
+    assert 'records=1 disposition="failed"' in caplog.text
+    assert 'records=1 disposition="saved"' in caplog.text
+
+
+def test_devices_checkpoint_failure_warning_escapes_and_redacts(tmp_path, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(
+        devices_module, "save_checkpoint_json",
+        Mock(side_effect=OSError("networkKey=secret-sentinel\nforged-event")),
+    )
+    devices_module._write_checkpoint_best_effort(
+        {"partial": True, "items": [{"id": "a"}]}, tmp_path / "checkpoint.json"
+    )
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "secret-sentinel" not in caplog.text
+    assert "\\nforged-event" in warnings[0].message
+    assert "\n" not in warnings[0].message
+    assert 'error_type="OSError"' in warnings[0].message
+    assert "action=continue_best_effort" in warnings[0].message
+
+
+def test_devices_retains_previous_on_empty_partial(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    path = tmp_path / "devices.json"
+    path.write_text('["previous"]')
+    client = Mock()
+    client.fetch_device_collection.return_value = {"partial": True, "items": []}
+    args = SimpleNamespace(
+        devices_command="fetch", device_count=1, max_age=None, max_retries=1,
+        task_timeout=1, poll_interval=1, poll_timeout=1, structured_outcome=True,
+        resolved_output_path=path,
+    )
+    devices_module.dispatch_devices(client, args, False, None)
+    assert json.loads(path.read_text()) == ["previous"]
+    assert 'records=0 disposition="retained_previous"' in caplog.text
+
+
+def test_action_accepted_before_write_failure_without_repeat(tmp_path, monkeypatch, caplog):
+    import util_data
+
+    caplog.set_level(logging.INFO)
+    client = Mock()
+    client.enqueue_add_thread_device_task.return_value = {"id": "a", "status": "queued", "accepted": True}
+    monkeypatch.setattr(util_data, "save_final_json", Mock(side_effect=OSError("write failed")))
+    args = SimpleNamespace(
+        actions_command="enqueue", enqueue_type="add-thread-device",
+        pskd="secret-sentinel", eui=None, discerner=None, joiner_id=None, timeout=1,
+        resolved_output_path=tmp_path / "action.json",
+    )
+    with pytest.raises(OSError):
+        actions_module.dispatch_actions(client, args, False, None, False)
+    client.enqueue_add_thread_device_task.assert_called_once()
+    assert 'state="returned"' in caplog.text
+    assert 'action_state="queued"' in caplog.text
+    assert 'accepted=true' in caplog.text
+    assert 'disposition="failed"' in caplog.text
+    assert "secret-sentinel" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("args", "method", "command"),
+    [
+        ({"node_command": "get"}, "get_node", "node get"),
+        ({"node_command": "state", "state_command": "get"}, "get_node_state", "node state get"),
+        ({"node_command": "state", "state_command": "set", "value": "disabled"}, "set_node_state", "node state set"),
+        ({"node_command": "dataset", "dataset_kind": "active", "dataset_command": "get", "text": False},
+         "get_active_dataset", "node dataset active get"),
+        ({"node_command": "dataset", "dataset_kind": "active", "dataset_command": "set",
+          "json": '{"networkKey":"secret-sentinel"}', "json_file": None, "text": None, "text_file": None},
+         "set_active_dataset", "node dataset active set"),
+    ],
+)
+def test_node_operation_and_no_output_events(args, method, command, caplog, capsys):
+    caplog.set_level(logging.INFO)
+    client = Mock()
+    getattr(client, method).return_value = {"id": "node", "networkKey": "secret-sentinel"}
+    args = SimpleNamespace(**args, resolved_output_path=None)
+    node_module.dispatch_node(client, args, True, None)
+    getattr(client, method).assert_called_once()
+    assert f'command="{command}"' in caplog.text
+    assert 'event="operation_end"' in caplog.text and 'state="returned"' in caplog.text
+    assert 'disposition="not_requested"' in caplog.text
+    assert "secret-sentinel" not in caplog.text
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("wait", [False, True])
+def test_action_wait_preserves_existing_calls_and_observed_state(wait, caplog, monkeypatch):
+    caplog.set_level(logging.INFO)
+    client = Mock()
+    client.enqueue_get_network_diagnostic_task.return_value = {"id": "a", "status": "pending"}
+    client.run_action.return_value = {
+        "status": "completed", "relationships": {"result": {"data": {"id": "d"}}}
+    }
+    client.get_diagnostic.return_value = {"id": "d"}
+    monkeypatch.setattr(actions_module, "resolve_types", lambda _: [1])
+    args = SimpleNamespace(
+        actions_command="enqueue", enqueue_type="get-network-diagnostic",
+        destination="a", destination_type="extAddress", timeout=10,
+        wait=wait, poll_interval=1, poll_timeout=2, resolved_output_path=None,
+    )
+    result = actions_module.dispatch_actions(client, args, False, None, False)
+    if wait:
+        assert result == {"id": "d"}
+        client.run_action.assert_called_once()
+        client.get_diagnostic.assert_called_once_with("d", raw=False)
+        assert 'action_state="completed"' in caplog.text
+    else:
+        assert result == {"id": "a", "status": "pending"}
+        client.enqueue_get_network_diagnostic_task.assert_called_once()
+        client.run_action.assert_not_called()
+        client.get_diagnostic.assert_not_called()
+        assert 'action_state="pending"' in caplog.text
+    assert 'state="returned"' in caplog.text
+    assert 'disposition="not_requested"' in caplog.text
+
+
+@pytest.mark.parametrize("operation", ["list", "get"])
+def test_action_list_and_get_observed(operation, caplog):
+    caplog.set_level(logging.INFO)
+    client = Mock()
+    client.list_actions.return_value = [{"id": "a"}]
+    client.get_action.return_value = {"id": "a", "status": "active"}
+    args = SimpleNamespace(actions_command=operation, action_id="a", with_meta=False,
+                           resolved_output_path=None)
+    actions_module.dispatch_actions(client, args, True, None, True)
+    assert f'command="actions {operation}"' in caplog.text
+    assert 'state="returned"' in caplog.text
+    assert 'records=1 disposition="not_requested"' in caplog.text
+
+
+def test_node_operation_failure_has_no_write_event(caplog):
+    caplog.set_level(logging.INFO)
+    client = Mock()
+    client.get_node_state.side_effect = ValueError("failure")
+    args = SimpleNamespace(node_command="state", state_command="get", resolved_output_path=None)
+    with pytest.raises(ValueError):
+        node_module.dispatch_node(client, args, False, None)
+    assert 'event="operation_end"' in caplog.text and 'state="raised"' in caplog.text
+    assert 'event="write"' not in caplog.text

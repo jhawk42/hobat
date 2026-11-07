@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+import json
 import logging
 import sys
 import time
@@ -25,12 +27,17 @@ from otbr_restapi_util import (
     OTBRUsageError,
     collection_outcome_path as _diagnostic_outcome_path,
     emit_rest_command_output,
+    emit_rest_observed_output,
     write_rest_collection_outcome as _write_guard_affected_outcome,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
 from td_device_fields import normalize_input_record
 from otbr_role_evidence import normalize_otbr_role_record
 from td_record_merge import append_merge_conflict
+from td_logging import format_event, log_event, redact_sensitive_text
+from otbr_restapi_outcomes import diagnostic_outcome_views
+from td_collection_outcomes import log_outcome_summary
+from td_restapi_diagnostic_recovery import REST_DIAGNOSTIC_RECOVERY_VERSION
 from util_data import (
     CollectionWriteOutcome,
     create_checkpoint_filename,
@@ -183,14 +190,66 @@ def _apply_role_evidence_normalization(
             )
     return diagnostics
 
-def make_progress_fn(total: int, enabled: bool):
+_SOURCE = "otbr-restapi"
+_DIAGNOSTICS_COMMAND = "diagnostics fetch-all"
+
+
+def _safe_legacy_field(value: object) -> str:
+    return json.dumps(redact_sensitive_text(str(value)), ensure_ascii=True)
+
+
+def make_progress_fn(
+    total: int, enabled: bool, *, command: str = _DIAGNOSTICS_COMMAND,
+    stage: str = "initial", expansion_stage: str | None = "expansion",
+):
     if not enabled or total == 0:
         return None
 
-    def _cb(count: int, total_: int, device_id: str, elapsed: float, status: str) -> None:
-        print(f"[{count}/{total_}] {device_id} → {status} ({elapsed:.1f}s)", file=sys.stderr)
+    def _cb(count: int, total_: int, device_id: object, elapsed: float, status: str) -> None:
+        actual_stage = (
+            expansion_stage if expansion_stage is not None
+            and isinstance(device_id, str)
+            and device_id.startswith(RLOC_EXPANSION_PROGRESS_PREFIX)
+            else stage
+        )
+        print(format_event(
+            "target_progress", source=_SOURCE, command=command, stage=actual_stage,
+            progress=f"[{count}/{total_}]", current=count, total=total_,
+            target=device_id if isinstance(device_id, str) else str(device_id),
+            status=status,
+            elapsed_s=round(elapsed, 3),
+        ), file=sys.stderr)
 
     return _cb
+
+
+def make_batch_progress_fns(
+    total: int, enabled: bool, *, command: str, stage: str,
+    expansion_stage: str | None = None,
+):
+    progress = make_progress_fn(
+        total, enabled, command=command, stage=stage,
+        expansion_stage=expansion_stage,
+    )
+    if progress is None:
+        return None, None
+    rejected = 0
+
+    def on_rejected(target: object, elapsed: float, status: str) -> None:
+        nonlocal rejected
+        rejected += 1
+        progress(rejected, total, target, elapsed, status)
+
+    def on_progress(
+        index: int, normalized_total: int, target: object, elapsed: float,
+        status: str,
+    ) -> None:
+        if expansion_stage is not None and isinstance(target, str) and target.startswith(RLOC_EXPANSION_PROGRESS_PREFIX):
+            progress(index, normalized_total, target, elapsed, status)
+        else:
+            progress(index + rejected, total, target, elapsed, status)
+
+    return on_progress, on_rejected
 
 
 def _parse_typed_values(values: Sequence[str]) -> list[str | int]:
@@ -402,26 +461,42 @@ def _write_checkpoint_best_effort(
             }
         else:
             payload_to_save = payload
-        save_checkpoint_json(
+        written = save_checkpoint_json(
             payload_to_save if raw else convert_keys_to_camel_case(payload_to_save),
             checkpoint_path,
             CollectionWriteOutcome.partial(has_usable_data=bool(payload)),
             writer=save_json_atomic,
         )
-        logging.info(
-            "event=checkpoint_write command=%s checkpoint_file=%s records=%d stage=%s",
-            command_name,
-            checkpoint_path,
-            len(payload) if isinstance(payload, list) else 0,
-            stage,
+        if written:
+            logging.info(
+                "event=checkpoint_write command=%s checkpoint_file=%s records=%d stage=%s",
+                _safe_legacy_field(command_name),
+                _safe_legacy_field(checkpoint_path),
+                len(payload) if isinstance(payload, list) else 0,
+                _safe_legacy_field(stage),
+            )
+        log_event(
+            "checkpoint", source=_SOURCE, command=command_name, stage=stage,
+            output=str(checkpoint_path),
+            records=len(payload) if isinstance(payload, list) else (
+                len(payload["items"]) if isinstance(payload, dict)
+                and isinstance(payload.get("items"), list) else 0
+            ),
+            disposition="written" if written else "skipped_unusable",
         )
     except (OSError, ValueError, TypeError) as exc:
+        log_event(
+            "checkpoint", source=_SOURCE, command=command_name, stage=stage,
+            output=str(checkpoint_path),
+            records=len(payload) if isinstance(payload, list) else 0,
+            disposition="failed", error_type=type(exc).__name__,
+        )
         logging.warning(
             "event=checkpoint_write_failed command=%s checkpoint_file=%s error_type=%s error=%s action=continue_best_effort",
-            command_name,
-            checkpoint_path,
+            _safe_legacy_field(command_name),
+            _safe_legacy_field(checkpoint_path),
             type(exc).__name__,
-            exc,
+            _safe_legacy_field(exc),
         )
 
 
@@ -432,6 +507,123 @@ def _has_unresolved_iid_skip(outcome: dict[str, Any]) -> bool:
         and result.get("status") != "completed"
         for result in outcome.get("deviceResults", [])
     )
+
+
+def _log_diagnostic_facts(
+    outcome: dict[str, Any], *, command: str = _DIAGNOSTICS_COMMAND,
+    stage_prefix: str = "",
+) -> None:
+    results = outcome.get("deviceResults")
+    if not isinstance(results, list):
+        log_event(
+            "collector_summary", source=_SOURCE, command=command,
+            stage=f"{stage_prefix}initial", terminal_results="unavailable",
+        )
+        log_outcome_summary(
+            None, source=_SOURCE, command=command, stage=f"{stage_prefix}initial",
+            status_phase="initial",
+        )
+        return
+    log_event(
+        "collector_summary", source=_SOURCE, command=command,
+        stage=f"{stage_prefix}initial", input=outcome.get("inputCount", "unavailable"),
+        normalized=outcome.get("queriedCount", "unavailable"),
+        attempted=outcome.get("attemptedCount", "unavailable"),
+        terminal_results=len(results),
+    )
+    for name, population in diagnostic_outcome_views(
+        outcome, command=command, stage_prefix=stage_prefix,
+    ).items():
+        for view in population:
+            log_event(
+                "target_outcome", source=view.source, command=view.command,
+                stage=view.stage, **view.event_fields(),
+            )
+        available = True
+        if name == "expansion":
+            expanded = outcome.get("childrenExpansion")
+            if not isinstance(expanded, dict):
+                continue
+            available = isinstance(expanded.get("results"), list)
+        elif name == "effective":
+            recovered = outcome.get("diagnosticRecovery")
+            available = (
+                isinstance(recovered, dict)
+                and recovered.get("contractVersion") == REST_DIAGNOSTIC_RECOVERY_VERSION
+                and isinstance(recovered.get("devices"), list)
+            )
+        for phase in (("initial", "effective") if name == "expansion" else (
+            "initial" if name == "initial" else "effective",
+        )):
+            log_outcome_summary(
+                population if available else None, source=_SOURCE,
+                command=command, stage=f"{stage_prefix}{name}", status_phase=phase,
+            )
+    for record in results:
+        if isinstance(record, dict):
+            log_event(
+                "target_result", source=_SOURCE, command=command,
+                stage=f"{stage_prefix}initial", target=record.get("deviceId"),
+                status=record.get("originalStatus", record.get("status", "unavailable")),
+            )
+    expansion = outcome.get("childrenExpansion")
+    if isinstance(expansion, dict):
+        records = expansion.get("results")
+        log_event(
+            "expansion_summary", source=_SOURCE, command=command,
+            stage=f"{stage_prefix}expansion", parents=expansion.get("parentCount", "unavailable"),
+            targets=expansion.get("targetCount", "unavailable"),
+            attempted=expansion.get("attemptedCount", "unavailable"),
+            terminal_results=len(records) if isinstance(records, list) else "unavailable",
+        )
+        for record in records if isinstance(records, list) else []:
+            if isinstance(record, dict):
+                log_event(
+                    "target_result", source=_SOURCE, command=command,
+                    stage=f"{stage_prefix}expansion", target=record.get("destination"),
+                    status=record.get("status", "unavailable"),
+                    effective_status=record.get("effectiveStatus", record.get("status", "unavailable")),
+                )
+    recovery = outcome.get("diagnosticRecovery")
+    if isinstance(recovery, dict) and isinstance(recovery.get("devices"), list):
+        from td_restapi_mesh_evidence import extended_address
+
+        details = recovery["devices"]
+        counts = Counter(
+            extended_address(item.get("extAddress"))
+            for item in details if isinstance(item, dict)
+        )
+        base_counts = Counter(
+            extended_address(item.get("deviceId"))
+            for item in results if isinstance(item, dict)
+        )
+        correlated = sum(
+            1 for key, count in counts.items()
+            if key is not None and count == 1 and base_counts[key] == 1
+        )
+        ambiguous = sum(
+            count for key, count in base_counts.items()
+            if key is not None and (count > 1 or counts[key] > 1)
+        )
+        log_event(
+            "coverage", source=_SOURCE, command=command,
+            stage=f"{stage_prefix}effective", status=recovery.get("effectiveStatus", "unavailable"),
+            base_results=len(results), devices=correlated, ambiguous=ambiguous,
+            unmatched=len(results) - correlated - ambiguous,
+            ambiguous_details=sum(count for key, count in counts.items() if key is not None and count > 1),
+            unmatched_details=len(details) - sum(counts.values()) + counts.get(None, 0),
+            uncorrelated_details=sum(
+                count for key, count in counts.items()
+                if key is not None and base_counts[key] != 1
+            ),
+        )
+
+
+def _write_event(command: str, stage: str, output: object, records: int,
+                 disposition: str, **fields: object) -> None:
+    log_event("write", source=_SOURCE, command=command, stage=stage,
+              output=str(output) if output is not None else "unavailable",
+              records=records, disposition=disposition, **fields)
 
 
 def _dispatch_diagnostics_list(
@@ -608,8 +800,9 @@ def _dispatch_diagnostics_fetch_all(
         )
         _write_checkpoint(results, f"{prefix}pass:{pass_name}")
 
-    progress_fn = make_progress_fn(
-        len(selected_devices), not getattr(args, "no_progress", False)
+    progress_fn, rejected_progress_fn = make_batch_progress_fns(
+        len(selected_devices), not getattr(args, "no_progress", False),
+        command=_DIAGNOSTICS_COMMAND, stage="initial", expansion_stage="expansion",
     )
     expansion_kwargs = (
         {"children_expand_by_rloc": True} if expand_by_rloc else {}
@@ -633,22 +826,34 @@ def _dispatch_diagnostics_fetch_all(
         child_poll_timeout=child_options["poll_timeout"],
         raw=raw_arg,
         on_progress=progress_fn,
+        on_rejected_progress=rejected_progress_fn,
         on_checkpoint=_on_checkpoint,
         on_pass_checkpoint=_on_pass_checkpoint,
         **expansion_kwargs,
     )
+    _log_diagnostic_facts(outcome)
     guard_affected = _has_unresolved_iid_skip(outcome)
     expansion = outcome.get("childrenExpansion")
     expansion_incomplete = isinstance(expansion, dict) and bool(
         expansion.get("partial")
     )
     if output_path is not None:
-        _write_guard_affected_outcome(
-            outcome,
-            _diagnostic_outcome_path(output_path),
-            raw=raw_arg is True,
-            command_name="otbr-restapi diagnostics fetch-all",
-        )
+        outcome_path = _diagnostic_outcome_path(output_path)
+        try:
+            _write_guard_affected_outcome(
+                outcome, outcome_path, raw=raw_arg is True,
+                command_name="otbr-restapi diagnostics fetch-all",
+            )
+        except Exception as exc:
+            _write_event(_DIAGNOSTICS_COMMAND, "outcome", outcome_path,
+                         len(outcome.get("deviceResults", [])), "failed",
+                         error_type=type(exc).__name__)
+            raise
+        _write_event(_DIAGNOSTICS_COMMAND, "outcome", outcome_path,
+                     len(outcome.get("deviceResults", [])), "saved")
+    else:
+        _write_event(_DIAGNOSTICS_COMMAND, "outcome", None,
+                     len(outcome.get("deviceResults", [])), "not_requested")
     diagnostics = outcome["items"]
     if raw_arg is not True:
         if do_enrich:
@@ -676,7 +881,16 @@ def _dispatch_diagnostics_fetch_all(
             "unresolved-IID skip" if guard_affected else "incomplete child RLOC expansion",
             output_path if output_path is not None else "(no output path resolved)",
         )
-    return finish(payload, write=not preserve_prior_dataset)
+    if preserve_prior_dataset:
+        _write_event(_DIAGNOSTICS_COMMAND, "final", output_path, len(diagnostics),
+                     "retained_previous" if output_path is not None else "not_requested")
+        return finish(payload, write=False)
+    try:
+        return finish(payload, write=True, records=len(diagnostics))
+    except Exception as exc:
+        _write_event(_DIAGNOSTICS_COMMAND, "final", output_path, len(diagnostics),
+                     "failed", error_type=type(exc).__name__)
+        raise
 
 
 def dispatch_diagnostics(
@@ -686,27 +900,59 @@ def dispatch_diagnostics(
     fields: dict[str, str] | None,
 ) -> Any:
     output_path = getattr(args, "resolved_output_path", None)
+    single = args.diagnostics_command != "fetch-all"
+    started = time.monotonic() if single else 0.0
+    operation_returned = False
 
-    def finish(result: Any, *, write: bool = True) -> Any:
+    def finish(result: Any, *, write: bool = True, records: int | None = None) -> Any:
+        nonlocal operation_returned
         if not write:
             return result
-        if raw_arg is True:
+        if records is not None:
+            if output_path is None:
+                _write_event(_DIAGNOSTICS_COMMAND, "final", None, records, "not_requested")
+                if raw_arg is True:
+                    return emit_rest_command_output(
+                        result, output_path, logger=logging.getLogger(__name__), raw=True
+                    )
+                return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
             return emit_rest_command_output(
-                result, output_path, logger=logging.getLogger(__name__), raw=True
+                result, output_path, logger=logging.getLogger(__name__),
+                raw=raw_arg is True,
+                on_write=lambda written: _write_event(
+                    _DIAGNOSTICS_COMMAND, "final", output_path, records,
+                    "saved" if written else "retained_previous",
+                ),
             )
-        return emit_rest_command_output(
-            result, output_path, logger=logging.getLogger(__name__)
+        operation_returned = True
+        command = f"diagnostics {args.diagnostics_command}"
+        log_event(
+            "operation_end", source=_SOURCE, command=command, stage="operation",
+            state="returned", elapsed_s=time.monotonic() - started,
+        )
+        return emit_rest_observed_output(
+            result, output_path, command=command, stage="final",
+            single=args.diagnostics_command != "list",
+            raw=raw_arg is True, logger=logging.getLogger(__name__),
+            emitter=emit_rest_command_output,
         )
 
-    if args.diagnostics_command == "list":
-        return _dispatch_diagnostics_list(client, args, raw_arg, fields, finish)
-    if args.diagnostics_command == "get":
-        return _dispatch_diagnostics_get(client, args, raw_arg, finish)
-    if args.diagnostics_command == "fetch":
-        return _dispatch_diagnostics_fetch(client, args, raw_arg, finish)
-    if args.diagnostics_command == "fetch-all":
-        return _dispatch_diagnostics_fetch_all(
-            client, args, raw_arg, finish, output_path
-        )
-
-    raise ValueError("Unsupported diagnostics command")
+    try:
+        if args.diagnostics_command == "list":
+            return _dispatch_diagnostics_list(client, args, raw_arg, fields, finish)
+        if args.diagnostics_command == "get":
+            return _dispatch_diagnostics_get(client, args, raw_arg, finish)
+        if args.diagnostics_command == "fetch":
+            return _dispatch_diagnostics_fetch(client, args, raw_arg, finish)
+        if args.diagnostics_command == "fetch-all":
+            return _dispatch_diagnostics_fetch_all(
+                client, args, raw_arg, finish, output_path
+            )
+        raise ValueError("Unsupported diagnostics command")
+    finally:
+        if single and not operation_returned:
+            log_event(
+                "operation_end", source=_SOURCE,
+                command=f"diagnostics {args.diagnostics_command}", stage="operation",
+                state="raised", elapsed_s=time.monotonic() - started,
+            )

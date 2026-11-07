@@ -3,6 +3,7 @@ import subprocess
 import re
 import json
 import logging
+import time
 
 # Container use flag default value (1 means use container, 0 means do not use container)
 TD_OTBR_CONTAINER_USE_DEFAULT = 1
@@ -49,10 +50,16 @@ def exec_ot_ctl_dispatch(cmd, container_name=None):
         command = local_cmd
 
     from otbr_restapi_util import redact_sensitive_text
+    from td_logging import format_event
 
     # Log the command being executed without inline dataset credentials.
     logging.debug("[DEBUG] %s", redact_sensitive_text(str(command)))
 
+    started_at = time.monotonic()
+    state = "raised"
+    exit_code = None
+    stdout = None
+    stderr = None
     try:
         # Run the command and capture output
         timeout_sec = int(os.environ.get(
@@ -64,13 +71,23 @@ def exec_ot_ctl_dispatch(cmd, container_name=None):
             check=True,
             timeout=timeout_sec,
         )
-        return result.stdout.strip()
-    except subprocess.TimeoutExpired:
+        stdout, stderr = result.stdout, result.stderr
+        exit_code = result.returncode
+        output = stdout.strip()
+        state = "returned"
+        return output
+    except subprocess.TimeoutExpired as exc:
+        state = "timeout"
+        stdout, stderr = exc.output, exc.stderr
         logging.error(
-            f"[ERROR] ot-ctl command timed out after {timeout_sec}s: {command}"
+            "[ERROR] ot-ctl command timed out after %ss: %s",
+            timeout_sec, redact_sensitive_text(str(command)),
         )
         return f"Error: command timed out after {timeout_sec}s"
     except subprocess.CalledProcessError as e:
+        state = "failed"
+        exit_code = e.returncode
+        stdout, stderr = e.output, e.stderr
         err_str = e.stderr.strip() if e.stderr else "Unknown error"
         safe_err_str = redact_sensitive_text(err_str)
         safe_output = redact_sensitive_text(e.output.strip()) if e.output else "No output"
@@ -86,6 +103,34 @@ def exec_ot_ctl_dispatch(cmd, container_name=None):
         logging.error("[ERROR] Output: %s", safe_output)
 
         return f"Error: {safe_err_str}"
+    finally:
+        sizes = {
+            f"{name}_bytes": (
+                None if value is None
+                else len(value.encode("utf-8") if isinstance(value, str) else value)
+            )
+            for name, value in (("stdout", stdout), ("stderr", stderr))
+        }
+        stdout_empty = None if stdout is None else not stdout.strip()
+        stderr_text = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else stderr
+        level = (
+            logging.ERROR if state != "returned"
+            else logging.WARNING if stderr or stdout_empty else logging.INFO
+        )
+        logging.log(
+            level, "%s",
+            format_event(
+                "transport_end", source="otbr-cli", command="ot-ctl",
+                stage="transport",
+                mode="docker" if container_name is not None else "local",
+                state=state, exit=exit_code,
+                elapsed_s=max(0.0, time.monotonic() - started_at),
+                **sizes,
+                stdout_empty=stdout_empty,
+                stderr_present=None if stderr is None else bool(stderr),
+                stderr=stderr_text,
+            ),
+        )
 
 
 def exec_ot_ctl(command, container_name=TD_OTBR_CONTAINER_NAME_DEFAULT):

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack, contextmanager
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from td_const import (
     OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
@@ -18,16 +19,24 @@ from otbr_restapi_diagnostics import (
     _apply_mac_enrichment,
     _apply_time_stats_enrichment,
     _has_unresolved_iid_skip,
+    _log_diagnostic_facts,
+    _write_event,
     _write_guard_affected_outcome,
     _write_checkpoint_best_effort,
-    make_progress_fn,
+    make_batch_progress_fns,
     resolve_child_collection_options,
     resolve_fallback_types,
     resolve_types,
     use_progressive_fallback,
 )
 from otbr_restapi_mesh_diagnostics import filter_router_device_ids
-from otbr_restapi_util import DestinationType, MESH_DIAGNOSTIC_TLVS, OTBRRestApiClient, emit_rest_payload_output
+from otbr_restapi_util import (
+    DestinationType, MESH_DIAGNOSTIC_TLVS, OTBRRestApiClient,
+    RLOC_EXPANSION_PROGRESS_PREFIX, emit_rest_payload_output,
+)
+from td_logging import log_event
+from otbr_restapi_outcomes import mesh_outcome_views
+from td_collection_outcomes import log_outcome_summary
 from util_data import create_checkpoint_filename
 
 CLI_TOPOLOGY_TASK_TIMEOUT_FALLBACK = 15
@@ -35,10 +44,84 @@ CLI_TOPOLOGY_POLL_INTERVAL_FALLBACK = 2.0
 CLI_TOPOLOGY_POLL_TIMEOUT_FALLBACK = None
 
 
+def _write_topology_output(
+    payload: Any, path: Path, stage: str, records: int, *,
+    guarded_outcome: bool = False, raw: bool = False,
+) -> None:
+    written: bool | None = None
+    returned = False
+
+    def on_write(value: bool) -> None:
+        nonlocal written
+        written = value
+
+    try:
+        if guarded_outcome:
+            _write_guard_affected_outcome(
+                payload, path, raw=raw,
+                command_name="otbr-restapi topology diagnostics",
+            )
+            written = True
+        else:
+            emit_rest_payload_output(
+                payload, path, logging.getLogger(__name__), on_write=on_write,
+            )
+        if written is None:
+            raise RuntimeError("Topology output writer did not report its disposition")
+        returned = True
+    finally:
+        _write_event(
+            "topology", stage, path, records,
+            ("saved" if written else "retained_previous") if returned else "failed",
+        )
+
+
+@contextmanager
+def _topology_step(
+    stage: str, current: int, counts: dict[str, int],
+) -> Iterator[None]:
+    started = time.monotonic()
+    returned = False
+    counts["executed"] += 1
+    log_event("step_start", source="otbr-restapi", command="topology",
+              stage=stage, current=current, total=3)
+    try:
+        yield
+        returned = True
+    finally:
+        if not returned:
+            counts["failed"] += 1
+        log_event(
+            "step_end", source="otbr-restapi", command="topology", stage=stage,
+            current=current, total=3, state="returned" if returned else "raised",
+            elapsed_s=round(time.monotonic() - started, 3),
+        )
+
+
 def dispatch_topology(
+    client: OTBRRestApiClient, args: argparse.Namespace, raw_arg: object,
+) -> None:
+    started = time.monotonic()
+    counts = {"executed": 0, "skipped": 0, "failed": 0}
+    returned = False
+    try:
+        with ExitStack() as steps:
+            _dispatch_topology(client, args, raw_arg, counts, steps)
+        returned = True
+    finally:
+        log_event(
+            "workflow_summary", source="otbr-restapi", command="topology",
+            stage="workflow", **counts, state="returned" if returned else "raised",
+            elapsed_s=round(time.monotonic() - started, 3),
+        )
+
+
+def _dispatch_topology(
     client: OTBRRestApiClient,
     args: argparse.Namespace,
     raw_arg: object,
+    counts: dict[str, int],
+    steps: ExitStack,
 ) -> None:
     data_dir: Path = args.td_data_dir
     do_update = not getattr(args, "no_update_devices", False)
@@ -59,17 +142,32 @@ def dispatch_topology(
     devices: list[Any] = []
     if not getattr(args, "skip_devices", False):
         logging.info("topology step 1: devices fetch ...")
-        devices = client.fetch_device_collection(items_only=True)
-        path = data_dir / OTBR_RESTAPI_DEVICES_FETCH_FILENAME
-        emit_rest_payload_output(devices, path, logging.getLogger(__name__))
+        with _topology_step("devices.fetch", 1, counts):
+            devices = client.fetch_device_collection(items_only=True)
+            path = data_dir / OTBR_RESTAPI_DEVICES_FETCH_FILENAME
+            _write_topology_output(devices, path, "devices.final", len(devices))
         logging.info("topology step 1 done: %d device(s) → %s", len(devices), path)
     else:
         logging.info("topology step 1 skipped (--skip-devices); fetching device list quietly")
-        devices = client.list_devices(raw=False)
+        counts["skipped"] += 1
+        log_event("step_skip", source="otbr-restapi", command="topology",
+                  stage="devices.fetch", reason="skip_devices", current=1, total=3)
+        started = time.monotonic()
+        returned = False
+        try:
+            devices = client.list_devices(raw=False)
+            returned = True
+        finally:
+            log_event(
+                "operation_end", source="otbr-restapi", command="topology",
+                stage="devices.list", state="returned" if returned else "raised",
+                elapsed_s=round(time.monotonic() - started, 3),
+            )
 
     device_ids = [d["id"] for d in devices if isinstance(d, dict) and d.get("id")]
 
     if not getattr(args, "skip_diagnostics", False):
+        steps.enter_context(_topology_step("diagnostics", 2, counts))
         logging.info("topology step 2: diagnostics fetch-all --preset %s ...", args.preset)
         step_start = time.monotonic()
         if do_update and not getattr(args, "skip_devices", False):
@@ -83,7 +181,10 @@ def dispatch_topology(
             diag_device_ids = device_ids
             diagnostic_roster = devices
 
-        progress_fn = make_progress_fn(len(diag_device_ids), progress_enabled)
+        progress_fn, rejected_progress_fn = make_batch_progress_fns(
+            len(diag_device_ids), progress_enabled, command="topology",
+            stage="diagnostics.initial", expansion_stage="diagnostics.expansion",
+        )
         devices_by_id = {
             device.get("id"): device
             for device in diagnostic_roster
@@ -101,18 +202,20 @@ def dispatch_topology(
             _write_checkpoint_best_effort(
                 results,
                 checkpoint_path,
-                "otbr-restapi topology diagnostics",
-                stage,
+                "topology",
+                f"diagnostics.{stage}",
                 raw=raw_arg is True,
             )
 
-        def on_checkpoint(results, _idx, _total, _device_id, _status):
-            write_checkpoint(results, "device")
+        def on_checkpoint(results, _idx, _total, device_id, _status):
+            expanded = isinstance(device_id, str) and device_id.startswith(RLOC_EXPANSION_PROGRESS_PREFIX)
+            write_checkpoint(results, "expansion" if expanded else "device")
 
         def on_pass_checkpoint(
-            results, _idx, _total, _device_id, pass_name
+            results, _idx, _total, device_id, pass_name
         ):
-            write_checkpoint(results, f"pass:{pass_name}")
+            expanded = isinstance(device_id, str) and device_id.startswith(RLOC_EXPANSION_PROGRESS_PREFIX)
+            write_checkpoint(results, f"{'expansion.' if expanded else ''}pass:{pass_name}")
 
         diagnostic_outcome = client.fetch_all_devices_diagnostics(
             selected_devices,
@@ -132,8 +235,12 @@ def dispatch_topology(
             child_poll_timeout=child_options["poll_timeout"],
             raw=raw_arg,
             on_progress=progress_fn,
+            on_rejected_progress=rejected_progress_fn,
             on_checkpoint=on_checkpoint,
             on_pass_checkpoint=on_pass_checkpoint,
+        )
+        _log_diagnostic_facts(
+            diagnostic_outcome, command="topology", stage_prefix="diagnostics.",
         )
         diagnostics = diagnostic_outcome["items"]
         if do_enrich:
@@ -156,23 +263,16 @@ def dispatch_topology(
                 unresolved_iid_skips,
                 diagnostic_path,
             )
+            _write_event("topology", "diagnostics.final", diagnostic_path,
+                         len(diagnostics), "retained_previous")
         else:
-            emit_rest_payload_output(
-                diagnostics, diagnostic_path, logging.getLogger(__name__)
+            _write_topology_output(
+                diagnostics, diagnostic_path, "diagnostics.final", len(diagnostics),
             )
-        if guard_affected:
-            _write_guard_affected_outcome(
-                diagnostic_outcome,
-                outcome_path,
-                raw=raw_arg is True,
-                command_name="otbr-restapi topology diagnostics",
-            )
-        else:
-            emit_rest_payload_output(
-                diagnostic_outcome,
-                outcome_path,
-                logging.getLogger(__name__),
-            )
+        _write_topology_output(
+            diagnostic_outcome, outcome_path, "diagnostics.outcome",
+            len(diagnostics), guarded_outcome=guard_affected, raw=raw_arg is True,
+        )
         elapsed = time.monotonic() - step_start
         if guard_affected:
             logging.info(
@@ -193,15 +293,22 @@ def dispatch_topology(
                 elapsed,
                 diagnostic_path,
             )
+        steps.close()
     else:
         logging.info("topology step 2 skipped (--skip-diagnostics)")
+        counts["skipped"] += 1
+        log_event("step_skip", source="otbr-restapi", command="topology",
+                  stage="diagnostics", reason="skip_diagnostics", current=2, total=3)
 
     if not getattr(args, "skip_mesh_diagnostics", False):
+        steps.enter_context(_topology_step("mesh", 3, counts))
         logging.info("topology step 3: mesh-diagnostics fetch-all --routers-only ...")
         step_start = time.monotonic()
         router_ids = filter_router_device_ids(devices, device_ids)
         logging.info("topology step 3: %d router device(s) selected", len(router_ids))
-        mesh_progress_fn = make_progress_fn(len(router_ids), progress_enabled)
+        mesh_progress_fn, mesh_rejected_fn = make_batch_progress_fns(
+            len(router_ids), progress_enabled, command="topology", stage="mesh.initial",
+        )
         mesh_outcome = client.fetch_mesh_diagnostics_all_devices(
             router_ids,
             types=list(MESH_DIAGNOSTIC_TLVS),
@@ -211,15 +318,42 @@ def dispatch_topology(
             clear_diagnostics=False,
             progressive_fallback=not getattr(args, "no_fallback", False),
             on_progress=mesh_progress_fn,
+            on_rejected_progress=mesh_rejected_fn,
         )
         mesh_results = mesh_outcome["items"]
+        views = mesh_outcome_views(
+            mesh_outcome, command="topology", stage="mesh.initial",
+        )
+        for view in views:
+            log_event(
+                "target_outcome", source=view.source, command=view.command,
+                stage=view.stage, **view.event_fields(),
+            )
+        log_outcome_summary(
+            views if isinstance(mesh_outcome.get("deviceResults"), list) else None,
+            source="otbr-restapi", command="topology", stage="mesh.initial",
+        )
         path = data_dir / OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME
-        emit_rest_payload_output(mesh_results, path, logging.getLogger(__name__))
+        log_event(
+            "collector_summary", source="otbr-restapi", command="topology",
+            stage="mesh.initial", records=len(mesh_results),
+            input=mesh_outcome.get("inputCount", "unavailable"),
+            normalized=mesh_outcome.get("queriedCount", "unavailable"),
+            terminal_results=(
+                len(mesh_outcome["deviceResults"])
+                if isinstance(mesh_outcome.get("deviceResults"), list) else "unavailable"
+            ),
+        )
+        _write_topology_output(mesh_results, path, "mesh.final", len(mesh_results))
         mesh_outcome_path = data_dir / OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME
-        emit_rest_payload_output(
-            mesh_outcome,
-            mesh_outcome_path,
-            logging.getLogger(__name__),
+        _write_topology_output(
+            mesh_outcome, mesh_outcome_path, "mesh.outcome", len(mesh_results),
+        )
+        log_event("coverage", source="otbr-restapi", command="topology",
+                  stage="mesh.qualification", availability="unavailable",
+                  reason="not_requested")
+        log_outcome_summary(
+            None, source="otbr-restapi", command="topology", stage="mesh.qualification",
         )
         elapsed = time.monotonic() - step_start
         logging.info(
@@ -228,8 +362,12 @@ def dispatch_topology(
             elapsed,
             path,
         )
+        steps.close()
     else:
         logging.info("topology step 3 skipped (--skip-mesh-diagnostics)")
+        counts["skipped"] += 1
+        log_event("step_skip", source="otbr-restapi", command="topology",
+                  stage="mesh", reason="skip_mesh_diagnostics", current=3, total=3)
 
     total_elapsed = time.monotonic() - wall_start
     logging.info("Topology sweep complete in %.1fs", total_elapsed)

@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import json
+from types import SimpleNamespace
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -1218,7 +1219,8 @@ def test_device_ping_emits_structured_failure(
     assert payload["results"] == {}
 
 
-def test_checkpoint_payload_identifies_partial_completeness(monkeypatch, tmp_path) -> None:
+def test_checkpoint_payload_identifies_partial_completeness(monkeypatch, tmp_path, caplog) -> None:
+    caplog.set_level("INFO")
     writes = []
     monkeypatch.setattr(
         ha_matter_ws_cli,
@@ -1242,6 +1244,52 @@ def test_checkpoint_payload_identifies_partial_completeness(monkeypatch, tmp_pat
     assert payload["sourceObservedAt"] == observed_at
     assert payload["sourceObservationKind"] == "controller-snapshot"
     assert path.name == "td-ha-matter-ws-devices-fetch-all.partial.json"
+    assert 'event="checkpoint"' in caplog.text
+    assert 'event="write"' not in caplog.text
+
+
+@pytest.mark.parametrize("use_callback", [True, False])
+@pytest.mark.parametrize("result", [True, False, OSError("checkpoint failed")])
+def test_checkpoint_event_name_covers_each_disposition(
+    monkeypatch, tmp_path, use_callback, result
+):
+    events = []
+
+    def save(*_args, **_kwargs):
+        if isinstance(result, OSError):
+            raise result
+        return result
+
+    monkeypatch.setattr(ha_matter_ws_cli, "save_checkpoint_json", save)
+    monkeypatch.setattr(
+        ha_matter_ws_cli, "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    if use_callback:
+        callback = ha_matter_ws_cli.make_checkpoint_callback(
+            {"devices": tmp_path / "devices.json"}, show_progress=False,
+        )
+        callback(1, 2, _collection())
+    else:
+        kwargs = dict(dataset="devices", records=1, command="devices fetch-all")
+        if isinstance(result, OSError):
+            with pytest.raises(OSError, match="checkpoint failed"):
+                ha_matter_ws_cli._save_checkpoint_artifact(
+                    [], tmp_path / "devices.partial.json", **kwargs,
+                )
+        else:
+            assert ha_matter_ws_cli._save_checkpoint_artifact(
+                [], tmp_path / "devices.partial.json", **kwargs,
+            ) is result
+
+    event, fields = events[0]
+    assert len(events) == 1
+    assert event == "checkpoint"
+    assert fields["stage"] == "checkpoint"
+    assert fields["disposition"] == (
+        "failed" if isinstance(result, OSError)
+        else "written" if result else "skipped_unusable"
+    )
 
 
 def test_fetch_all_wires_collection_progress_to_checkpoint(monkeypatch, tmp_path) -> None:
@@ -1264,6 +1312,198 @@ def test_fetch_all_wires_collection_progress_to_checkpoint(monkeypatch, tmp_path
         HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME,
     ]
     assert writes[0][0]["records"] == list(_collection().devices)
+
+
+def test_normalization_progress_has_node_identity_and_measures_only_normalization(
+    monkeypatch,
+) -> None:
+    snapshot = NodeSnapshot(
+        uri="ws://controller",
+        server_info={},
+        frames=(),
+        events=(),
+        nodes=({"node_id": 7}, {"node_id": 9}),
+    )
+    monkeypatch.setattr(
+        ha_matter_ws_fetch_all,
+        "fetch_node_snapshot",
+        lambda *args, **kwargs: asyncio.sleep(0, result=snapshot),
+    )
+    monkeypatch.setattr(
+        ha_matter_ws_fetch_all,
+        "extract_node_info",
+        lambda node, server_info: {"nodeId": node["node_id"]},
+    )
+    monkeypatch.setattr(
+        ha_matter_ws_fetch_all,
+        "_build_collection",
+        lambda snapshot, records, *, node_count: MatterCollection(
+            uri=snapshot.uri,
+            message_count=0,
+            node_count=node_count,
+            server_info={},
+            devices=tuple(records),
+            diagnostics=(),
+            mesh_diagnostics=(),
+            topology=(),
+        ),
+    )
+    monotonic_values = iter((10.0, 10.25, 30.0, 30.5))
+    monkeypatch.setattr(
+        ha_matter_ws_fetch_all,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(monotonic_values)),
+    )
+    legacy_progress = []
+    target_progress = []
+    callback_order = []
+
+    def on_checkpoint(current, total, current_collection) -> None:
+        legacy_progress.append((current, total, current_collection.node_count))
+        callback_order.append(("checkpoint", current))
+
+    def on_target(current, total, node_id, elapsed) -> None:
+        target_progress.append((current, total, node_id, elapsed))
+        callback_order.append(("target", current))
+
+    collection = asyncio.run(
+        ha_matter_ws_fetch_all.collect_devices(
+            progress_callback=on_checkpoint,
+            target_progress_callback=on_target,
+        )
+    )
+
+    assert legacy_progress == [(1, 2, 2), (2, 2, 2)]
+    assert target_progress == [(1, 2, 7, 0.25), (2, 2, 9, 0.5)]
+    assert callback_order == [
+        ("checkpoint", 1),
+        ("target", 1),
+        ("checkpoint", 2),
+        ("target", 2),
+    ]
+    assert collection.node_count == 2
+
+
+def test_no_progress_keeps_checkpoint_callbacks_and_logs_no_targets(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    writes = []
+    events = []
+
+    async def fake_collect_devices(*args, **kwargs):
+        assert kwargs["target_progress_callback"] is None
+        kwargs["progress_callback"](1, 2, _collection())
+        return _collection()
+
+    monkeypatch.setattr(ha_matter_ws_cli, "collect_devices", fake_collect_devices)
+    monkeypatch.setattr(
+        ha_matter_ws_cli,
+        "save_json_atomic",
+        lambda payload, path, **kwargs: writes.append((payload, Path(path))),
+    )
+    monkeypatch.setattr(
+        ha_matter_ws_cli,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    assert main(
+        ["--datadir", str(tmp_path), "--no-progress", "devices", "fetch-all"]
+    ) == 0
+    assert any(path.name.endswith(".partial.json") for _, path in writes)
+    assert not any(event == "target_progress" for event, _ in events)
+    assert "target_progress" not in capsys.readouterr().err
+
+
+def test_cli_reports_normalization_progress_after_snapshot_with_target_identity(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    async def fake_collect_devices(*args, **kwargs):
+        kwargs["target_progress_callback"](1, 2, 7, 0.125)
+        return _collection()
+
+    monkeypatch.setattr(ha_matter_ws_cli, "collect_devices", fake_collect_devices)
+    monkeypatch.setattr(
+        ha_matter_ws_cli,
+        "save_json_atomic",
+        lambda payload, path, **kwargs: None,
+    )
+    assert main(["--datadir", str(tmp_path), "devices", "fetch-all"]) == 0
+
+    progress_line = capsys.readouterr().err
+    assert 'progress="[1/2]"' in progress_line
+    assert "current=1" in progress_line
+    assert "completed=1" in progress_line
+    assert "total=2" in progress_line
+    assert "target=7" in progress_line
+    assert "stage=\"normalize\"" in progress_line
+    assert "elapsed_s=0.125" in progress_line
+
+
+def test_final_write_disposition_uses_helper_result_and_stdout_is_not_requested(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    events = []
+    monkeypatch.setattr(ha_matter_ws_cli, "save_final_json", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        ha_matter_ws_cli,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    assert ha_matter_ws_cli._save_final_artifact(
+        [],
+        tmp_path / "retained.json",
+        dataset="devices",
+        records=0,
+        command="devices fetch-all",
+    ) is False
+    final_event = next(fields for event, fields in events if event == "write")
+    assert final_event["disposition"] == "retained_previous"
+
+    async def fake_collect_devices(*args, **kwargs):
+        return _collection()
+
+    monkeypatch.setattr(ha_matter_ws_cli, "collect_devices", fake_collect_devices)
+    assert main(["--datadir", str(tmp_path), "devices", "list"]) == 0
+    assert json.loads(capsys.readouterr().out) == ha_matter_ws_cli._device_inventory(
+        _collection().devices
+    )
+    assert any(
+        fields["disposition"] == "not_requested"
+        for event, fields in events
+        if event == "write"
+    )
+
+
+def test_fetch_all_reports_earlier_save_and_later_failure_without_all_saved_claim(
+    monkeypatch, tmp_path
+) -> None:
+    events = []
+    writes = iter((True, OSError("companion failed")))
+
+    async def fake_collect_devices(*args, **kwargs):
+        return _collection()
+
+    def save_final(*args, **kwargs):
+        result = next(writes)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(ha_matter_ws_cli, "collect_devices", fake_collect_devices)
+    monkeypatch.setattr(ha_matter_ws_cli, "save_final_json", save_final)
+    monkeypatch.setattr(
+        ha_matter_ws_cli,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    assert main(["--datadir", str(tmp_path), "all"]) == EXIT_PERSISTENCE
+    writes = [fields for event, fields in events if event == "write"]
+    assert [entry["disposition"] for entry in writes] == ["saved", "failed"]
+    assert writes[0]["output"] == HA_MATTER_WS_SERVER_INFO_FILENAME
+    assert not any(entry.get("disposition") == "all_saved" for entry in writes)
 
 
 def test_dashboard_and_checkpoints_preserve_matter_operational_products(

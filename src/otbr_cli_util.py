@@ -19,6 +19,12 @@ from typing import Any
 
 from extaddr_device_label_map import load_extaddr_device_label_map
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_collection_outcomes import (
+    CollectionAttempt, CollectionOutcome, Coverage, Response, ResponseEvidence,
+    Status, TableClass,
+    log_outcome_summary,
+)
+from td_logging import log_event
 from util_data import (
     CollectionWriteOutcome,
     data_file_path,
@@ -363,6 +369,8 @@ def classify_meshdiag_router_table(record: Any) -> str:
     if not isinstance(attempt, dict):
         return "unanswered"
     status = attempt.get("status")
+    if not isinstance(status, str):
+        return "unanswered"
     if status == "success":
         return "answered"
     if status not in {"timeout", "error"}:
@@ -399,6 +407,84 @@ def meshdiag_router_table_summary(records: list[Any]) -> dict[str, Any]:
         "unanswered": classes.count("unanswered"),
         "guardPassed": "answered" in classes,
     }
+
+
+def meshdiag_outcome_view(record: Any, command: str) -> CollectionOutcome:
+    classification = classify_meshdiag_router_table(record)
+    row = record if isinstance(record, dict) else {}
+    attempt = row.get("tableAttempt", row.get("table_attempt"))
+    attempt = attempt if isinstance(attempt, dict) else {}
+    raw_status = attempt.get("status")
+    raw_status = raw_status if isinstance(raw_status, str) else None
+    status: Status = (
+        "completed" if raw_status == "success" else
+        "failed" if raw_status in {"timeout", "error", "protocol-error"} else "other"
+    )
+    classes: dict[str, TableClass] = {
+        "answered": "answered", "not-provided": "not_provided",
+        "unanswered": "unanswered", "legacy": "legacy",
+    }
+    table_class = classes[classification]
+    coverage: Coverage = (
+        "complete" if classification == "answered" else
+        "absent" if classification == "not-provided" else "unknown"
+    )
+    response: Response = "observed" if classification == "answered" else "unknown"
+    response_evidence: ResponseEvidence = "direct" if classification == "answered" else "unknown"
+    ping = row.get("ping")
+    identity = row.get("targetIdentity", row.get("target_identity"))
+    if classification != "answered" and isinstance(ping, dict) and isinstance(identity, dict) and canonical_router_rloc16(identity.get("rloc16")):
+        if ping.get("status") == "reply":
+            response, response_evidence = "observed", "ping"
+        elif ping.get("attempted") is True and ping.get("status") == "no-reply":
+            response, response_evidence = "not_observed", "ping"
+    ambiguous = attempt.get("error_type", attempt.get("errorType")) == "AmbiguousTarget"
+    if ambiguous:
+        status = "skipped"
+        coverage = "unknown"
+    attempts = (
+        (CollectionAttempt("initial", status, evidence_ref=command,
+                           original_status=raw_status),)
+        if status != "other" and not ambiguous else ()
+    )
+    target = row.get("rloc16")
+    return CollectionOutcome(
+        source="otbr-cli", command=command, stage="router",
+        target=target if isinstance(target, str) and target else "unavailable",
+        initial_status=status, effective_status=status, original_status=raw_status,
+        original_effective_status=raw_status, table_class=table_class,
+        coverage=coverage, response=response, response_evidence=response_evidence,
+        recovery_state="unknown" if status == "other" else "none",
+        recovery_kind="unknown" if status == "other" else "none",
+        original_reason_code=(
+            "ambiguous_target" if ambiguous else
+            "not-provided-qualified" if classification == "not-provided" else
+            "answered" if classification == "answered" else None
+        ),
+        attempts=attempts,
+    )
+
+
+def log_meshdiag_summary(
+    results: list[dict[str, Any]], command: str, final: str
+) -> None:
+    summary = meshdiag_router_table_summary(results)
+    log_event(
+        "collector_summary", source="otbr-cli", command=command, stage="router",
+        targets=len(results), answered=summary["answered"],
+        not_provided=len(summary["notProvided"]), unanswered=summary["unanswered"],
+        legacy=summary["classes"].count("legacy"), guard_passed=summary["guardPassed"],
+        records=len(results), final=final,
+    )
+    views = tuple(meshdiag_outcome_view(record, command) for record in results)
+    for view in views:
+        log_event(
+            "target_outcome", source=view.source, command=view.command,
+            stage=view.stage, **view.event_fields(),
+        )
+    log_outcome_summary(
+        views, source="otbr-cli", command=command, stage="router",
+    )
 
 
 def meshdiag_collection_outcome(results: list[dict[str, Any]]) -> CollectionWriteOutcome:
@@ -523,11 +609,14 @@ def collect_per_router(
     results = []
     routers_by_rloc: dict[str, dict] = {}
     ambiguous_rlocs: set[str] = set()
+    rejected = 0
     for router in router_table_data:
         if not isinstance(router, dict):
+            rejected += 1
             continue
         rloc16 = canonical_router_rloc16(router.get("rloc16"))
         if rloc16 is None:
+            rejected += 1
             continue
         existing = routers_by_rloc.get(rloc16)
         if existing is None:
@@ -535,13 +624,27 @@ def collect_per_router(
         elif canonical_extaddr(existing.get("extaddr")) != canonical_extaddr(router.get("extaddr")):
             ambiguous_rlocs.add(rloc16)
 
-    for rloc16, router in routers_by_rloc.items():
+    total = len(routers_by_rloc)
+    log_event(
+        "stage_start", source="otbr-cli", command=collection_name, stage="router",
+        targets=total, rejected=rejected,
+    )
+    for current, (rloc16, router) in enumerate(routers_by_rloc.items(), 1):
+        started_at = time.monotonic()
         if rloc16 in ambiguous_rlocs:
             logging.warning("Skipping ambiguous %s router identity for %s", rloc16, collection_name)
+            result = None
+            if ambiguous_result_fn is not None:
+                result = ambiguous_result_fn(rloc16, router)
+                results.append(result)
+            log_event(
+                "target_progress", source="otbr-cli", command=collection_name,
+                stage="router", progress=f"[{current}/{total}]", current=current,
+                total=total, target=rloc16, status="unanswered" if result else "skipped",
+                reason="ambiguous_target", elapsed_s=time.monotonic() - started_at,
+            )
             if ambiguous_result_fn is None:
                 continue
-            result = ambiguous_result_fn(rloc16, router)
-            results.append(result)
             if on_result is not None:
                 on_result(results, rloc16, router)
             continue
@@ -566,7 +669,14 @@ def collect_per_router(
         
         # Call collector function
         result = collect_fn(rloc16, router, extaddr_map)
+        elapsed = time.monotonic() - started_at
         results.append(result)
+        log_event(
+            "target_progress", source="otbr-cli", command=collection_name,
+            stage="router", progress=f"[{current}/{total}]", current=current,
+            total=total, target=rloc16, status=classify_meshdiag_router_table(result),
+            elapsed_s=elapsed,
+        )
 
         if on_result is not None:
             on_result(results, rloc16, router)

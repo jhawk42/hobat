@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
-from typing import Any, Sequence, Tuple
+from typing import Any, Callable, Sequence, Tuple
 
 from td_const import (
     OTBR_RESTAPI_DATASET_ACTIVE_FILENAME,
@@ -27,9 +28,11 @@ from otbr_restapi_util import (
     OTBRClientError,
     OTBRRestApiClient,
     redact_sensitive_payload,
+    rest_payload_record_count,
     resolve_default_rest_host,
     resolve_default_rest_port,
 )
+from td_logging import log_event
 from util_data import resolve_data_dir, resolve_data_file_path
 
 # Retain local constants for backward compatibility with direct-entry tests
@@ -159,25 +162,54 @@ def _download_static_endpoints(
     client: OTBRRestApiClient,
     data_dir: Path,
     static_endpoints: Sequence[Tuple[str, str]],
+    *,
+    on_artifact: Callable[[str], None] | None = None,
 ) -> int:
     failures = 0
     logger = logging.getLogger(__name__)
 
-    for method_name, filename in static_endpoints:
+    for current, (method_name, filename) in enumerate(static_endpoints, 1):
         output_file = resolve_data_file_path(filename, data_dir)
         method = getattr(client, method_name)
+        started = time.monotonic()
+        written: bool | None = None
+        returned = False
+        data: Any = None
+
+        def on_write(value: bool) -> None:
+            nonlocal written
+            written = value
+
         try:
             data = method(raw=True)
             if filename == OTBR_RESTAPI_DATASET_ACTIVE_FILENAME:
                 data = redact_sensitive_payload(data)
-            emit_rest_payload_output(data, output_file, logger)
-            logging.info("OK: %s -> %s", method_name, output_file)
+            emit_rest_payload_output(data, output_file, logger, on_write=on_write)
+            returned = True
         except OTBRClientError as exc:
             logging.error("Failed to download %s: %s", method_name, exc)
             failures += 1
         except OSError as exc:
             logging.error("File write error for %s: %s", output_file, exc)
             failures += 1
+        finally:
+            disposition = ("failed" if not returned else
+                           "saved" if written is True else
+                           "retained_previous" if written is False else "unavailable")
+            if on_artifact is not None:
+                on_artifact(disposition)
+            log_event(
+                "write", source="otbr-restapi", command="download",
+                stage="download", output=str(output_file),
+                records=rest_payload_record_count(data), disposition=disposition,
+            )
+            log_event(
+                "endpoint_end", source="otbr-restapi", command="download",
+                stage="download", method=method_name, output=str(output_file),
+                current=current, total=len(static_endpoints),
+                elapsed_s=time.monotonic() - started, disposition=disposition,
+                records=rest_payload_record_count(data),
+            )
 
     return failures
 
@@ -261,25 +293,48 @@ def download_all_restapi_endpoints(
     if data_dir is None:
         data_dir = _ACTIVE_TD_DATA_DIR or resolve_data_dir(data_dir=None)
 
-    # Optionally refresh device collection first
-    if update_devices:
-        logging.info("Triggering updateDeviceCollectionTask …")
-        try:
-            client.trigger_and_wait_device_collection()
-            logging.info("Device collection update completed.")
-        except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
-            logging.warning(
-                "Device collection update did not complete cleanly: %s", exc)
-        except OTBRClientError as exc:
-            logging.warning("Device collection update failed: %s", exc)
+    started = time.monotonic()
+    refresh = "not_requested"
+    artifacts = {"saved": 0, "retained_previous": 0, "failed": 0, "unavailable": 0}
+    exit_code: int | str = "unavailable"
+    returned = False
 
-    failures = _download_static_endpoints(client, data_dir, _STATIC_ENDPOINTS)
-    if failures:
-        logging.error("Completed with %d failure(s).", failures)
-        return 1
+    def on_artifact(disposition: str) -> None:
+        artifacts[disposition] += 1
 
-    logging.info("All downloads completed successfully.")
-    return 0
+    try:
+        if update_devices:
+            refresh = "raised"
+            logging.info("Triggering updateDeviceCollectionTask …")
+            try:
+                client.trigger_and_wait_device_collection()
+                logging.info("Device collection update completed.")
+                refresh = "returned"
+            except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+                refresh = "warning_action"
+                logging.warning(
+                    "Device collection update did not complete cleanly: %s", exc)
+            except OTBRClientError as exc:
+                refresh = "warning_client"
+                logging.warning("Device collection update failed: %s", exc)
+
+        failures = _download_static_endpoints(
+            client, data_dir, _STATIC_ENDPOINTS, on_artifact=on_artifact
+        )
+        exit_code = 1 if failures else 0
+        if failures:
+            logging.error("Completed with %d failure(s).", failures)
+        returned = True
+        return exit_code
+    finally:
+        log_event(
+            "workflow_summary", source="otbr-restapi", command="download",
+            stage="final", elapsed_s=time.monotonic() - started,
+            state="returned" if returned else "raised",
+            refresh=refresh, exit=exit_code if returned else "unavailable",
+            executed=sum(artifacts.values()),
+            skipped=len(_STATIC_ENDPOINTS) - sum(artifacts.values()), **artifacts,
+        )
 
 # ---------------------------------------------------------------------------
 # Entry point

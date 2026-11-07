@@ -593,8 +593,12 @@ class TestCollectPerRouter:
                 collection_name="meshdiag childtable"
             )
         
-        assert len(caplog.records) == 1
-        log_message = caplog.records[0].message
+        starts = [
+            record.message for record in caplog.records
+            if record.message.startswith("Fetching ")
+        ]
+        assert len(starts) == 1
+        log_message = starts[0]
         assert "Fetching meshdiag childtable" in log_message
         assert "0x5000" in log_message
         assert "Living Room Bulb" in log_message
@@ -617,7 +621,10 @@ class TestCollectPerRouter:
                 collection_name="meshdiag childip6"
             )
         
-        log_message = caplog.records[0].message
+        log_message = next(
+            record.message for record in caplog.records
+            if record.message.startswith("Fetching ")
+        )
         assert "Unknown" in log_message
         assert "0x5000" in log_message
     
@@ -639,7 +646,10 @@ class TestCollectPerRouter:
                 collection_name="test"
             )
         
-        log_message = caplog.records[0].message
+        log_message = next(
+            record.message for record in caplog.records
+            if record.message.startswith("Fetching ")
+        )
         assert "Unknown" in log_message
     
     def test_collect_fn_can_return_any_dict_structure(self):

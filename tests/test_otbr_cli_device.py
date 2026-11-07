@@ -1,12 +1,33 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from unittest.mock import patch
 
 import pytest
 
 import otbr_cli_device
 import td_cli
+
+
+def _events(caplog, name=None):
+    results = []
+    for record in caplog.records:
+        if record.levelno != logging.INFO:
+            continue
+        fields = {}
+        for key, value in re.findall(
+            r'([A-Za-z0-9_]+)=("(?:\\.|[^"\\])*"|\S+)',
+            record.getMessage(),
+        ):
+            try:
+                fields[key] = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+        if "event" in fields and (name is None or fields["event"] == name):
+            results.append(fields)
+    return results
 
 
 def test_ping_materializes_positional_defaults_and_reports_json(capsys) -> None:
@@ -129,6 +150,82 @@ def test_reset_reports_unsupported_tlv_without_claiming_success(capsys) -> None:
     result = json.loads(capsys.readouterr().out)
     assert result["acceptedForTransmission"] is False
     assert result["errorCategory"] == "unsupported"
+
+
+def test_ping_completion_reports_actual_packet_evidence_without_claiming_reachability(
+    monkeypatch, caplog, capsys
+) -> None:
+    caplog.set_level(logging.INFO)
+    clock = iter((1.0, 1.075))
+    monkeypatch.setattr(otbr_cli_device.time, "monotonic", lambda: next(clock))
+    output = (
+        "1 packets transmitted, 0 packets received. Packet loss = 100.0%.\nDone"
+    )
+    with patch.object(
+        otbr_cli_device.util_ot_ctl, "exec_ot_ctl", return_value=output
+    ):
+        assert otbr_cli_device.main(
+            ["ping", "2001:db8::1", "--json"]
+        ) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    event, = _events(caplog, "operation_end")
+    assert event["command"] == "device ping"
+    assert event["state"] == "returned"
+    assert event["sent"] == result["sent"] == 1
+    assert event["received"] == result["received"] == 0
+    assert event["error_category"] == "timeout"
+    assert event["elapsed_ms"] == 75
+    assert "reachable" not in event
+
+
+def test_reset_completion_reports_transmission_acceptance_only(
+    monkeypatch, caplog, capsys
+) -> None:
+    caplog.set_level(logging.INFO)
+    clock = iter((3.0, 3.125))
+    monkeypatch.setattr(otbr_cli_device.time, "monotonic", lambda: next(clock))
+    with patch.object(
+        otbr_cli_device.util_ot_ctl, "exec_ot_ctl", return_value="Done"
+    ):
+        assert otbr_cli_device.main(
+            [
+                "reset-counters",
+                "2001:db8::1",
+                "--counters",
+                "mac",
+                "--confirm",
+                "--json",
+            ]
+        ) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    event, = _events(caplog, "operation_end")
+    assert event["command"] == "device reset-counters"
+    assert event["state"] == "returned"
+    assert event["accepted_for_transmission"] is result["acceptedForTransmission"] is True
+    assert event["elapsed_ms"] == 125
+    assert "reset" not in event
+
+
+def test_device_operation_exception_keeps_propagation_and_logs_no_success(
+    monkeypatch, caplog
+) -> None:
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(
+        otbr_cli_device.util_ot_ctl,
+        "exec_ot_ctl",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("dispatch failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="dispatch failed"):
+        otbr_cli_device.main(["ping", "2001:db8::1"])
+
+    event, = _events(caplog, "operation_end")
+    assert event["state"] == "failed"
+    assert event["sent"] is None
+    assert event["received"] is None
+    assert event["error_category"] is None
 
 
 def test_td_cli_forwards_device_command_to_action_module() -> None:

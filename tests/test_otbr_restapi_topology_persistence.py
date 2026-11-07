@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -51,8 +53,9 @@ def test_topology_saves_each_enabled_output_before_the_next_collection(tmp_path)
         lambda *_args, **_kwargs: events.append("collect:mesh") or mesh_outcome
     )
 
-    def save(_payload, path, _logger):
+    def save(_payload, path, _logger, *, on_write):
         events.append(f"save:{path.name}")
+        on_write(True)
 
     with patch.object(topology_module, "emit_rest_payload_output", side_effect=save):
         result = topology_module.dispatch_topology(client, args, raw_arg=False)
@@ -125,10 +128,14 @@ def test_topology_skip_devices_keeps_device_inputs_unsaved(tmp_path):
     }
     saved_paths = []
 
+    def save(_payload, path, _logger, *, on_write):
+        saved_paths.append(path.name)
+        on_write(True)
+
     with patch.object(
         topology_module,
         "emit_rest_payload_output",
-        side_effect=lambda _payload, path, _logger: saved_paths.append(path.name),
+        side_effect=save,
     ):
         assert topology_module.dispatch_topology(client, args, raw_arg=False) is None
 
@@ -180,7 +187,7 @@ def test_topology_uses_refreshed_roster_mode_for_diagnostics(tmp_path):
     with patch.object(
         topology_module,
         "emit_rest_payload_output",
-        side_effect=lambda _payload, *_args, **_kwargs: None,
+        wraps=topology_module.emit_rest_payload_output,
     ):
         topology_module.dispatch_topology(client, args, raw_arg=False)
 
@@ -339,11 +346,11 @@ def test_topology_skip_devices_no_update_writes_only_enabled_stage_outputs(
     }
     saved_paths = []
 
-    with patch.object(
-        topology_module,
-        "emit_rest_payload_output",
-        side_effect=lambda _payload, path, _logger: saved_paths.append(path.name),
-    ):
+    def save(_payload, path, _logger, *, on_write):
+        saved_paths.append(path.name)
+        on_write(True)
+
+    with patch.object(topology_module, "emit_rest_payload_output", side_effect=save):
         assert topology_module.dispatch_topology(client, args, raw_arg=False) is None
 
     client.list_devices.assert_called_once_with(raw=False)
@@ -401,6 +408,175 @@ def test_topology_updates_device_collection_at_most_once(tmp_path, command_args,
 
     assert client.fetch_device_collection.call_count == expected_updates
     assert client.fetch_device_collection.call_count <= 1
+
+
+def _observed_topology(tmp_path, *flags):
+    args = cli_module.build_parser().parse_args(
+        ["topology", "--no-enrich-mac-counters", *flags]
+    )
+    args.td_data_dir = tmp_path
+    client = MagicMock()
+    devices = [
+        {"id": "1111111111111111", "rloc16": "0x4000"},
+        {"id": "bad", "rloc16": "0x8000"},
+    ]
+    client.fetch_device_collection.return_value = devices
+    client.list_devices.return_value = devices
+    outcome = {
+        "items": [{"id": "diagnostic-one"}],
+        "deviceResults": [
+            {"deviceId": "1111111111111111", "status": "completed"},
+            {"deviceId": "bad", "status": "skipped"},
+        ],
+        "inputCount": 2, "queriedCount": 1, "attemptedCount": 1, "partial": False,
+    }
+    client.fetch_all_devices_diagnostics.return_value = outcome
+    client.fetch_mesh_diagnostics_all_devices.return_value = outcome
+    return args, client, outcome
+
+
+@pytest.mark.parametrize("progress_enabled", [False, True])
+def test_topology_progress_has_owned_stages_and_separate_expansion(
+    tmp_path, caplog, capsys, progress_enabled,
+):
+    args, client, outcome = _observed_topology(
+        tmp_path, *([] if progress_enabled else ["--no-progress"])
+    )
+
+    def diagnostics(_selected, **kwargs):
+        if kwargs["on_progress"] is not None:
+            kwargs["on_rejected_progress"]("bad", 0.125, "malformed")
+            kwargs["on_progress"](1, 1, "1111111111111111", 0.25, "completed")
+            kwargs["on_progress"](1, 3, "rloc:0001", 0.375, "completed")
+        return outcome
+
+    def mesh(_selected, **kwargs):
+        if kwargs["on_progress"] is not None:
+            kwargs["on_rejected_progress"]("bad", 0.125, "malformed")
+            kwargs["on_progress"](1, 1, "1111111111111111", 0.25, "completed")
+        return outcome
+
+    client.fetch_all_devices_diagnostics.side_effect = diagnostics
+    client.fetch_mesh_diagnostics_all_devices.side_effect = mesh
+    with caplog.at_level(logging.INFO):
+        topology_module.dispatch_topology(client, args, False)
+    captured = capsys.readouterr()
+    assert not captured.out
+    lines = captured.err.splitlines()
+    assert len(lines) == (5 if progress_enabled else 0)
+    if progress_enabled:
+        assert all('command="topology"' in line for line in lines)
+        assert 'stage="diagnostics.initial"' in lines[0] and 'progress="[1/2]"' in lines[0]
+        assert 'stage="diagnostics.initial"' in lines[1] and 'progress="[2/2]"' in lines[1]
+        assert 'stage="diagnostics.expansion"' in lines[2] and 'progress="[1/3]"' in lines[2]
+        assert 'stage="mesh.initial"' in lines[3] and 'progress="[1/2]"' in lines[3]
+        assert 'stage="mesh.initial"' in lines[4] and 'progress="[2/2]"' in lines[4]
+    assert 'command="diagnostics fetch-all"' not in caplog.text
+    assert 'stage="mesh.qualification" availability="unavailable"' in caplog.text
+    starts = [r.message for r in caplog.records if 'event="step_start"' in r.message]
+    ends = [r.message for r in caplog.records if 'event="step_end"' in r.message]
+    assert len(starts) == len(ends) == 3
+    assert ['stage="devices.fetch"' in starts[0], 'stage="diagnostics"' in starts[1],
+            'stage="mesh"' in starts[2]] == [True, True, True]
+    summary = next(r.message for r in caplog.records if 'event="workflow_summary"' in r.message)
+    assert 'executed=3' in summary and 'skipped=0' in summary and 'failed=0' in summary
+
+
+_TOPOLOGY_ARTIFACTS = [
+    (OTBR_RESTAPI_DEVICES_FETCH_FILENAME, "devices.final"),
+    (OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME, "diagnostics.final"),
+    (OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME, "diagnostics.outcome"),
+    (OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME, "mesh.final"),
+    (OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME, "mesh.outcome"),
+]
+
+
+@pytest.mark.parametrize("filename,stage", _TOPOLOGY_ARTIFACTS)
+@pytest.mark.parametrize("disposition", ["retained_previous", "failed"])
+def test_topology_observes_each_actual_publication(
+    tmp_path, monkeypatch, caplog, filename, stage, disposition,
+):
+    import util_data
+
+    args, client, _outcome = _observed_topology(tmp_path, "--no-progress")
+    target = tmp_path / filename
+    target.write_bytes(b"old snapshot\n")
+    original = util_data.save_final_json
+
+    def save(payload, path, *args, **kwargs):
+        if Path(path).name == filename:
+            if disposition == "failed":
+                raise OSError("publication failed")
+            return False
+        return original(payload, path, *args, **kwargs)
+
+    monkeypatch.setattr(util_data, "save_final_json", save)
+    with caplog.at_level(logging.INFO):
+        if disposition == "failed":
+            with pytest.raises(OSError, match="publication failed"):
+                topology_module.dispatch_topology(client, args, False)
+        else:
+            topology_module.dispatch_topology(client, args, False)
+    writes = [
+        r.message for r in caplog.records
+        if r.message.startswith('event="write"') and f'stage="{stage}"' in r.message
+    ]
+    assert len(writes) == 1 and f'disposition="{disposition}"' in writes[0]
+    assert target.read_bytes() == b"old snapshot\n"
+    if disposition == "failed":
+        summary = next(r.message for r in caplog.records if 'event="workflow_summary"' in r.message)
+        assert 'state="raised"' in summary and 'failed=1' in summary
+        if stage == "devices.final":
+            client.fetch_all_devices_diagnostics.assert_not_called()
+        if not stage.startswith("mesh."):
+            client.fetch_mesh_diagnostics_all_devices.assert_not_called()
+
+
+def test_topology_primary_then_scope_failure_is_not_saved(tmp_path, monkeypatch, caplog):
+    import util_data
+
+    args, client, _outcome = _observed_topology(tmp_path, "--no-progress")
+    original = util_data.write_network_scope
+
+    def scope(path, value):
+        if Path(path).name == OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME:
+            raise OSError("scope failed")
+        return original(path, value)
+
+    monkeypatch.setattr(util_data, "write_network_scope", scope)
+    with caplog.at_level(logging.INFO), pytest.raises(OSError, match="scope failed"):
+        topology_module.dispatch_topology(client, args, False)
+    assert (tmp_path / OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME).is_file()
+    writes = [
+        r.message for r in caplog.records
+        if r.message.startswith('event="write"') and 'stage="mesh.final"' in r.message
+    ]
+    assert len(writes) == 1 and 'disposition="failed"' in writes[0]
+    assert not (tmp_path / OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME).exists()
+
+
+@pytest.mark.parametrize("skip_devices", [False, True])
+@pytest.mark.parametrize("skip_diagnostics", [False, True])
+@pytest.mark.parametrize("skip_mesh", [False, True])
+def test_topology_skipped_stages_keep_actual_operations_visible(
+    tmp_path, caplog, skip_devices, skip_diagnostics, skip_mesh,
+):
+    flags = ["--no-progress", "--no-update-devices"]
+    flags += ["--skip-devices"] if skip_devices else []
+    flags += ["--skip-diagnostics"] if skip_diagnostics else []
+    flags += ["--skip-mesh-diagnostics"] if skip_mesh else []
+    args, client, _outcome = _observed_topology(tmp_path, *flags)
+    with caplog.at_level(logging.INFO):
+        topology_module.dispatch_topology(client, args, False)
+    assert client.list_devices.call_count == int(skip_devices)
+    assert client.fetch_device_collection.call_count == int(not skip_devices)
+    assert client.fetch_all_devices_diagnostics.call_count == int(not skip_diagnostics)
+    assert client.fetch_mesh_diagnostics_all_devices.call_count == int(not skip_mesh)
+    skipped = sum([skip_devices, skip_diagnostics, skip_mesh])
+    summary = next(r.message for r in caplog.records if 'event="workflow_summary"' in r.message)
+    assert f'executed={3 - skipped}' in summary and f'skipped={skipped}' in summary
+    if skip_devices:
+        assert 'stage="devices.list" state="returned"' in caplog.text
 
 
 def test_topology_run_cli_does_not_add_a_generic_final_write(tmp_path):

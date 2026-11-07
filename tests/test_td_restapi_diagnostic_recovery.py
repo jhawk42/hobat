@@ -136,6 +136,89 @@ def _bound_outcome(outcome: dict, final: list, *, scope: str = "1234567890abcdef
     )
 
 
+def test_observability_preserves_initial_skip_after_expansion_recovery(caplog):
+    import logging
+    from otbr_restapi_diagnostics import _log_diagnostic_facts
+
+    outcome, _ = _fixture()
+    effective = reconcile_rest_diagnostics(outcome)
+    with caplog.at_level(logging.INFO):
+        _log_diagnostic_facts(effective)
+    lines = [record.message for record in caplog.records]
+    child = next(line for line in lines if 'event="target_result"' in line and 'stage="initial"' in line and f'target="{CHILD}"' in line)
+    assert 'status="skipped"' in child
+    expansion = next(line for line in lines if 'event="target_result"' in line and 'stage="expansion"' in line)
+    assert 'status="completed"' in expansion
+    coverage = next(line for line in lines if 'event="coverage"' in line and 'stage="effective"' in line)
+    assert 'devices=2' in coverage
+    import json
+
+    summaries = [line for line in lines if 'event="outcome_summary"' in line]
+    assert len(summaries) == 4
+    initial = next(line for line in summaries if 'stage="initial"' in line)
+    terminal = json.JSONDecoder().raw_decode(initial.split("terminal_statuses=", 1)[1])[0]
+    assert terminal == {"completed": 0, "skipped": 1, "partial": 1, "failed": 0, "other": 0}
+    for line in summaries:
+        population = int(line.split("population=", 1)[1].split()[0])
+        terminal = json.JSONDecoder().raw_decode(line.split("terminal_statuses=", 1)[1])[0]
+        reasons = json.JSONDecoder().raw_decode(line.split("reasons=", 1)[1])[0]
+        assert sum(terminal.values()) == sum(reasons.values()) == population
+        assert population == (1 if 'stage="expansion"' in line else 2)
+    recovered = next(line for line in summaries if 'stage="effective"' in line)
+    assert '"completed":2' in recovered
+    assert 'status_phase="effective"' in recovered
+
+
+@pytest.mark.parametrize("base,devices,ambiguous,unmatched,uncorrelated", [
+    ([{"deviceId": CHILD}, {"deviceId": CHILD}], 0, 2, 0, 1),
+    ([{"deviceId": PARENT}], 0, 0, 1, 1),
+    ([{"deviceId": CHILD}], 1, 0, 0, 0),
+    ([None, {"deviceId": "invalid"}], 0, 0, 2, 1),
+])
+def test_observability_requires_unique_base_identity_for_coverage(
+    caplog, base, devices, ambiguous, unmatched, uncorrelated
+):
+    import logging
+    from otbr_restapi_diagnostics import _log_diagnostic_facts
+
+    outcome = {
+        "deviceResults": base,
+        "diagnosticRecovery": {
+            "effectiveStatus": "partial", "devices": [{"extAddress": CHILD}],
+        },
+    }
+    with caplog.at_level(logging.INFO):
+        _log_diagnostic_facts(outcome)
+    coverage = next(r.message for r in caplog.records if 'event="coverage"' in r.message and 'stage="effective"' in r.message)
+    assert f"devices={devices}" in coverage
+    assert f"ambiguous={ambiguous}" in coverage
+    assert f"unmatched={unmatched}" in coverage
+    assert devices + ambiguous + unmatched == len(base)
+    assert f"uncorrelated_details={uncorrelated}" in coverage
+
+
+@pytest.mark.parametrize("details,ambiguous,unmatched", [
+    ([], 0, 1),
+    ([{"extAddress": CHILD}, {"extAddress": CHILD}], 1, 0),
+])
+def test_coverage_accounts_for_valid_base_without_unique_detail(caplog, details, ambiguous, unmatched):
+    import logging
+    from otbr_restapi_diagnostics import _log_diagnostic_facts
+
+    outcome = {
+        "deviceResults": [{"deviceId": CHILD, "status": "failed"}],
+        "diagnosticRecovery": {"devices": details},
+    }
+    with caplog.at_level(logging.INFO):
+        _log_diagnostic_facts(outcome)
+    coverage = next(r.message for r in caplog.records if 'event="coverage"' in r.message)
+    assert "base_results=1" in coverage
+    assert "devices=0" in coverage
+    assert f"ambiguous={ambiguous}" in coverage
+    assert f"unmatched={unmatched}" in coverage
+    assert ambiguous + unmatched == 1
+
+
 @pytest.mark.parametrize("raw", [False, True])
 @pytest.mark.parametrize("base_child", [False, True])
 def test_completed_expansion_only_child_qualifies_router_table(raw: bool, base_child: bool) -> None:

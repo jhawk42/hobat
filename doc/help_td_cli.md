@@ -45,6 +45,109 @@ explicit `--log-thread-secrets` option disables redaction only for OTBR REST
 DEBUG response-body logs; it never changes stdout or saved snapshots. Use it
 only when the process log destination, access, and retention are controlled.
 
+### Collector observability
+
+Collectors emit escaped `event`, `source`, `command`, and `stage` fields through
+the existing INFO logger on stderr; JSON stdout and cached snapshot schemas
+are unchanged. Values use JSON quoting, so embedded quotes and newlines cannot
+create a second event. These lines are troubleshooting output, not a versioned
+machine API. `TD_RUN_CMD`, when supplied by the local collection wrapper, adds
+one `run_cmd` correlation ID per invocation; standalone commands omit it.
+Finite numeric `elapsed_s` values use exactly three decimal places (for example,
+`elapsed_s=0.250`) and remain JSON numbers, not quoted strings. This is log-only
+formatting; unavailable values remain `null`, and cached timings are unchanged.
+The existing REST CLI stdout-only mode appends `Output written to stdout`
+after its JSON payload. That complete stream is not standalone JSON; the new
+events do not change this legacy status line.
+
+- `target_progress` uses a fixed stage population and monotonic elapsed seconds.
+  CLI mesh tables deduplicate valid router RLOCs and report rejected inputs
+  separately. Router diagnostics and child expansion are separate stages;
+  repeated stages do not add up to a unique-device count.
+- CLI mesh coverage distinguishes `answered`, `not_provided`, `unanswered`,
+  and `legacy`. A fallback ping is not a table answer; a nonempty complete
+  table run still needs at least one actual answer (`guard_passed`).
+- Multicast attempt responses and cumulative unique devices are different
+  counts. HA per-node timing measures normalization after controller receipt,
+  not WebSocket collection latency or reachability. mDNS has a timed dynamic
+  browse, not a fixed denominator. Eve enrichment skips do not mean its
+  topology failed to save.
+- Checkpoint events use `event="checkpoint"`, including HA and mDNS, and
+  distinguish `written`, `skipped_unusable`, and
+  `failed`. Final writes distinguish `saved`, `retained_previous`,
+  `not_requested`, and `failed`. Each artifact is reported independently:
+  an earlier save does not guarantee a later output or scope companion saved.
+  Existing atomic-write, checkpoint and retained-cache rules are unchanged.
+- Bulk topology/router-table, metadata/BBR, REST device discovery/download and
+  single diagnostic/node/action commands also report their actual operations
+  and artifact dispositions. `operation_end state="returned"` means the local
+  operation returned, not that an enqueued action completed remotely.
+  Composite `step_end` and `workflow_summary` report actual executed, skipped
+  or not-run work, including raised aborts; command-specific fields identify
+  their units. A failed publication can follow replacement of the primary JSON
+  if its scope companion then fails. It does not imply rollback. A writer
+  declining replacement (`retained_previous`) does not validate an older file.
+- OTBR CLI prefix reads report `operation_end` with `output_state` set to
+  `valid_prefix`, `empty`, `completion_only`, `invalid_prefix` or `unavailable`.
+  The event does not include raw output. Multicast-neighbors also reports its
+  metadata preflight's terminal `step_end` before propagating a failure.
+  Empty output or `Done` alone remains an error, not a cached-prefix fallback.
+- OTBR CLI subprocesses emit `transport_end` with process state/exit, monotonic
+  elapsed seconds, captured stdout/stderr byte lengths (UTF-8 for decoded
+  text), `stdout_empty`, `stderr_present` and redacted, escaped stderr.
+  Arguments and stdout bodies are not included in this event. Unavailable
+  captures and exit codes remain `null`, not invented zeros. Zero exit with
+  stderr or blank stdout is logged at WARNING; ordinary returns use INFO and
+  subprocess failures/timeouts use ERROR. `state="returned"` describes the
+  local process, not valid diagnostic data. Existing return values are unchanged.
+- `target_outcome` uses logging-only vocabulary version 1. Request status,
+  requested-data coverage, table class, response evidence and recovery are
+  independent. Unknown source statuses become `other` with diagnostics; their
+  original strings remain visible. An already qualified table exemption shows
+  **Not provided**, but its failed request remains failed. A ping reply is not
+  table recovery. Empty error placeholders do not establish absent coverage;
+  unanswered or skipped targets retain unknown coverage. Recovery summaries
+  include only verified existing attempts.
+  Router diagnostics use `diagnostic-result-missing` when an executed attempt
+  returned no matching parsed result, including a failed attempt before a
+  successful fallback. This describes parser evidence, not device Offline
+  status, an established timeout, or unsupported TLVs.
+  A router stage with effective failures also emits one plain-English WARNING
+  separating completed direct queries, missing parsed results, multicast skips
+  and current topology record count. It does not claim the final snapshot was
+  saved; separate write events report that. Recovered-only or fully skipped
+  stages do not receive this incomplete-collection warning.
+- `outcome_summary` reports per-stage `terminal_statuses` and bounded `reasons`.
+  Each histogram sums to that event's `population`. Initial, expansion and
+  uniquely correlated effective populations are separate; `status_phase`
+  identifies which status was counted. Reasons retain source provenance, so a
+  recovered device can retain its original skip reason. Never add these
+  populations, or CLI child fast/detail stages, as unique devices.
+  The child-level history retains attempts from every executed policy.
+  REST effective correlation accounts for all base results as
+  `devices + ambiguous + unmatched = base_results`; valid identities without
+  matching detail remain unmatched, not silently omitted.
+  `verified_attempts` and `verified_attempt_kinds` count proven attempt history,
+  not extra devices or all reported requests. Incomplete history stays unknown.
+  Unavailable evidence has `availability="unavailable"` without zero-filled
+  counts; a known empty population legitimately has zero counts.
+
+Existing `--no-progress` options suppress enabled per-target stderr progress,
+not checkpoint publication or INFO summaries. A successful process exit or
+saved snapshot does not establish complete coverage. If a command fails before
+emitting a collector summary, its counts are unavailable, not zero. Correlate
+any child summary with the wrapper's separate process result; the wrapper does
+not inspect child output to reconstruct outcomes. The shared vocabulary does
+not join identities across sources, persist new snapshot fields, alter health
+authority, or change dashboard wording.
+
+New event fields and sanitized argv never honor `--log-thread-secrets`.
+Inline dataset bodies and sensitive option values are replaced, credential
+URIs and labeled JSON/text secrets are redacted, and device/network identifiers
+remain useful context. Sanitized argv retains argument boundaries, including
+empty values; it is not a fully verbatim command. Redaction is not a guarantee
+for arbitrary unlabeled secrets in unrelated third-party output.
+
 ## Command Summary
 
 | Command | Description |
@@ -134,31 +237,7 @@ script status is 1 for unavailable/skipped sources, collection failures, or
 Unified/health failures, and 2 for preflight errors (which take precedence).
 Final elapsed-time output and the full script's tabular exports are retained.
 
-#### Collection script modes
-
-The [full collection script](../script/td-fetch.sh) owns both collection modes:
-
-```bash
-script/td-fetch.sh          # Full collection (default)
-script/td-fetch.sh --quick  # Reduced collection
-script/td-fetch.sh --help   # Help only; no activation, probes, or collection
-```
-
-The [quick compatibility script](../script/td-fetch-quick.sh) delegates to
-`td-fetch.sh --quick` using `exec`, forwarding any arguments and preserving
-the exit status. Existing quick-script cron jobs can continue unchanged.
-Unknown arguments exit with status 2 before environment activation or probes.
-
-| Operation | Full mode | Quick mode |
-|---|---|---|
-| CLI meshdiag neighbor, child-table, and child-IP tables | Collect | Skip |
-| CLI `networkdiag fetch-all` | Existing full options | Add `-cno` / `--children-no` |
-| REST diagnostics and mesh-diagnostics `fetch-all` | Collect | Skip |
-| Final tabular exports | Produce | Skip |
-| HA Matter, mDNS, source preflights, merge, Unified, and health | Shared pipeline | Shared pipeline |
-
-Both modes use the full script's existing repository-local data-directory
-setup, network-identity guard, failure reporting, and retained-cache policy.
+See [collection script modes](../script/TD-FETCH.md) for usage and logging.
 
 ### `unify-dataset`
 

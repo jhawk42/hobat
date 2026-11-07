@@ -8,10 +8,12 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Sequence
 
+from td_logging import log_event
 import util_ot_ctl
 
 
@@ -204,15 +206,30 @@ def _run_ping(args: argparse.Namespace) -> int:
         if args.timeout is not None
         else PING_SED_DEFAULT_TIMEOUT if args.allow_sed else PING_DEFAULT_TIMEOUT
     )
-    result = ping_device(PingRequest(
-        target=args.target,
-        source=args.source,
-        size=args.size,
-        count=args.count,
-        interval_seconds=args.interval,
-        hop_limit=args.hop_limit,
-        timeout_seconds=timeout_seconds,
-    ))
+    started_at = time.monotonic()
+    returned = False
+    result = None
+    try:
+        result = ping_device(PingRequest(
+            target=args.target,
+            source=args.source,
+            size=args.size,
+            count=args.count,
+            interval_seconds=args.interval,
+            hop_limit=args.hop_limit,
+            timeout_seconds=timeout_seconds,
+        ))
+        returned = True
+    finally:
+        log_event(
+            "operation_end", source="otbr-cli", command="device ping",
+            stage="device", state="returned" if returned else "failed",
+            target=args.target,
+            sent=result.sent if result is not None else None,
+            received=result.received if result is not None else None,
+            error_category=result.error_category if result is not None else None,
+            elapsed_ms=max(0, round((time.monotonic() - started_at) * 1000)),
+        )
     _emit(result.as_json_dict(), args.json)
     return 3 if result.error_category == "local-dispatch" else 0
 
@@ -221,28 +238,44 @@ def _run_reset(args: argparse.Namespace) -> int:
     if not args.confirm:
         raise ValueError("reset-counters requires --confirm")
     tlvs = {"mac": "9", "mle": "34", "both": "9 34"}[args.counters]
-    output = util_ot_ctl.exec_ot_ctl(f"networkdiagnostic reset {args.target} {tlvs}")
-    accepted = output.rstrip().endswith("Done")
-    error_category = "none"
-    if not accepted:
-        if "unsupported" in output.lower():
-            error_category = "unsupported"
-        elif output.startswith("Error:"):
-            error_category = "local-dispatch"
-        else:
-            error_category = "remote-rejected"
-    result = {
-        "target": args.target,
-        "counters": args.counters,
-        "container": os.getenv(
-            util_ot_ctl.TD_OTBR_CONTAINER_NAME_ENV,
-            util_ot_ctl.TD_OTBR_CONTAINER_NAME_DEFAULT,
-        ),
-        "acceptedForTransmission": accepted,
-        "errorCategory": error_category,
-        "observedAt": datetime.now(timezone.utc).isoformat(),
-        "output": output,
-    }
+    started_at = time.monotonic()
+    returned = False
+    result = None
+    try:
+        output = util_ot_ctl.exec_ot_ctl(f"networkdiagnostic reset {args.target} {tlvs}")
+        accepted = output.rstrip().endswith("Done")
+        error_category = "none"
+        if not accepted:
+            if "unsupported" in output.lower():
+                error_category = "unsupported"
+            elif output.startswith("Error:"):
+                error_category = "local-dispatch"
+            else:
+                error_category = "remote-rejected"
+        result = {
+            "target": args.target,
+            "counters": args.counters,
+            "container": os.getenv(
+                util_ot_ctl.TD_OTBR_CONTAINER_NAME_ENV,
+                util_ot_ctl.TD_OTBR_CONTAINER_NAME_DEFAULT,
+            ),
+            "acceptedForTransmission": accepted,
+            "errorCategory": error_category,
+            "observedAt": datetime.now(timezone.utc).isoformat(),
+            "output": output,
+        }
+        returned = True
+    finally:
+        log_event(
+            "operation_end", source="otbr-cli", command="device reset-counters",
+            stage="device", state="returned" if returned else "failed",
+            target=args.target, counters=args.counters,
+            accepted_for_transmission=(
+                result["acceptedForTransmission"] if result is not None else None
+            ),
+            error_category=result["errorCategory"] if result is not None else None,
+            elapsed_ms=max(0, round((time.monotonic() - started_at) * 1000)),
+        )
     _emit(result, args.json)
     return 0 if accepted else 3
 

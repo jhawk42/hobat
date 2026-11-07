@@ -3,6 +3,8 @@ from __future__ import annotations
 import tempfile
 import unittest
 import json
+import logging
+import pytest
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -197,8 +199,9 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
         mock_client.list_devices.side_effect = collect("devices", [{"id": "dev-1"}])
         mock_client.list_diagnostics.side_effect = collect("diagnostics", [{"id": "diag-1"}])
 
-        def save(_payload, output_file, _logger):
+        def save(_payload, output_file, _logger, *, on_write):
             events.append(f"save:{output_file.name}")
+            on_write(True)
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
             script_module, "emit_rest_payload_output", side_effect=save
@@ -314,6 +317,99 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_client.fetch_device_diagnostics.assert_not_called()
         emit_output.assert_not_called()
+
+
+def test_static_download_two_endpoints_failure_then_success(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    client = MagicMock()
+    client.first.side_effect = script_module.OTBRClientError("offline")
+    client.second.return_value = {"data": [{"id": "a"}]}
+    counts = []
+    assert script_module._download_static_endpoints(
+        client, tmp_path, [("first", "a.json"), ("second", "b.json")],
+        on_artifact=counts.append,
+    ) == 1
+    assert counts == ["failed", "saved"]
+    lines = [record.message for record in caplog.records if 'event="endpoint_end"' in record.message]
+    assert len(lines) == 2
+    assert 'current=1 total=2' in lines[0] and 'disposition="failed"' in lines[0]
+    assert 'current=2 total=2' in lines[1] and 'disposition="saved"' in lines[1]
+    assert 'records=1' in lines[1]
+
+
+def test_download_refresh_warning_and_retained_artifact(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    client = MagicMock()
+    client.trigger_and_wait_device_collection.side_effect = script_module.OTBRClientError("offline")
+    client.get_active_dataset.return_value = {"networkKey": "secret-sentinel"}
+    client.list_devices.return_value = {"partial": True, "items": []}
+    client.list_diagnostics.return_value = []
+    assert script_module.download_all_restapi_endpoints(client, tmp_path, update_devices=True) == 0
+    assert 'refresh="warning_client" exit=0' in caplog.text
+    assert 'saved=2 retained_previous=1 failed=0' in caplog.text
+    assert "secret-sentinel" not in caplog.text
+    client.fetch_device_diagnostics.assert_not_called()
+
+
+def test_download_refresh_warning_three_successful_downloads(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    client = MagicMock()
+    client.trigger_and_wait_device_collection.side_effect = script_module.OTBRClientError("offline")
+    client.get_active_dataset.return_value = {}
+    client.list_devices.return_value = [{"id": "a"}]
+    client.list_diagnostics.return_value = []
+    assert script_module.download_all_restapi_endpoints(client, tmp_path, update_devices=True) == 0
+    assert 'refresh="warning_client" exit=0' in caplog.text
+    assert 'saved=3 retained_previous=0 failed=0' in caplog.text
+    client.fetch_device_diagnostics.assert_not_called()
+
+
+def test_download_serialization_and_companion_failures_propagate(tmp_path, monkeypatch, caplog):
+    import util_data
+
+    caplog.set_level(logging.INFO)
+    client = MagicMock()
+    client.first.return_value = [{"bad": object()}]
+    with pytest.raises(TypeError):
+        script_module._download_static_endpoints(client, tmp_path, [("first", "bad.json")])
+    assert 'disposition="failed"' in caplog.text
+    caplog.clear()
+    client.first.return_value = [{"id": "a"}]
+    monkeypatch.setattr(util_data, "write_network_scope", MagicMock(side_effect=OSError("scope failure")))
+    assert script_module._download_static_endpoints(
+        client, tmp_path, [("first", "td-otbr-restapi-devices.json")]
+    ) == 1
+    assert 'disposition="failed"' in caplog.text
+    assert 'disposition="saved"' not in caplog.text
+
+
+def test_download_workflow_serialization_abort_does_not_run_remaining_endpoints(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    client = MagicMock()
+    client.get_active_dataset.return_value = {}
+    client.list_devices.return_value = [{"bad": object()}]
+    with pytest.raises(TypeError):
+        script_module.download_all_restapi_endpoints(client, tmp_path)
+    client.list_diagnostics.assert_not_called()
+    summary = next(record.message for record in caplog.records
+                   if 'event="workflow_summary"' in record.message)
+    assert 'state="raised"' in summary
+    assert 'exit="unavailable"' in summary
+    assert "executed=2 skipped=1" in summary
+    assert "saved=1 retained_previous=0 failed=1" in summary
+
+
+def test_download_workflow_refresh_abort_has_no_exit_or_downloads(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    client = MagicMock()
+    client.trigger_and_wait_device_collection.side_effect = ValueError("unexpected")
+    with pytest.raises(ValueError):
+        script_module.download_all_restapi_endpoints(client, tmp_path, update_devices=True)
+    client.get_active_dataset.assert_not_called()
+    summary = next(record.message for record in caplog.records
+                   if 'event="workflow_summary"' in record.message)
+    assert 'state="raised" refresh="raised" exit="unavailable"' in summary
+    assert "executed=0 skipped=3" in summary
 
 
 if __name__ == "__main__":

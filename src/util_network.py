@@ -2,6 +2,10 @@ import ipaddress
 import json
 import util_ot_ctl
 import logging
+import sys
+import time
+
+from td_logging import log_event
 
 THREAD_RLOC16_ADDRESS_PREFIX = ":0:ff:fe00:"
 
@@ -156,18 +160,37 @@ def _strip_prefix_mask(prefix):
 
 def _fetch_prefix_via_ot_ctl(command, label):
     """Runs an ot-ctl prefix command and returns the extracted prefix token."""
-    command_output = util_ot_ctl.exec_ot_ctl(command)
-    logging.debug(f"[DEBUG] Output of 'ot-ctl {command}':\n{command_output}\n")
-
-    prefix = _parse_prefix_token(command_output)
+    started_at = time.monotonic()
+    normal_return = False
+    output_state = "unavailable"
     try:
-        ipaddress.IPv6Network(prefix, strict=False)
-    except ValueError as exc:
-        raise PrefixFetchError(
-            f"Invalid {label.lower()} from ot-ctl: {prefix or 'empty output'}"
-        ) from exc
-    logging.debug((f"[DEBUG] {label}: {prefix}\n"))
-    return prefix
+        command_output = util_ot_ctl.exec_ot_ctl(command)
+        logging.debug(f"[DEBUG] Output of 'ot-ctl {command}':\n{command_output}\n")
+        output_state = (
+            "empty" if not command_output.strip()
+            else "completion_only" if command_output.strip().lower() in {"done", "done."}
+            else "invalid_prefix"
+        )
+        prefix = _parse_prefix_token(command_output)
+        try:
+            ipaddress.IPv6Network(prefix, strict=False)
+        except ValueError as exc:
+            raise PrefixFetchError(
+                f"Invalid {label.lower()} from ot-ctl: {prefix or 'empty output'}"
+            ) from exc
+        logging.debug((f"[DEBUG] {label}: {prefix}\n"))
+        output_state = "valid_prefix"
+        normal_return = True
+        return prefix
+    finally:
+        error = None if normal_return else sys.exc_info()[1]
+        log_event(
+            "operation_end", source="otbr-cli", command=command, stage="prefix",
+            state="returned" if normal_return else "raised",
+            elapsed_s=max(0.0, time.monotonic() - started_at),
+            output_state=output_state,
+            error_type=type(error).__name__ if error is not None else None,
+        )
 
 
 def _build_ipv6_prefix_by_type(prefix, kind):

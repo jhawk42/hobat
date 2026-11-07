@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Any, Callable
 
 from ha_matter_ws_client import NodeSnapshot, fetch_node_snapshot
@@ -30,6 +31,7 @@ class MatterCollection:
 
 
 CollectionProgressCallback = Callable[[int, int, MatterCollection], None]
+TargetProgressCallback = Callable[[int, int, int, float], None]
 
 
 def _build_collection(
@@ -68,6 +70,7 @@ async def collect_devices(
     settle_timeout: float = 0.25,
     max_frames: int = 500,
     progress_callback: CollectionProgressCallback | None = None,
+    target_progress_callback: TargetProgressCallback | None = None,
 ) -> MatterCollection:
     """Collect and normalize devices; command-owned persistence arrives in Phase 5."""
 
@@ -82,12 +85,19 @@ async def collect_devices(
     records: list[dict[str, Any]] = []
     total = len(nodes)
     for completed, node in enumerate(nodes, start=1):
-        records.append(extract_node_info(node, server_info=snapshot.server_info))
+        started = time.monotonic()
+        record = extract_node_info(node, server_info=snapshot.server_info)
+        elapsed = max(0.0, time.monotonic() - started)
+        records.append(record)
         if progress_callback is not None:
             progress_callback(
                 completed,
                 total,
                 _build_collection(snapshot, records, node_count=total),
+            )
+        if target_progress_callback is not None:
+            target_progress_callback(
+                completed, total, node["node_id"], elapsed
             )
     return _build_collection(snapshot, records, node_count=total)
 

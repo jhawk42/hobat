@@ -1,11 +1,12 @@
 import argparse
 import json
 import logging
-from typing import Sequence
+from typing import Callable, Sequence
 
 import util_network
 from td_const import EVE_TOPOLOGY_FILENAME
 from td_json_key_normalizer import convert_keys_to_camel_case
+from td_logging import log_event
 from util_convert import b64_to_extended_address
 from util_data import (
     CollectionWriteOutcome,
@@ -20,7 +21,12 @@ from util_data import (
 
 EVE_NATIVE_LAYOUT_FILENAME = "Eve Thread Network Layout.evethreadlayout"
 
-def load_and_parse_eve_file(path, thread_network_info=None):
+def load_and_parse_eve_file(
+    path,
+    thread_network_info=None,
+    *,
+    enrichment_summary_callback: Callable[[dict[str, int]], None] | None = None,
+):
     """
     Parses Eve JSON file and preserves all node fields.
 
@@ -54,6 +60,14 @@ def load_and_parse_eve_file(path, thread_network_info=None):
         data = json.load(f)
 
     logging.info(f"Eve native: {len(data.get('nodes', []))} records in eve file.")
+    enrichment_counts = {
+        "nodes": len(data.get("nodes", [])),
+        "existing_rloc": 0,
+        "extracted_rloc": 0,
+        "missing_prefix": 0,
+        "missing_addresses": 0,
+        "no_matching_rloc": 0,
+    }
 
     for node in data.get("nodes", []):
         node_id = node.get("id")
@@ -82,15 +96,16 @@ def load_and_parse_eve_file(path, thread_network_info=None):
 
         # Enrich with rloc16 in hex from rloc16 ipv6 addresses if rloc16 field is missing
         if rloc16_decimal is None:
-            
-            # Note: some eve nodes don't have a rloc16 field. For these nodes, attempt to extract rloc16 from 
-            # their IPv6 addresses if available, since rloc16 may be encoded in the IPv6 addresses for Thread devices.
-            # Call extract_rloc16_from_ipv6_addresses to extract the rloc16 as hex from the IPv6 addresses
-            if ipv6_addrs and meshlocal_ipv6addr_prefix:
+            if not meshlocal_ipv6addr_prefix:
+                enrichment_counts["missing_prefix"] += 1
+            elif not ipv6_addrs:
+                enrichment_counts["missing_addresses"] += 1
+            else:
                 rloc16_hex = util_network.extract_rloc16_from_ipv6_addresses_cached(
                     ipv6_addrs, meshlocal_ipv6addr_prefix
                 )
                 if rloc16_hex is not None:
+                    enrichment_counts["extracted_rloc"] += 1
                     node["rloc16"] = rloc16_hex  # Patch original rloc16 field to hex string for consistency in the node data structure
                     node["rloc16_hex"] = rloc16_hex  # Add hex rloc16 for reference
                     node["rloc16_hexshort"] = util_network.strip_rloc16_hex_prefix(
@@ -102,9 +117,12 @@ def load_and_parse_eve_file(path, thread_network_info=None):
                         f"Extracted rloc16 {rloc16_hex} from IPv6 addresses for node {node.get('name', 'Unknown')} (id: {node.get('id', 'Unknown')})."
                     )
                 else:
+                    enrichment_counts["no_matching_rloc"] += 1
                     logging.warning(
                         f"No valid RLOC16 found in IPv6 addresses for node {node.get('name', 'Unknown')} (id: {node.get('id', 'Unknown')}). Skipping rloc16 enrichment for this node."
                     )
+        else:
+            enrichment_counts["existing_rloc"] += 1
 
         # Enrich node with OMR IPv6 address  using OMR prefix
         if omr_ipv6addr_prefix:
@@ -142,6 +160,8 @@ def load_and_parse_eve_file(path, thread_network_info=None):
         #    result[rloc16_hex] = node
         result[node_id] = node  # Also index by node id for reference
 
+    if enrichment_summary_callback is not None:
+        enrichment_summary_callback(enrichment_counts)
     return result
 
 
@@ -305,23 +325,68 @@ def main(argv: Sequence[str] | None = None) -> int:
             classification="required",
             action="fail code=4",
         )
+        enrichment_counts: dict[str, int] = {}
         eve_data_raw = load_and_parse_eve_file(
-            eve_json_file_path, thread_network_info
+            eve_json_file_path,
+            thread_network_info,
+            enrichment_summary_callback=enrichment_counts.update,
         )
 
         # Enrich the eve_data json data structure to add route destination node names for reference
         eve_data_enhanced = enrich_eve_nodes(eve_data_raw)
-
         # Save json data structures for reference
         file_path = data_file_path(EVE_TOPOLOGY_FILENAME, td_data_dir)
-        save_final_json(
-            convert_keys_to_camel_case(eve_data_enhanced),
-            file_path,
-            CollectionWriteOutcome.complete(valid_empty_reason="valid-eve-layout"),
-            writer=save_json_atomic,
+        payload = convert_keys_to_camel_case(eve_data_enhanced)
+        log_event(
+            "collector_summary",
+            source="eve",
+            command="process-eve",
+            stage="enrichment",
+            rloc_skipped=sum(
+                enrichment_counts[name]
+                for name in (
+                    "missing_prefix",
+                    "missing_addresses",
+                    "no_matching_rloc",
+                )
+            ),
+            records=len(payload),
+            **enrichment_counts,
+        )
+        try:
+            written = save_final_json(
+                payload,
+                file_path,
+                CollectionWriteOutcome.complete(valid_empty_reason="valid-eve-layout"),
+                writer=save_json_atomic,
+            )
+        except Exception:
+            log_event(
+                "write",
+                source="eve",
+                command="process-eve",
+                stage="final",
+                dataset="topology",
+                output=file_path.name,
+                records=len(payload),
+                disposition="failed",
+            )
+            raise
+        log_event(
+            "write",
+            source="eve",
+            command="process-eve",
+            stage="final",
+            dataset="topology",
+            output=file_path.name,
+            records=len(payload),
+            disposition="saved" if written else "retained_previous",
         )
 
-        logging.info("Saved eve topology data to %s", file_path)
+        if written:
+            logging.info("Saved eve topology data to %s", file_path)
+        else:
+            logging.info("Retained previous eve topology data at %s", file_path)
         return 0
     except TDRequiredInputMissingError as exc:
         logging.error(str(exc))
