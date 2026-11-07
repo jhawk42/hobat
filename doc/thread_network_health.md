@@ -480,7 +480,8 @@ neighbor links, or healthy telemetry are fabricated. Other findings remain.
 
 New generations use retained `unified-health-v2` context and evaluator
 `snapshot-v19`; older builder/context/evaluator semantics remain supported
-without rewriting assessments. V19 comparisons require matching v12 contracts;
+without rewriting assessments. V19 comparisons require matching assembly
+contracts (v12, v13 or v14, never a cross-version comparison);
 cross-version comparisons remain unsupported. Explicit Unified rebuild and
 health processing are cache-only and never refresh evidence. Live validation
 requires separate approval of the endpoint, commands, writes, and duration.
@@ -497,6 +498,19 @@ first four pillars and limited for external routing; HA maxima are limited
 for all five and have no whole-network topology/BR absence authority.
 Original completeness, outcomes and unavailable inputs can only reduce these
 maxima.
+
+Assembly-v14's HA admission requires positive Thread evidence for new
+HA/Multi-source Unified generations, including original-evidence health reads.
+Thread hybrids are retained; unknown/conflicting records are excluded without
+being declared non-Thread. Missing evidence can hide a real Thread device.
+Only independently eligible Thread evidence can become health
+samples. `coverage.haTransportFiltering` records intentional member/link
+exclusions separately from collection completeness or missing Thread tables.
+This does not authorize mesh absence, invent measurements, remove expected
+roster members, or rewrite raw inventories and stored assessments. Retained
+v13 and earlier assessments remain reproducible under their recorded
+contracts; explicit new processing retains the existing v2 context, v19
+evaluator and sample contract rather than adding a health rule or schema.
 
 Unified assessments containing typed controller-observation evidence use
 `snapshot-v18`; legacy/other Unified evidence retains `snapshot-v17`. Both use the distinct

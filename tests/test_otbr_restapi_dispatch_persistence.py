@@ -1446,30 +1446,47 @@ def test_mesh_fetch_all_routers_only_selector_remains_accepted():
 
     assert args.routers_only is True
 
-def test_children_expand_by_rloc_requires_extended_destination_before_discovery():
+@pytest.mark.parametrize("flag", [[], ["--children-expand-by-rloc"]])
+@pytest.mark.parametrize("destination", ["rloc", "mleid"])
+@pytest.mark.parametrize("internal", [False, True])
+def test_children_expand_by_rloc_requires_extended_destination_before_discovery(
+    flag, destination, internal
+):
     client = Mock()
     args = cli_module.build_parser().parse_args(
         [
             "diagnostics",
             "fetch-all",
-            "--children-expand-by-rloc",
             "--destination-type",
-            "rloc",
-        ]
+            destination,
+            *flag,
+        ],
     )
+    if internal:
+        del args.children_expand_by_rloc
 
-    with pytest.raises(OTBRUsageError, match="--children-expand-by-rloc"):
+    with pytest.raises(OTBRUsageError, match="--no-children-expand-by-rloc"):
         diagnostics_module.dispatch_diagnostics(
             client, args, raw_arg=False, fields=None
         )
 
-    client.fetch_device_collection.assert_not_called()
-    client.list_devices.assert_not_called()
-    client.fetch_all_devices_diagnostics.assert_not_called()
+    assert client.mock_calls == []
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-def test_children_expand_by_rloc_is_forwarded_only_when_enabled(enabled):
+@pytest.mark.parametrize(
+    ("flag", "enabled", "destination", "internal"),
+    [
+        ([], True, "extended", False),
+        (["--children-expand-by-rloc"], True, "extended", False),
+        (["--no-children-expand-by-rloc"], False, "extended", False),
+        (["--no-children-expand-by-rloc"], False, "rloc", False),
+        (["--no-children-expand-by-rloc"], False, "mleid", False),
+        ([], True, "extended", True),
+    ],
+)
+def test_children_expand_by_rloc_resolved_and_forwarded(
+    flag, enabled, destination, internal
+):
     client = Mock()
     client.list_devices.return_value = []
     client.fetch_all_devices_diagnostics.return_value = {
@@ -1477,19 +1494,20 @@ def test_children_expand_by_rloc_is_forwarded_only_when_enabled(enabled):
         "deviceResults": [],
         "partial": False,
     }
-    command = ["--no-progress", "diagnostics", "fetch-all", "--no-update-devices"]
-    if enabled:
-        command.append("--children-expand-by-rloc")
+    command = [
+        "--no-progress", "diagnostics", "fetch-all", "--no-update-devices",
+        "--destination-type", destination, *flag,
+    ]
     args = cli_module.build_parser().parse_args(command)
+    if internal:
+        del args.children_expand_by_rloc
     args.resolved_output_path = None
 
     diagnostics_module.dispatch_diagnostics(client, args, raw_arg=False, fields=None)
 
     kwargs = client.fetch_all_devices_diagnostics.call_args.kwargs
-    if enabled:
-        assert kwargs["children_expand_by_rloc"] is True
-    else:
-        assert "children_expand_by_rloc" not in kwargs
+    assert kwargs["children_expand_by_rloc"] is enabled
+    assert kwargs["destination_type"] == destination
 
 
 def _incomplete_expansion_outcome(items):

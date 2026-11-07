@@ -457,7 +457,10 @@ def extract_network_interfaces(attributes: Mapping[str, Any]) -> list[dict[str, 
             {
                 "name": values["Name"] if isinstance(values["Name"], str) else None,
                 "isOperational": values["IsOperational"],
-                "interfaceType": INTERFACE_TYPE_ENUM.get(interface_type, f"Unknown ({interface_type})"),
+                "interfaceType": (
+                    INTERFACE_TYPE_ENUM.get(interface_type, f"Unknown ({interface_type})")
+                    if type(interface_type) is int else f"Unknown ({interface_type})"
+                ),
                 "hardwareAddress": hardware.hex().upper() if hardware else None,
                 "ipv4Addresses": [
                     address

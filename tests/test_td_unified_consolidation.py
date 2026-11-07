@@ -115,6 +115,8 @@ def test_production_built_replacement_preserves_legacy_fields_and_graph(
         merged, _ = build_merged_records(tmp_path, "", inputs, {})
         assert merged
         _save(tmp_path, _entry(legacy)["files"][0], merged)
+        native_graph_file = tmp_path / "td-ha-matter-ws-network-topology.json"
+        native_graph_before = native_graph_file.read_bytes()
     build_unified_dataset(tmp_path, replacement)
     rows = json.loads((tmp_path / entry["files"][0]).read_text())
     router = next(row for row in rows if row.get("extAddress") == records[0]["extAddress"])
@@ -126,9 +128,12 @@ def test_production_built_replacement_preserves_legacy_fields_and_graph(
     if replacement == "multi_source_unified":
         assert router["powerSources"] == [{"endpointId": 0, "batteryPercent": 0}]
         assert router["endpoints"] == [{"endpointId": 0, "bridged": False}]
-        assert any(row.get("matter", {}).get("matterId", "").endswith("-0000000000000002")
-                   for row in rows)
-        assert any("ap" in row.get("nativeNodeIds", []) for row in rows)
+        assert not any(row.get("matter", {}).get("matterId", "").endswith("-0000000000000002")
+                       for row in rows)
+        assert native_graph_file.read_bytes() == native_graph_before
+        assert any(node.get("id") == "ap" and node.get("network_type") == "wifi"
+                   for node in json.loads(native_graph_before)["topology"]["nodes"])
+        assert not any("ap" in row.get("nativeNodeIds", []) for row in rows)
         assert any(row.get("name") == "border-router" for row in rows)
     script = """
 import fs from 'node:fs';

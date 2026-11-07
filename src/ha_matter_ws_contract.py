@@ -146,6 +146,8 @@ CLUSTER_IDS = MappingProxyType(
         "PowerSource": 0x002F,
         "GeneralDiagnostics": 0x0033,
         "ThreadNetworkDiagnostics": 0x0035,
+        "WiFiNetworkDiagnostics": 0x0036,
+        "EthernetNetworkDiagnostics": 0x0037,
         "BridgedDeviceBasicInformation": 0x0039,
     }
 )

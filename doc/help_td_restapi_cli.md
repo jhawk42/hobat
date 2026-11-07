@@ -407,7 +407,7 @@ diagnostics fetch-all [--device-ids ID ...]
                       [--preset {recommended,full,minimal,basic}]
                       [--task-timeout SECS]
                       [--destination-type TYPE]
-                      [--children-expand-by-rloc]
+                      [--children-expand-by-rloc | --no-children-expand-by-rloc]
                       [--no-update-devices]
                       [--no-fallback]
                       [--fallback-preset {medium,minimal,basic}]
@@ -426,8 +426,8 @@ diagnostics fetch-all [--device-ids ID ...]
 | `--child-poll-timeout` | derived | Independent client polling budget for child actions; must satisfy the derived timing minimum |
 | `--children-fetch-fast` / `--children-fetch-fast-no` | fast enabled | Enable or disable MTD fast TLVs 0, 1, 2, 8 |
 | `--children-fetch-detail` / `--children-fetch-detail-no` | detail disabled | Enable or disable optional MTD detail TLVs 0, 1, 2, 8, 9 |
-| `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
-| `--children-expand-by-rloc` | off | After the extended-address sweep, query children listed in selected parents' `childTable` by RLOC16; requires `--destination-type extended` |
+| `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc`; alternate modes require `--no-children-expand-by-rloc` |
+| `--children-expand-by-rloc` / `--no-children-expand-by-rloc` | on | Enable or disable querying children from selected parents' `childTable` by RLOC16 after the extended-address sweep |
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
 | `--no-fallback` | off | Disable additional diagnostic actions; known children retain their selected initial sets, with one attempt per enabled pass |
 | `--no-basic-fallback` | off | Suppress only the final basic tier for routers and unknown-mode children; does not suppress MTD fast or its same-set retry |
@@ -495,8 +495,11 @@ but does not broaden known-child initial TLVs or disable the fast pass.
 
 ##### Child expansion by RLOC (`--children-expand-by-rloc`)
 
-Off by default. When enabled, the normal extended-address sweep runs first
-and requests `childTable` from every selected non-child device, adding it to
+Enabled by default for this command; the positive flag remains accepted.
+Use `--no-children-expand-by-rloc` to restore the previous behavior, including
+when using `--destination-type mleid` or `rloc`. When enabled, the normal
+extended-address sweep runs first and requests `childTable` from every selected
+non-child device, adding it to
 both the primary and fallback TLV lists only when missing (TLV 16 counts as
 present). Global presets are not changed. After the sweep, each child entry
 from this run's parent results is turned into a six-character RLOC
@@ -555,9 +558,12 @@ four hex digits. For example, parent `0x9400` with child IDs 53 and 14 gives
 Examples:
 
 ```bash
-# Opt-in child expansion by RLOC after the normal extended-address sweep
+# Default child expansion by RLOC after the normal extended-address sweep
+PYTHONPATH=src python3 -m td_cli otbr-restapi diagnostics fetch-all
+
+# Disable expansion, e.g. for an alternate destination type
 PYTHONPATH=src python3 -m td_cli otbr-restapi diagnostics fetch-all \
-    --children-expand-by-rloc
+    --destination-type rloc --no-children-expand-by-rloc
 
 # Detail-only MTD collection; FTD medium collection remains enabled
 PYTHONPATH=src python3 -m td_cli otbr-restapi diagnostics fetch-all \

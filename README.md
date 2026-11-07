@@ -107,6 +107,11 @@ digest-bound outcome metadata even with `--items-only`; the flag still returns
 the compatibility item array. Guarded empty sweeps retain old diagnostics.
 Cache-only builds do not repair old outcomes or their scope bindings.
 See the [REST collection reference](doc/help_td_restapi_cli.md#diagnostics-fetch-all).
+REST `diagnostics fetch-all` expands children from current parent child tables
+by RLOC by default. `--children-expand-by-rloc` remains accepted;
+`--no-children-expand-by-rloc` restores the earlier no-expansion behavior.
+Alternate destination modes require that opt-out. Shared REST client calls,
+topology, mesh diagnostics and single-device commands retain their defaults.
 REST `mesh-diagnostics fetch-all --diagnostic-response-fallback` opts into one
 bounded Network Diagnostics check for each eligible failed router, using the
 same extended-address destination. It records a fresh matching response
@@ -150,10 +155,19 @@ HA uses its [cached converters](src/ha_matter_ws_unified.py) and the commissione
 inventory plus three required topology/native inputs. A missing inventory is
 explicitly partial, never repaired by a dashboard projection. Native graph time
 is not refreshed by reading its cache; outcome/coverage gaps are reported
-separately from materialization. Unknown/non-Thread rows do not acquire a Thread
-network merely from a file sidecar or requested network.
-Underlying snapshots, explicit recipe lookup, defaults, all three same-source
-OTBR + mDNS alternatives, and live collector commands are unchanged.
+separately from materialization. HA Unified and its Multi-source contributions
+admit devices with positive cached Thread diagnostic, Thread interface, Thread
+topology or Border Router evidence, including Thread/Wi-Fi and Thread/Ethernet
+hybrids. Validated Thread diagnostic relationships can also identify topology-only
+devices. Unknown and conflicting observations are excluded, not declared
+non-Thread; missing evidence can therefore hide a real Thread device. Decisions
+and filtered links are recorded in `coverage.haTransportFiltering`.
+Raw commissioned inventory, legacy recipes and other sources' membership are
+unchanged. Unknown rows do not acquire a Thread network merely from a file
+sidecar or requested network. Explicit builds upgrade to assembly-v14;
+coherent older generations remain readable without automatic rebuilding.
+Explicit recipe lookup, source defaults and all three same-source OTBR + mDNS
+alternatives are unchanged.
 See the [Unified command reference](doc/help_td_cli.md#unify-dataset).
 
 ## Start the Dashboard

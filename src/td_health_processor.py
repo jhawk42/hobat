@@ -862,8 +862,12 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
         ))
     sources.sort(key=lambda source: source.filename)
     source_time_provenance = []
-    is_v12 = report.get("builderContract") == "unified-assembly-v12"
-    if report.get("builderContract") in {"unified-assembly-v11", "unified-assembly-v12"}:
+    is_v12 = report.get("builderContract") in {
+        "unified-assembly-v12", "unified-assembly-v13", "unified-assembly-v14",
+    }
+    if report.get("builderContract") in {
+        "unified-assembly-v11", "unified-assembly-v12", "unified-assembly-v13", "unified-assembly-v14",
+    }:
         for item in metadata:
             declaration = view["declarations"][item["filename"]]
             if declaration["source"] == "mdns":
@@ -927,6 +931,7 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
                 or (
                     (report.get("builderContract") in {
                         "unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12",
+                        "unified-assembly-v13", "unified-assembly-v14",
                     }
                      or "restDiagnostics" in report["coverage"])
                     and report["coverage"].get("restDiagnostics") != rest_diagnostics
@@ -951,6 +956,7 @@ def _read_unified_inputs(data_dir, dataset, allow_partial, read_time):
     rest_child_tables = None
     if dataset.datasource_id == "multi-source" and report.get("builderContract") in {
         "unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12",
+        "unified-assembly-v13", "unified-assembly-v14",
     }:
         coverage = report["coverage"]
         advertised_sources = coverage.get("sources")

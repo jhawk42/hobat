@@ -68,17 +68,29 @@ class OTBRRestApiCLIIncompleteHelpTests(unittest.TestCase):
         enabled = parser.parse_args(
             ["diagnostics", "fetch-all", "--children-expand-by-rloc"]
         )
-        self.assertIs(default.children_expand_by_rloc, False)
+        disabled = parser.parse_args(
+            ["diagnostics", "fetch-all", "--no-children-expand-by-rloc"]
+        )
+        self.assertIs(default.children_expand_by_rloc, True)
         self.assertIs(enabled.children_expand_by_rloc, True)
+        self.assertIs(disabled.children_expand_by_rloc, False)
 
         rc, out = self._run_and_capture(["diagnostics", "fetch-all", "--help"])
         self.assertEqual(rc, 0)
         self.assertIn("--children-expand-by-rloc", out)
-        for argv in (["topology"], ["mesh-diagnostics", "fetch-all"]):
-            with self.subTest(argv=argv):
-                with io.StringIO() as err, redirect_stderr(err):
-                    with self.assertRaises(SystemExit):
-                        parser.parse_args([*argv, "--children-expand-by-rloc"])
+        self.assertIn("--no-children-expand-by-rloc", out)
+        with io.StringIO() as err, redirect_stderr(err):
+            with self.assertRaises(SystemExit):
+                parser.parse_args(["diagnostics", "fetch-all",
+                                   "--children-expand-by-rloc",
+                                   "--no-children-expand-by-rloc"])
+        for argv in (["topology"], ["mesh-diagnostics", "fetch-all"],
+                     ["diagnostics", "fetch", "--device-id", "a"]):
+            for flag in ("--children-expand-by-rloc", "--no-children-expand-by-rloc"):
+                with self.subTest(argv=argv, flag=flag):
+                    with io.StringIO() as err, redirect_stderr(err):
+                        with self.assertRaises(SystemExit):
+                            parser.parse_args([*argv, flag])
 
 
 if __name__ == "__main__":

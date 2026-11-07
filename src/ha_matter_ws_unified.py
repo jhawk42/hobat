@@ -5,11 +5,17 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import re
 from copy import deepcopy
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable, Literal, Mapping
 
-from ha_matter_ws_contract import MatterWsContractError
+from ha_matter_ws_contract import (
+    CLUSTER_IDS,
+    INTERFACE_TYPE_ENUM,
+    MatterWsContractError,
+)
 from ha_matter_ws_native_topology import MAX_SAFE_JSON_INTEGER, validate_native_topology
 from ha_matter_ws_roles import ROLE_FIELDS, ROLE_INPUT_FIELDS, normalize_ha_matter_roles
 from ha_matter_ws_snapshots import (
@@ -19,9 +25,10 @@ from ha_matter_ws_snapshots import (
     build_device_snapshot,
 )
 from ha_matter_ws_thread import validate_border_router_entries
-from ha_matter_ws_topology import _topology_id
+from ha_matter_ws_topology import _rloc16, _topology_id
 from td_device_fields import (
     get_canonical_ext_address,
+    get_matter_fabric_node_identity,
     is_placeholder_ext_address,
     normalize_input_record,
 )
@@ -39,6 +46,701 @@ from td_const import (
 )
 from td_network_identity import canonical_ext_pan_id
 from td_record_merge import append_merge_conflict
+
+
+HaTransportKind = Literal["thread", "non-thread", "unknown", "conflicting"]
+
+
+@dataclass(frozen=True)
+class HaTransportEvidence:
+    source: str
+    observation: str
+    endpoint_id: int | None = None
+    cluster_id: int | None = None
+    attribute_id: int | None = None
+    interface_type: str | None = None
+    network_type: str | None = None
+
+
+@dataclass(frozen=True)
+class HaTransportClassification:
+    classification: HaTransportKind
+    reason_codes: tuple[str, ...]
+    evidence: tuple[HaTransportEvidence, ...]
+
+
+_NON_THREAD_INTERFACE_TYPES = frozenset({"WiFi", "Ethernet", "Cellular"})
+_KNOWN_INTERFACE_TYPES = frozenset(INTERFACE_TYPE_ENUM.values())
+_NETWORK_INTERFACES_CLUSTER_ID = CLUSTER_IDS["GeneralDiagnostics"]
+_THREAD_DIAGNOSTICS_CLUSTER_ID = CLUSTER_IDS["ThreadNetworkDiagnostics"]
+_WIFI_DIAGNOSTICS_CLUSTER_ID = CLUSTER_IDS["WiFiNetworkDiagnostics"]
+_ETHERNET_DIAGNOSTICS_CLUSTER_ID = CLUSTER_IDS["EthernetNetworkDiagnostics"]
+_DESCRIPTOR_CLUSTER_ID = CLUSTER_IDS["Descriptor"]
+
+
+def _transport_result(
+    classification: HaTransportKind,
+    reason_codes: Iterable[str],
+    evidence: Iterable[HaTransportEvidence],
+) -> HaTransportClassification:
+    return HaTransportClassification(
+        classification=classification,
+        reason_codes=tuple(sorted(set(reason_codes))),
+        evidence=tuple(
+            sorted(
+                set(evidence),
+                key=lambda item: (
+                    item.source,
+                    item.observation,
+                    -1 if item.endpoint_id is None else item.endpoint_id,
+                    -1 if item.cluster_id is None else item.cluster_id,
+                    -1 if item.attribute_id is None else item.attribute_id,
+                    item.interface_type or "",
+                    item.network_type or "",
+                ),
+            )
+        ),
+    )
+
+
+def _interface_coverage_state(record: Mapping[str, Any]) -> str | None:
+    coverage = record.get("diagnosticCoverage")
+    general = coverage.get("generalDiagnostics") if isinstance(coverage, Mapping) else None
+    attributes = general.get("attributes") if isinstance(general, Mapping) else None
+    state = (
+        attributes.get("networkInterfaces")
+        if isinstance(attributes, Mapping)
+        else None
+    )
+    return state if isinstance(state, str) else None
+
+
+def _root_server_clusters(record: Mapping[str, Any]) -> set[int] | None:
+    endpoints = record.get("endpoints")
+    if not isinstance(endpoints, list):
+        return None
+    roots = [
+        endpoint
+        for endpoint in endpoints
+        if isinstance(endpoint, Mapping)
+        and type(endpoint.get("endpointId")) is int
+        and endpoint["endpointId"] == 0
+    ]
+    if len(roots) != 1:
+        return None
+    clusters = roots[0].get("serverClusters")
+    if (
+        not isinstance(clusters, list)
+        or not clusters
+        or any(type(cluster_id) is not int or cluster_id < 0 for cluster_id in clusters)
+        or len(clusters) != len(set(clusters))
+        or _DESCRIPTOR_CLUSTER_ID not in clusters
+    ):
+        return None
+    coverage = record.get("diagnosticCoverage")
+    general = coverage.get("generalDiagnostics") if isinstance(coverage, Mapping) else None
+    invalid_values = (
+        general.get("invalidValues") if isinstance(general, Mapping) else None
+    )
+    if isinstance(invalid_values, Mapping) and "0/29/1" in invalid_values:
+        return None
+    return set(clusters)
+
+
+def _thread_diagnostic_paths(record: Mapping[str, Any]) -> tuple[bool, bool]:
+    thread = record.get("thread")
+    details = thread.get("diagnosticsDetail") if isinstance(thread, Mapping) else None
+    if not isinstance(details, Mapping):
+        details = record.get("diagnosticsDetail")
+    if not isinstance(details, Mapping):
+        return False, False
+    values = details.get("threadNetworkDiagnostics")
+    has_observation = isinstance(values, Mapping) and bool(values)
+    unknown_values = details.get("unknownAttributes")
+    if isinstance(unknown_values, Mapping):
+        has_observation = has_observation or any(
+            re.fullmatch(r"0/53/[0-9]+", path) is not None
+            for path in unknown_values
+            if isinstance(path, str)
+        )
+    errors = details.get("readErrors")
+    has_read_error = isinstance(errors, Mapping) and any(
+        re.fullmatch(r"0/53/[0-9]+", path) is not None
+        for path in errors
+        if isinstance(path, str)
+    )
+    return has_observation, has_read_error
+
+
+def _interface_views(record: Mapping[str, Any]) -> tuple[list[Any] | None, list[Any] | None]:
+    primary = record.get("networkInterfaces")
+    general = record.get("generalDiagnostics")
+    nested = general.get("networkInterfaces") if isinstance(general, Mapping) else None
+    return (
+        primary if isinstance(primary, list) else None,
+        nested if isinstance(nested, list) else None,
+    )
+
+
+def classify_ha_transport(
+    record: Mapping[str, Any], *, source: str = "record"
+) -> HaTransportClassification:
+    """Classify cached transport evidence without changing the source record."""
+
+    if not isinstance(record, Mapping):
+        raise MatterWsContractError("Expected a normalized HA transport record")
+    evidence: list[HaTransportEvidence] = []
+    thread_reasons: set[str] = set()
+    non_thread_reasons: set[str] = set()
+    unresolved = False
+    read_error = False
+
+    def add(
+        observation: str,
+        *,
+        endpoint_id: int | None = None,
+        cluster_id: int | None = None,
+        attribute_id: int | None = None,
+        interface_type: str | None = None,
+        network_type: str | None = None,
+    ) -> None:
+        evidence.append(
+            HaTransportEvidence(
+                source=source if isinstance(source, str) and source else "record",
+                observation=observation,
+                endpoint_id=endpoint_id,
+                cluster_id=cluster_id,
+                attribute_id=attribute_id,
+                interface_type=interface_type,
+                network_type=network_type,
+            )
+        )
+
+    root_clusters = _root_server_clusters(record)
+    if root_clusters is not None:
+        if _THREAD_DIAGNOSTICS_CLUSTER_ID in root_clusters:
+            thread_reasons.add("thread-diagnostics-present")
+            add(
+                "root-server-list",
+                endpoint_id=0,
+                cluster_id=_THREAD_DIAGNOSTICS_CLUSTER_ID,
+            )
+        if (
+            _WIFI_DIAGNOSTICS_CLUSTER_ID in root_clusters
+            or _ETHERNET_DIAGNOSTICS_CLUSTER_ID in root_clusters
+        ):
+            if _THREAD_DIAGNOSTICS_CLUSTER_ID not in root_clusters:
+                non_thread_reasons.add("non-thread-root-clusters-only")
+            for cluster_id in (_WIFI_DIAGNOSTICS_CLUSTER_ID, _ETHERNET_DIAGNOSTICS_CLUSTER_ID):
+                if cluster_id in root_clusters:
+                    add(
+                        "root-server-list",
+                        endpoint_id=0,
+                        cluster_id=cluster_id,
+                    )
+
+    has_thread_diagnostics, has_thread_read_error = _thread_diagnostic_paths(record)
+    if has_thread_diagnostics:
+        thread_reasons.add("thread-diagnostics-present")
+        add(
+            "thread-diagnostics",
+            endpoint_id=0,
+            cluster_id=_THREAD_DIAGNOSTICS_CLUSTER_ID,
+        )
+    if has_thread_read_error:
+        unresolved = True
+        read_error = True
+        add(
+            "thread-diagnostics-read-error",
+            endpoint_id=0,
+            cluster_id=_THREAD_DIAGNOSTICS_CLUSTER_ID,
+        )
+
+    state = _interface_coverage_state(record)
+    primary_interfaces, nested_interfaces = _interface_views(record)
+    if (
+        primary_interfaces is not None
+        and nested_interfaces is not None
+        and primary_interfaces != nested_interfaces
+        and state in {"populated", "implementedEmpty"}
+    ):
+        add(
+            "inconsistent-interface-projections",
+            cluster_id=_NETWORK_INTERFACES_CLUSTER_ID,
+            attribute_id=0,
+        )
+        return _transport_result(
+            "conflicting", ("transport-evidence-conflict",), evidence
+        )
+
+    interfaces = primary_interfaces if primary_interfaces is not None else nested_interfaces
+    if state == "readError":
+        unresolved = True
+        read_error = True
+        add(
+            "network-interface-read-error",
+            endpoint_id=0,
+            cluster_id=_NETWORK_INTERFACES_CLUSTER_ID,
+            attribute_id=0,
+        )
+    elif state in {"null", "invalidValue", "attributeUnsupported"}:
+        unresolved = True
+        add(
+            "network-interface-incomplete",
+            endpoint_id=0,
+            cluster_id=_NETWORK_INTERFACES_CLUSTER_ID,
+            attribute_id=0,
+        )
+    elif state in {"populated", "implementedEmpty"} and interfaces is None:
+        unresolved = True
+    elif state in {"populated", "implementedEmpty"} and interfaces is not None:
+        add(
+            "network-interface-list",
+            endpoint_id=0,
+            cluster_id=_NETWORK_INTERFACES_CLUSTER_ID,
+            attribute_id=0,
+        )
+        interface_types: list[str] = []
+        valid_entries = True
+        for interface in interfaces:
+            if not isinstance(interface, Mapping):
+                valid_entries = False
+                continue
+            interface_type = interface.get("interfaceType")
+            if type(interface_type) is not str or interface_type not in _KNOWN_INTERFACE_TYPES:
+                valid_entries = False
+                continue
+            interface_types.append(interface_type)
+            add(
+                "network-interface",
+                endpoint_id=0,
+                cluster_id=_NETWORK_INTERFACES_CLUSTER_ID,
+                attribute_id=0,
+                interface_type=interface_type,
+            )
+        if "Thread" in interface_types:
+            thread_reasons.add("thread-interface-present")
+        if (
+            interfaces
+            and valid_entries
+            and interface_types
+            and all(value in _NON_THREAD_INTERFACE_TYPES for value in interface_types)
+        ):
+            non_thread_reasons.add("non-thread-interfaces-only")
+        elif not valid_entries:
+            unresolved = True
+    elif interfaces is not None:
+        unresolved = True
+        if interfaces:
+            add("network-interface-unqualified", endpoint_id=0,
+                cluster_id=_NETWORK_INTERFACES_CLUSTER_ID, attribute_id=0)
+
+    details = record.get("diagnosticsDetail")
+    native_br = details.get("nativeBorderRouter") if isinstance(details, Mapping) else None
+    if isinstance(native_br, Mapping) and native_br:
+        thread_reasons.add("native-thread-node")
+        add("native-border-router", network_type="thread")
+
+    native_topology = details.get("nativeTopology") if isinstance(details, Mapping) else None
+    native_node = (
+        native_topology.get("node")
+        if isinstance(native_topology, Mapping)
+        else None
+    )
+    if isinstance(native_node, Mapping):
+        network_type = native_node.get("network_type")
+        if network_type == "thread":
+            thread_reasons.add("native-thread-node")
+            add("native-topology-node", network_type="thread")
+        elif network_type in {"wifi", "ethernet"}:
+            non_thread_reasons.add("native-non-thread-node")
+            add("native-topology-node", network_type=network_type)
+        else:
+            unresolved = True
+            add("native-topology-unknown")
+
+    if thread_reasons:
+        return _transport_result("thread", thread_reasons, evidence)
+    if read_error:
+        return _transport_result(
+            "unknown", ("transport-read-error",), evidence
+        )
+    if unresolved:
+        return _transport_result(
+            "unknown", ("insufficient-transport-evidence",), evidence
+        )
+    if non_thread_reasons:
+        return _transport_result("non-thread", non_thread_reasons, evidence)
+    return _transport_result(
+        "unknown", ("insufficient-transport-evidence",), evidence
+    )
+
+
+def combine_ha_transport_evidence(
+    observations: Iterable[HaTransportClassification],
+) -> HaTransportClassification:
+    """Combine results only after the caller has correlated their identities."""
+
+    items = tuple(observations)
+    evidence = tuple(entry for item in items for entry in item.evidence)
+    reasons = {reason for item in items for reason in item.reason_codes}
+    classes = {item.classification for item in items}
+    if not items:
+        return _transport_result(
+            "unknown", ("insufficient-transport-evidence",), ()
+        )
+    if "conflicting" in classes:
+        return _transport_result(
+            "conflicting", reasons | {"transport-evidence-conflict"}, evidence
+        )
+    if "thread" in classes:
+        return _transport_result("thread", reasons, evidence)
+    if "unknown" in classes:
+        if not reasons:
+            reasons.add("insufficient-transport-evidence")
+        return _transport_result("unknown", reasons, evidence)
+    return _transport_result("non-thread", reasons, evidence)
+
+
+HA_TRANSPORT_FILTER_VERSION = "ha-transport-admission-v1"
+HA_THREAD_EVIDENCE_FILTER_VERSION = "ha-thread-evidence-admission-v2"
+
+
+def _thread_topology_evidence(
+    inputs: list[tuple[str, list[dict]]],
+) -> dict[tuple[str, int], HaTransportEvidence]:
+    result: dict[tuple[str, int], HaTransportEvidence] = {}
+    for filename, records in inputs:
+        if filename != HA_MATTER_WS_TOPOLOGY_FILENAME:
+            continue
+        by_id: dict[str, list[tuple[int, dict]]] = {}
+        for index, record in enumerate(records):
+            topology_id = record.get("topologyId")
+            if isinstance(topology_id, str) and topology_id:
+                by_id.setdefault(topology_id, []).append((index, record))
+        for reporter_index, reporter in enumerate(records):
+            reporter_id = reporter.get("topologyId")
+            matter_id = reporter.get("matterId")
+            network = reporter.get("extPanId")
+            if (
+                not isinstance(reporter_id, str)
+                or len(by_id.get(reporter_id, [])) != 1
+                or not isinstance(matter_id, str)
+                or not matter_id
+                or not get_matter_fabric_node_identity(reporter)
+                or get_matter_fabric_node_identity(reporter)
+                != get_matter_fabric_node_identity({"matterId": matter_id})
+                or network is None
+                or classify_ha_transport(reporter).classification != "thread"
+            ):
+                continue
+            route = reporter.get("route")
+            relationships = [
+                *(reporter.get("routerNeighbors") or []),
+                *(reporter.get("children") or []),
+                *((route.get("routeData") or []) if isinstance(route, dict) else []),
+            ]
+            for relationship in relationships:
+                if not isinstance(relationship, dict) or relationship.get("identityConflicts"):
+                    continue
+                target_id = relationship.get("targetId")
+                targets = by_id.get(target_id, []) if isinstance(target_id, str) else []
+                if relationship.get("sourceId") != reporter_id or len(targets) != 1:
+                    continue
+                target_index, target = targets[0]
+                if (
+                    target.get("relationshipOnly") is not True
+                    or target.get("extPanId") is None
+                    or _ext_pan_id(target["extPanId"]) != _ext_pan_id(network)
+                ):
+                    continue
+                target_address = get_canonical_ext_address(target)
+                if is_placeholder_ext_address(target_address) or not re.fullmatch(r"[0-9a-f]{16}", target_address):
+                    target_address = ""
+                target_rloc = _rloc16(target.get("rloc16"))
+                if not target_address and not target_rloc:
+                    continue
+                if target_address and sum(
+                    get_canonical_ext_address(node) == target_address
+                    and node.get("extPanId") is not None
+                    and _ext_pan_id(node["extPanId"]) == _ext_pan_id(network)
+                    for node in records
+                ) != 1:
+                    continue
+                observations = relationship.get("observations")
+                if not isinstance(observations, list):
+                    continue
+                for observation in observations:
+                    if not isinstance(observation, dict):
+                        continue
+                    entry = observation.get("entry")
+                    if (
+                        observation.get("source") not in {
+                            "ThreadNetworkDiagnostics.NeighborTable",
+                            "ThreadNetworkDiagnostics.RouteTable",
+                        }
+                        or observation.get("reporterMatterId") != matter_id
+                        or observation.get("sourceId") != reporter_id
+                        or observation.get("targetId") != target_id
+                        or not isinstance(entry, dict)
+                        or (observation.get("source") == "ThreadNetworkDiagnostics.RouteTable"
+                            and entry.get("allocated") is False)
+                    ):
+                        continue
+                    entry_address = get_canonical_ext_address(entry)
+                    if target_address:
+                        if entry_address != target_address:
+                            continue
+                    elif (_rloc16(entry.get("rloc16")) != target_rloc
+                          or sum(
+                              _rloc16(node.get("rloc16")) == target_rloc
+                              and node.get("extPanId") is not None
+                              and _ext_pan_id(node["extPanId"]) == _ext_pan_id(network)
+                              for node in records
+                          ) != 1):
+                        continue
+                    result[(filename, target_index)] = HaTransportEvidence(
+                        source=f"{filename}#{reporter_index}",
+                        observation="thread-topology-relationship",
+                        network_type="thread",
+                    )
+                    break
+    return result
+
+
+def _same_ha_device(left: dict, right: dict) -> bool:
+    left_network = _ext_pan_id(left["extPanId"]) if left.get("extPanId") is not None else None
+    right_network = _ext_pan_id(right["extPanId"]) if right.get("extPanId") is not None else None
+    if left_network and right_network and left_network != right_network:
+        return False
+    left_matter = get_matter_fabric_node_identity(left)
+    right_matter = get_matter_fabric_node_identity(right)
+    if left_matter and right_matter:
+        return left_matter == right_matter
+    left_address = get_canonical_ext_address(left)
+    right_address = get_canonical_ext_address(right)
+    return (
+        not is_placeholder_ext_address(left_address)
+        and bool(re.fullmatch(r"[0-9a-f]{16}", left_address))
+        and left_address == right_address
+        and bool(left_network) and left_network == right_network
+    )
+
+
+def admit_ha_records(
+    inputs: list[tuple[str, list[dict]]],
+    *,
+    thread_evidence_only: bool = False,
+) -> tuple[dict[str, list[dict]], dict]:
+    """Admit source-local observations without altering raw records or inventing identities."""
+    assert_snapshot_safe(inputs)
+    if len({filename for filename, _ in inputs}) != len(inputs):
+        raise MatterWsContractError("Duplicate HA transport input filename")
+    flat = [(filename, index, record) for filename, records in inputs
+            for index, record in enumerate(records)]
+    for _, records in inputs:
+        validate_canonical_rows(records)
+        for record in records:
+            if record.get("extPanId") is not None:
+                _ext_pan_id(record["extPanId"])
+    classifications = [
+        classify_ha_transport(record, source=f"{filename}#{index}")
+        for filename, index, record in flat
+    ]
+    topology_evidence = _thread_topology_evidence(inputs) if thread_evidence_only else {}
+    for position, (filename, index, _) in enumerate(flat):
+        evidence = topology_evidence.get((filename, index))
+        if evidence is not None:
+            classifications[position] = combine_ha_transport_evidence((
+                classifications[position],
+                _transport_result("thread", ("thread-topology-relationship",), (evidence,)),
+            ))
+    decisions = []
+    for position, (_, _, record) in enumerate(flat):
+        matches = [index for index, (_, _, candidate) in enumerate(flat)
+                   if index == position or _same_ha_device(record, candidate)]
+        fabrics = {get_matter_fabric_node_identity(flat[index][2]) for index in matches}
+        fabrics.discard("")
+        if len(fabrics) > 1:
+            matches = [position]
+        evidence = [classifications[index] for index in matches
+                    if classifications[index].classification != "unknown"
+                    or classifications[index].evidence]
+        # Sparse projections inherit observed transport, never the absence of evidence.
+        decision = combine_ha_transport_evidence(evidence or [classifications[position]])
+        addresses = {get_canonical_ext_address(flat[index][2]) for index in matches}
+        addresses = {address for address in addresses if not is_placeholder_ext_address(address)}
+        if len(addresses) > 1:
+            decision = _transport_result(
+                "conflicting", (*decision.reason_codes, "transport-identity-conflict"),
+                decision.evidence,
+            )
+        decisions.append(decision)
+    def excluded(decision: HaTransportClassification) -> bool:
+        return (decision.classification != "thread" if thread_evidence_only
+                else decision.classification == "non-thread")
+
+    excluded_native = {
+        native_id for (_, _, record), decision in zip(flat, decisions, strict=True)
+        if excluded(decision) for native_id in record.get("nativeNodeIds", [])
+    }
+    excluded_native -= {
+        native_id for (_, _, record), decision in zip(flat, decisions, strict=True)
+        if not excluded(decision) for native_id in record.get("nativeNodeIds", [])
+    }
+    admitted: dict[str, list[dict]] = {filename: [] for filename, _ in inputs}
+    metadata = {
+        filename: {"filename": filename, "recordCount": len(records),
+                   "admittedRecordCount": 0, "excludedRecordCount": 0,
+                   "unknownRecordCount": 0, "conflictingRecordCount": 0,
+                   "decisions": [], "filteredLinks": []}
+        for filename, records in inputs
+    }
+    for (filename, index, original), decision in zip(flat, decisions, strict=True):
+        record = deepcopy(original)
+        links = []
+        for link in record.get("nativeRelationships", []):
+            filtered_endpoints = sorted({
+                link["nativeSourceId"], link["nativeTargetId"],
+            } & excluded_native)
+            remove = (
+                excluded(decision)
+                or link["networkType"] in {"wifi", "ethernet"}
+                or record.get("relationshipOnly") is True
+                and len(filtered_endpoints) == 2
+            )
+            if remove or filtered_endpoints:
+                metadata[filename]["filteredLinks"].append({
+                    "recordIndex": index, "nativeSourceId": link["nativeSourceId"],
+                    "nativeTargetId": link["nativeTargetId"], "networkType": link["networkType"],
+                    "disposition": "excluded" if remove else "unresolved",
+                    "reasonCode": (
+                        ("non-thread-relationship" if remove else "filtered-non-thread-endpoint")
+                        if not thread_evidence_only else
+                        "non-thread-relationship" if link["networkType"] in {"wifi", "ethernet"} else
+                        "missing-thread-evidence" if remove else "filtered-endpoint-without-thread-evidence"
+                    ),
+                })
+            if not remove:
+                if filtered_endpoints:
+                    link["filteredEndpoints"] = filtered_endpoints
+                links.append(link)
+        if "nativeRelationships" in record:
+            record["nativeRelationships"] = links
+        if (not thread_evidence_only and record.get("relationshipOnly") is True
+                and original.get("nativeRelationships") and not links):
+            decision = _transport_result(
+                "non-thread", (*decision.reason_codes, "non-thread-relationships-only"),
+                decision.evidence,
+            )
+        info = metadata[filename]
+        representative_evidence = {}
+        for evidence in decision.evidence:
+            key = (evidence.observation, evidence.endpoint_id, evidence.cluster_id,
+                   evidence.attribute_id, evidence.interface_type, evidence.network_type)
+            representative_evidence.setdefault(key, asdict(evidence))
+        decision_record = {
+            "recordIndex": index, "classification": decision.classification,
+            "reasonCodes": list(decision.reason_codes),
+            "evidence": list(representative_evidence.values()),
+        }
+        if thread_evidence_only:
+            decision_record["disposition"] = "excluded" if excluded(decision) else "admitted"
+        info["decisions"].append(decision_record)
+        if excluded(decision):
+            info["excludedRecordCount"] += 1
+        else:
+            admitted[filename].append(record)
+            info["admittedRecordCount"] += 1
+        if decision.classification in {"unknown", "conflicting"}:
+            info[f"{decision.classification}RecordCount"] += 1
+    report = {"contractVersion": (HA_THREAD_EVIDENCE_FILTER_VERSION if thread_evidence_only
+                                  else HA_TRANSPORT_FILTER_VERSION),
+              "inputs": list(metadata.values())}
+    return admitted, report
+
+
+def validate_ha_transport_filtering(report: Any) -> None:
+    if (not isinstance(report, dict)
+            or set(report) != {"contractVersion", "inputs"}
+            or report["contractVersion"] not in {
+                HA_TRANSPORT_FILTER_VERSION, HA_THREAD_EVIDENCE_FILTER_VERSION,
+            }
+            or not isinstance(report["inputs"], list)):
+        raise MatterWsContractError("Invalid HA transport admission report")
+    filenames = set()
+    for item in report["inputs"]:
+        if (not isinstance(item, dict) or set(item) != {
+            "filename", "recordCount", "admittedRecordCount", "excludedRecordCount",
+            "unknownRecordCount", "conflictingRecordCount", "decisions", "filteredLinks",
+        } or not isinstance(item["filename"], str) or item["filename"] in filenames
+                or any(type(item[key]) is not int or item[key] < 0 for key in (
+                    "recordCount", "admittedRecordCount", "excludedRecordCount",
+                    "unknownRecordCount", "conflictingRecordCount",
+                ))
+                or not isinstance(item["decisions"], list)
+                or not isinstance(item["filteredLinks"], list)):
+            raise MatterWsContractError("Invalid HA transport input counts")
+        filenames.add(item["filename"])
+        counts = {kind: 0 for kind in ("thread", "non-thread", "unknown", "conflicting")}
+        thread_evidence_only = report["contractVersion"] == HA_THREAD_EVIDENCE_FILTER_VERSION
+        for index, decision in enumerate(item["decisions"]):
+            if (not isinstance(decision, dict)
+                    or set(decision) != ({"recordIndex", "classification", "reasonCodes", "evidence"}
+                                         | ({"disposition"} if thread_evidence_only else set()))
+                    or type(decision["recordIndex"]) is not int or decision["recordIndex"] != index
+                    or not isinstance(decision["classification"], str)
+                    or decision["classification"] not in counts
+                    or not isinstance(decision["reasonCodes"], list) or not decision["reasonCodes"]
+                    or any(not isinstance(reason, str) or not reason for reason in decision["reasonCodes"])
+                    or not isinstance(decision["evidence"], list)
+                    or any(not isinstance(value, dict) or set(value) != {
+                        "source", "observation", "endpoint_id", "cluster_id", "attribute_id",
+                        "interface_type", "network_type",
+                    } for value in decision["evidence"])):
+                raise MatterWsContractError("Invalid HA transport decision")
+            if thread_evidence_only and decision["disposition"] != (
+                "admitted" if decision["classification"] == "thread" else "excluded"
+            ):
+                raise MatterWsContractError("Invalid HA transport disposition")
+            counts[decision["classification"]] += 1
+            for value in decision["evidence"]:
+                if (any(not isinstance(value[key], str) or not value[key]
+                        for key in ("source", "observation"))
+                        or any(value[key] is not None and (
+                            type(value[key]) is not int or not 0 <= value[key] <= maximum
+                        ) for key, maximum in (
+                            ("endpoint_id", 65534), ("cluster_id", 2**32 - 1),
+                            ("attribute_id", 2**32 - 1),
+                        ))
+                        or value["interface_type"] is not None and (
+                            not isinstance(value["interface_type"], str)
+                            or value["interface_type"] not in _KNOWN_INTERFACE_TYPES
+                        )
+                        or value["network_type"] is not None and (
+                            not isinstance(value["network_type"], str)
+                            or value["network_type"] not in {"thread", "wifi", "ethernet"}
+                        )):
+                    raise MatterWsContractError("Invalid HA transport evidence reference")
+        if (len(item["decisions"]) != item["recordCount"]
+                or (item["recordCount"] - counts["thread"] if thread_evidence_only
+                    else counts["non-thread"]) != item["excludedRecordCount"]
+                or (counts["thread"] if thread_evidence_only
+                    else item["recordCount"] - counts["non-thread"]) != item["admittedRecordCount"]
+                or counts["unknown"] != item["unknownRecordCount"]
+                or counts["conflicting"] != item["conflictingRecordCount"]):
+            raise MatterWsContractError("HA transport counts do not reconcile")
+        for link in item["filteredLinks"]:
+            if (not isinstance(link, dict) or set(link) != {
+                "recordIndex", "nativeSourceId", "nativeTargetId", "networkType",
+                "disposition", "reasonCode",
+            } or type(link["recordIndex"]) is not int
+                    or not 0 <= link["recordIndex"] < item["recordCount"]
+                    or not isinstance(link["disposition"], str)
+                    or link["disposition"] not in {"excluded", "unresolved"}
+                    or any(not isinstance(link[key], str) or not link[key]
+                           for key in ("nativeSourceId", "nativeTargetId", "networkType", "reasonCode"))):
+                raise MatterWsContractError("Invalid HA filtered relationship")
 
 
 def _wrapper(payload: Any, source: str, field: str) -> Any:

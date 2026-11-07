@@ -1689,6 +1689,90 @@ def _rloc_fetch(responses, calls):
     return fetch
 
 
+@pytest.mark.parametrize("items_only", [False, True])
+def test_dispatch_default_expansion_matches_positive_and_inverse(
+    monkeypatch, tmp_path, items_only
+) -> None:
+    import otbr_restapi_diagnostics as diagnostics
+
+    def stable(value):
+        if isinstance(value, dict):
+            return {
+                key: stable(item)
+                for key, item in value.items()
+                if key not in {"startedAt", "completedAt", "elapsed"}
+            }
+        if isinstance(value, (list, tuple)):
+            return [stable(item) for item in value]
+        return value
+
+    def run(flag):
+        client = OTBRRestApiClient(base_url="http://example.test")
+        calls = []
+        monkeypatch.setattr(client, "list_devices", lambda **_kwargs: [
+            {"id": PARENT_EXT, "role": "router"},
+            {"id": OTHER_ROUTER_EXT, "role": "router"},
+            {"id": "2222222222222222", "role": "child", "mode": MTD_MODE,
+             "mlEidIid": "0000000000000000"},
+        ])
+        monkeypatch.setattr(client, "fetch_device_diagnostics", _rloc_fetch({
+            (PARENT_EXT, "extended"): _parent_item(
+                child_table=[{"childId": 42, "mode": MTD_MODE}]
+            ),
+            ("00382a", "rloc"): _child_item("2222222222222222", "0x382a"),
+        }, calls))
+        clear = MagicMock()
+        monkeypatch.setattr(client, "delete_all_diagnostics", clear)
+        checkpoints = []
+        outcomes = []
+        monkeypatch.setattr(
+            diagnostics, "_write_checkpoint_best_effort",
+            lambda items, _path, _command, stage, **_kwargs:
+                checkpoints.append((stage, copy.deepcopy(items))),
+        )
+        monkeypatch.setattr(
+            diagnostics, "_write_guard_affected_outcome",
+            lambda outcome, _path, **_kwargs: outcomes.append(copy.deepcopy(outcome)),
+        )
+        monkeypatch.setattr(
+            diagnostics, "emit_rest_command_output",
+            lambda payload, *_args, **_kwargs: payload,
+        )
+        argv = [
+            "--no-progress", "diagnostics", "fetch-all", "--no-update-devices",
+            "--device-ids", PARENT_EXT, "2222222222222222",
+            "--no-enrich-mac-counters", *flag,
+        ]
+        if items_only:
+            argv.append("--items-only")
+        args = cli_module.build_parser().parse_args(argv)
+        args.resolved_output_path = tmp_path / "diagnostics.json"
+        result = diagnostics.dispatch_diagnostics(client, args, False, None)
+        assert clear.call_count == 1
+        return stable((calls, checkpoints, outcomes, result))
+
+    default = run([])
+    positive = run(["--children-expand-by-rloc"])
+    disabled = run(["--no-children-expand-by-rloc"])
+    assert default == positive
+    calls, checkpoints, outcomes, result = default
+    assert [(dest, kwargs["destination_type"]) for dest, kwargs in calls] == [
+        (PARENT_EXT, "extended"), ("00382a", "rloc"),
+    ]
+    assert [stage for stage, _ in checkpoints] == [
+        "device", "device", "expansion-pass:fast", "expansion",
+    ]
+    assert len(outcomes[0]["items"]) == 2
+    assert outcomes[0]["childrenExpansion"]["completedCount"] == 1
+    assert outcomes[0]["deviceResults"][1]["skipReasonCode"] == "unresolved_mesh_local_iid"
+    assert result == (outcomes[0]["items"] if items_only else outcomes[0])
+    assert [(dest, kwargs["destination_type"]) for dest, kwargs in disabled[0]] == [
+        (PARENT_EXT, "extended"),
+    ]
+    assert len(disabled[2][0]["items"]) == 1
+    assert "childrenExpansion" not in disabled[2][0]
+
+
 @pytest.mark.parametrize(
     ("parent_rloc16", "child_id", "child_rloc16", "destination"),
     [
@@ -1847,6 +1931,47 @@ def test_expansion_disabled_keeps_requested_types_and_omits_outcome(monkeypatch)
     assert [kwargs["types"] for _dest, kwargs in calls] == [["extAddress", "rloc16"]]
     assert "childrenExpansion" not in outcome
     assert len(calls) == 1
+
+
+def test_topology_uses_batch_library_default_without_expansion(monkeypatch, tmp_path):
+    import otbr_restapi_topology as topology
+
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+    monkeypatch.setattr(
+        client, "list_devices",
+        lambda **_kwargs: [{"id": PARENT_EXT, "role": "router"}],
+    )
+    monkeypatch.setattr(
+        client, "fetch_device_diagnostics",
+        _rloc_fetch({
+            (PARENT_EXT, "extended"): _parent_item(
+                child_table=[{"childId": 42, "mode": MTD_MODE}]
+            ),
+        }, calls),
+    )
+    monkeypatch.setattr(client, "delete_all_diagnostics", MagicMock())
+    saved = {}
+
+    def save(payload, path, _logger, *, on_write):
+        saved[path.name] = payload
+        on_write(True)
+
+    monkeypatch.setattr(
+        topology, "emit_rest_payload_output", save,
+    )
+    args = cli_module.build_parser().parse_args([
+        "--no-progress", "topology", "--skip-devices", "--skip-mesh-diagnostics",
+        "--no-update-devices", "--no-enrich-mac-counters",
+    ])
+    args.td_data_dir = tmp_path
+    topology.dispatch_topology(client, args, raw_arg=False)
+    assert [(dest, kwargs["destination_type"]) for dest, kwargs in calls] == [
+        (PARENT_EXT, "extended"),
+    ]
+    assert "childrenExpansion" not in saved[
+        "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+    ]
 
 
 @pytest.mark.parametrize(

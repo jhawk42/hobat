@@ -141,6 +141,7 @@ def _prepare_contract(dataset: HealthDataset) -> _PreparedContract:
             "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
             "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
             "unified-assembly-v9", "unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12",
+            "unified-assembly-v13", "unified-assembly-v14",
         )
     ))
 
@@ -235,7 +236,8 @@ def has_typed_ha_observation(context, dataset):
     builder_digests = {digest([
         "unified-v1", builder, dataset.unified_recipe["recipeDigest"],
         dataset.unified_recipe["authorityDigest"],
-    ]) for builder in ("unified-assembly-v11", "unified-assembly-v12")}
+    ]) for builder in ("unified-assembly-v11", "unified-assembly-v12",
+                       "unified-assembly-v13", "unified-assembly-v14")}
     if value.get("reportContractDigest") not in builder_digests:
         return False
     entries = _source_time_provenance(value, required=True)
@@ -365,7 +367,15 @@ def validate_context(context, dataset, observation=None, *, prepared: _PreparedC
         "unified-v1", "unified-assembly-v12",
         dataset.unified_recipe["recipeDigest"], dataset.unified_recipe["authorityDigest"],
     ])
-    is_v12 = value.get("reportContractDigest") == v12_digest
+    v13_digest = digest([
+        "unified-v1", "unified-assembly-v13",
+        dataset.unified_recipe["recipeDigest"], dataset.unified_recipe["authorityDigest"],
+    ])
+    v14_digest = digest([
+        "unified-v1", "unified-assembly-v14",
+        dataset.unified_recipe["recipeDigest"], dataset.unified_recipe["authorityDigest"],
+    ])
+    is_v12 = value.get("reportContractDigest") in {v12_digest, v13_digest, v14_digest}
     if (value.get("version") == CONTEXT_VERSION) != is_v12:
         raise HealthManifestError("Unified context version does not match its builder contract")
     if is_v12:
@@ -378,14 +388,14 @@ def validate_context(context, dataset, observation=None, *, prepared: _PreparedC
         "sourceTimeProvenance" in value or "sourceTimeProvenanceDigest" in value
     )
     if has_source_time_provenance and (
-        value.get("reportContractDigest") not in {v11_digest, v12_digest}
+        value.get("reportContractDigest") not in {v11_digest, v12_digest, v13_digest, v14_digest}
         or "sourceTimeProvenance" not in value
         or "sourceTimeProvenanceDigest" not in value
     ):
         raise HealthManifestError("Source-time provenance requires the v11 Unified contract")
     retained_source_times = _source_time_provenance(
         value, observation,
-        required=value.get("reportContractDigest") in {v11_digest, v12_digest},
+        required=value.get("reportContractDigest") in {v11_digest, v12_digest, v13_digest, v14_digest},
     )
     typed_files = {
         item["filename"] for item in retained_source_times
@@ -453,7 +463,10 @@ def validate_context(context, dataset, observation=None, *, prepared: _PreparedC
                 "unified-v1", builder_contract, dataset.unified_recipe["recipeDigest"],
                 dataset.unified_recipe["authorityDigest"],
             ])
-            for builder_contract in ("unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12")
+            for builder_contract in (
+                "unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12",
+                "unified-assembly-v13", "unified-assembly-v14",
+            )
         }
         if (
             dataset.datasource_id != "multi-source"

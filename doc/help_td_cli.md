@@ -280,8 +280,10 @@ Multi-source prepares/reuses the four catalog-owned source-primary generations
 once under the outer build lock. It verifies reports, companions and original
 raw inputs, then replays only their admitted raw observations through the same
 normalizers/merge policies so an aggregate filename never supplies a rank.
-It preserves scoped Thread devices, distinct Matter fabrics, non-Thread members
-and uncorrelated services. Native links are rebound to final committed row IDs.
+It preserves scoped Thread devices, distinct Matter fabrics, uncertain HA
+members and uncorrelated services. Confirmed non-Thread HA contributions are
+filtered by the same policy as HA Unified; other sources are unaffected.
+Native links are rebound to final committed row IDs.
 An operational Matter or HAP UDP (`_hap._udp.local.`) mDNS advertisement with
 one matching Thread-device OMR address is embedded in the device's `mdnsRecords`
 array. Without an explicit service OMR field, usable IPv6 addresses from
@@ -323,9 +325,24 @@ their gaps degrade evidence without hiding usable rows. A malformed present
 outcome still aborts publication. Native graph collection/discovery time stays
 distinct from wrapper read/build time, and raw-file mtime fallback is explicitly
 degraded evidence. Safe identity is emitted only for one unambiguous observed
-network (or an explicit observed selection). Non-Thread rows remain unscoped.
+network (or an explicit observed selection). Unknown rows remain unscoped
+unless they carry independently validated Thread identity.
 Native link endpoints bind to committed row IDs; unresolved/ambiguous endpoints
 remain explicit coverage/conflicts, never arbitrary connections.
+
+Assembly-v14 admits HA observations only with positive cached Thread diagnostic,
+validated Thread interface, native Thread topology or Border Router evidence,
+including unambiguous Thread diagnostic topology relationships. Thread-capable
+hybrids remain; Wi-Fi/Ethernet backhaul does not exclude a Thread Border Router.
+Unknown and conflicting observations are excluded without being labeled
+non-Thread. Missing or incomplete evidence can hide a real Thread device.
+Raw inventory and legacy datasets are not filtered.
+`coverage.haTransportFiltering` records per-input admitted/excluded observation
+counts, unknown/conflicting subsets, decision dispositions, reasons and filtered-link
+reasons; these are not unique final device counts or collection failures.
+Explicit rebuilds upgrade unchanged caches; old-generation reads and stored
+health reproduction retain their original semantics. Filtering is cache-only,
+not proof of current connectivity or permission to remove expected-roster rows.
 
 | Option | Meaning |
 | --- | --- |
@@ -697,9 +714,11 @@ These options must be placed after `otbr-restapi` and before its subcommand.
 | `mesh-diagnostics` | `children`, `child-ipv6`, `router-neighbors`, `fetch`, `fetch-all` | Fetch mesh-diagnostic TLV datasets |
 | `topology` | *(none)* | Run full sweep: devices fetch + diagnostics fetch-all + mesh-diagnostics fetch-all |
 
-`otbr-restapi diagnostics fetch-all --children-expand-by-rloc` is an opt-in,
-off-by-default second phase that queries children from parent `childTable`
-entries by RLOC16. `topology` does not enable it. See the
+`otbr-restapi diagnostics fetch-all` queries children from current parent
+`childTable` entries by RLOC16 by default. The existing
+`--children-expand-by-rloc` flag remains accepted; use
+`--no-children-expand-by-rloc` to disable the second phase or to use an alternate
+destination mode. `topology` does not enable it. See the
 [REST CLI help](help_td_restapi_cli.md#child-expansion-by-rloc---children-expand-by-rloc)
 for scope, compatibility, and load limits.
 

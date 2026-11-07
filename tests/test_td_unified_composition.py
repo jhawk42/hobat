@@ -20,6 +20,7 @@ from td_source_capabilities import SourceCapabilityService
 from test_td_unified_dataset import (
     DATASET_IDS, NETWORK, OTHER_NETWORK, _artifacts, _entry, _router_table_row,
     _save, _seed, _seed_ha_controller, _seed_meshdiag_tables,
+    _seed_ha_transport_members,
 )
 
 
@@ -376,25 +377,38 @@ def test_capabilities_validate_ha_outcomes_in_their_own_format(tmp_path, dataset
         unified.build_unified_dataset(tmp_path, dataset_id, allow_partial=True)
 
 
-def test_native_links_rebind_to_final_ids_and_non_thread_fields_survive(tmp_path):
+def test_native_non_thread_and_unknown_admission_matches_primary(tmp_path):
     entry = _seed_all(tmp_path)
     unified.build_unified_dataset(tmp_path, TARGET)
     rows = _rows(tmp_path, entry)
     thread = next(row for row in rows if "native-router" in row.get("nativeNodeIds", []))
-    access_point = next(row for row in rows if row.get("nativeNodeIds") == ["ap"])
-    non_thread = next(row for row in rows if row.get("type") == "matterDevice")
-    assert access_point["_networkInstance"] is None and non_thread["_networkInstance"] is None
-    assert "isRouter" not in non_thread and "isRouter" not in access_point
+    assert not any(row.get("type") == "matterDevice" for row in rows)
+    assert not any("ap" in row.get("nativeNodeIds", []) for row in rows)
     assert thread["powerSources"] == [{"endpointId": 0, "batteryPercent": 0}]
     assert thread["endpoints"] == [{"endpointId": 0, "bridged": False}]
-    [link] = thread["nativeRelationships"]
-    assert link["sourceId"] == thread["_unifiedRecordId"]
-    assert link["targetId"] == access_point["_unifiedRecordId"]
-    assert link["strength"] == "strong"
-    assert "lqi" not in link and "sourceToTarget" not in link
-    fields = unified.read_generation(tmp_path, entry)["fieldSources"][thread["_unifiedRecordId"]]
-    assert any(path.startswith("nativeRelationships[") and path.endswith(".strength")
-               for path in fields)
+    assert thread["nativeRelationships"] == []
+    report = unified.read_generation(tmp_path, entry)
+    primary = unified.read_generation(tmp_path, _entry("ha_matter_ws_unified"))
+    assert report["coverage"]["haTransportFiltering"] == primary["coverage"]["haTransportFiltering"]
+
+
+def test_multi_source_never_reintroduces_filtered_ha_projections_but_keeps_other_sources(tmp_path):
+    entry = _seed_all(tmp_path)
+    _seed_ha_transport_members(tmp_path)
+    independent = {"extAddress": "8899aabbccddeeff", "rloc16": "0x2000",
+                   "deviceLabel": "independent OTBR device", "sourceObservedAt": "2026-01-01T00:00:00+00:00"}
+    _save(tmp_path, "td-otbr-cli-networkdiag-fetch-all.json", [independent])
+    unified.build_unified_dataset(tmp_path, TARGET)
+    rows = _rows(tmp_path, entry)
+    assert any(row.get("extAddress") == independent["extAddress"] for row in rows)
+    assert not any(row.get("matter", {}).get("matterId", "").endswith("-0000000000000002")
+                   for row in rows)
+    report = unified.read_generation(tmp_path, entry, verify_inputs=True)
+    primary = unified.read_generation(tmp_path, _entry("ha_matter_ws_unified"))
+    assert report["coverage"]["haTransportFiltering"] == primary["coverage"]["haTransportFiltering"]
+    before = _artifacts(tmp_path, entry)
+    assert unified.build_unified_dataset(tmp_path, TARGET)["noOp"] is True
+    assert _artifacts(tmp_path, entry) == before
 
 
 def test_native_thread_link_does_not_bind_different_known_networks():
@@ -809,7 +823,8 @@ def test_v7_generation_upgrades_missing_promoted_service_addresses_on_explicit_b
     upgraded = unified.build_unified_dataset(tmp_path, TARGET)
     assert upgraded["noOp"] is False
     assert upgraded["generationId"] != old["generationId"]
-    assert upgraded["rowCount"] == old["rowCount"] - 1
+    assert upgraded["rowCount"] == old["rowCount"] - 3
+    assert not any("ap" in row.get("nativeNodeIds", []) for row in _rows(tmp_path, entry))
     assert not any(row.get("type") == "service" for row in _rows(tmp_path, entry))
     assert unified.build_unified_dataset(tmp_path, TARGET)["noOp"] is True
 
@@ -955,6 +970,15 @@ def test_raw_to_primary_to_composed_matches_direct_declared_raw_merge(tmp_path):
                 continue
             payload = json.loads((tmp_path / item["file"]).read_text())
             records = unified._extract(item, payload)
+            if dependency["source"] == "ha-matter-ws":
+                records = [record for record in records if record.get("nativeNodeIds") != ["ap"]
+                           and record.get("matter", {}).get("matterId") !=
+                           "1111222233334444-0000000000000002"]
+                for record in records:
+                    if "nativeRelationships" in record:
+                        record["nativeRelationships"] = [
+                            link for link in record["nativeRelationships"] if link["networkType"] != "wifi"
+                        ]
             grouped = {}
             for record in records:
                 from ha_matter_ws_unified import is_thread_record

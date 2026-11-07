@@ -12,6 +12,8 @@ from ha_matter_ws_contract import (
     BAT_FAULT_ENUM,
     BAT_REPLACEABILITY_ENUM,
     BRIDGED_BASIC_INFORMATION_ATTRIBUTES,
+    CLUSTER_IDS,
+    CLUSTER_REVISIONS,
     COLLECTOR_SCHEMA_VERSION,
     GENERAL_DIAGNOSTICS_ATTRIBUTES,
     HA_MATTER_WS_HOST_DEFAULT,
@@ -204,6 +206,10 @@ def test_struct_field_contracts_are_exact_and_do_not_define_child_table() -> Non
 
 def test_general_diagnostics_network_interface_contract_separates_ip_versions() -> None:
     assert GENERAL_DIAGNOSTICS_ATTRIBUTES[0].name == "NetworkInterfaces"
+    assert CLUSTER_IDS["WiFiNetworkDiagnostics"] == 0x0036
+    assert CLUSTER_IDS["EthernetNetworkDiagnostics"] == 0x0037
+    assert 0x0036 not in CLUSTER_REVISIONS
+    assert 0x0037 not in CLUSTER_REVISIONS
     assert NETWORK_INTERFACE_FIELDS[4].name == "HardwareAddress"
     assert NETWORK_INTERFACE_FIELDS[5].name == "IPv4Addresses"
     assert NETWORK_INTERFACE_FIELDS[6].name == "IPv6Addresses"

@@ -18,6 +18,7 @@ from ha_matter_ws_contract import MatterWsContractError
 from ha_matter_ws_native_topology import validate_native_topology
 from ha_matter_ws_snapshots import MatterSnapshotSecurityError
 from ha_matter_ws_unified import (
+    admit_ha_records, validate_ha_transport_filtering,
     normalize_border_routers, normalize_inventory, normalize_native_topology,
 )
 import td_unified_dataset as unified
@@ -442,7 +443,7 @@ def test_complete_build_is_deterministic_and_no_op_preserves_every_artifact(tmp_
     entry = _seed(tmp_path, dataset_id, empty=empty)
     result = unified.build_unified_dataset(tmp_path, dataset_id)
     assert result["materializationState"] == "complete"
-    assert result["rowCount"] == (0 if empty else 3 if dataset_id == "ha_matter_ws_unified" else 1)
+    assert result["rowCount"] == (0 if empty else 1)
     assert result["noOp"] is False
     report = unified.read_generation(tmp_path, entry, verify_inputs=True)
     assert report["healthState"] == (
@@ -1031,7 +1032,7 @@ def test_ping_reachable_router_without_tables_is_expected_and_complete(tmp_path)
         {"file": "td-otbr-cli-meshdiag-router-childtables.json", "rloc16": "0x4400"},
         {"file": "td-otbr-cli-meshdiag-router-neighbortables.json", "rloc16": "0x4400"},
     ]
-    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v12"
+    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v14"
 
 
 @pytest.mark.parametrize(("kwargs", "reason"), [
@@ -1632,28 +1633,322 @@ def test_ha_inventory_preserves_non_thread_members_and_all_safe_device_fields():
     assert not any(key in non_thread for key in ("isRouter", "isBorderRouter", "isLeader", "isReed"))
 
 
-def test_ha_primary_preserves_inventory_and_native_links_without_assigning_non_thread_scope(tmp_path):
+def test_ha_primary_filters_non_thread_links_and_unknown_inventory(tmp_path):
     entry = _seed_ha(tmp_path)
     result = unified.build_unified_dataset(tmp_path, entry["value"])
     report = unified.read_generation(tmp_path, entry, verify_inputs=True)
     rows = json.loads((tmp_path / entry["files"][0]).read_text())
-    assert result["rowCount"] == 3 and result["linkCount"] == 1
+    assert result["rowCount"] == 1 and result["linkCount"] == 0
     thread = next(row for row in rows if row.get("nativeNodeIds") == ["native-router"])
-    access_point = next(row for row in rows if row.get("nativeNodeIds") == ["ap"])
-    non_thread = next(row for row in rows if row.get("type") == "matterDevice")
     assert thread["powerSources"] == [{"endpointId": 0, "batteryPercent": 0}]
     assert thread["endpoints"] == [{"endpointId": 0, "bridged": False}]
-    assert access_point["_networkInstance"] is None and non_thread["_networkInstance"] is None
-    [link] = thread["nativeRelationships"]
-    assert link["sourceId"] == thread["_unifiedRecordId"]
-    assert link["targetId"] == access_point["_unifiedRecordId"]
-    assert "isRouter" not in non_thread and "isRouter" not in access_point
-    assert report["coverage"]["commissionedInventory"]["selectedRecordCount"] == 2
+    assert not any("ap" in row.get("nativeNodeIds", []) for row in rows)
+    assert thread["nativeRelationships"] == []
+    filtering = report["coverage"]["haTransportFiltering"]
+    native = next(item for item in filtering["inputs"]
+                  if item["filename"] == "td-ha-matter-ws-network-topology.json")
+    assert native["excludedRecordCount"] == 1
+    assert len(native["filteredLinks"]) == 1
+    assert report["coverage"]["commissionedInventory"]["selectedRecordCount"] == 1
     assert report["coverage"]["unresolvedNativeRelationships"] == []
     assert report["networkInstance"] == NETWORK and result["healthState"] == "complete"
     assert {origin["filename"] for origin in report["fieldSources"][thread["_unifiedRecordId"]]["powerSources"]} >= {
         "td-ha-matter-ws-devices-fetch-all.json",
     }
+
+
+def _confirmed_non_thread_record(matter_id="1111222233334444-0000000000000002"):
+    return {
+        "matter": {"matterId": matter_id, "nodeId": 2},
+        "type": "matterDevice", "sourceObservedAt": SOURCE_TIME,
+        "endpoints": [{"endpointId": 0, "serverClusters": [29, 51, 54]}],
+        "networkInterfaces": [{"interfaceType": "WiFi", "isOperational": True}],
+        "generalDiagnostics": {
+            "networkInterfaces": [{"interfaceType": "WiFi", "isOperational": True}],
+        },
+        "diagnosticCoverage": {
+            "generalDiagnostics": {"attributes": {"networkInterfaces": "populated"}},
+        },
+    }
+
+
+def _seed_ha_transport_members(directory):
+    entry = _seed_ha(directory)
+    inventory_file = "td-ha-matter-ws-devices-fetch-all.json"
+    inventory = json.loads((directory / inventory_file).read_text())
+    inventory[1] = _confirmed_non_thread_record()
+    _save(directory, inventory_file, inventory)
+    sparse = {"matter": copy.deepcopy(inventory[1]["matter"]), "type": "matterDevice",
+              "sourceObservedAt": SOURCE_TIME}
+    _save(directory, "td-ha-matter-ws-topology.json", [inventory[0], sparse])
+    _save(directory, "td-ha-matter-ws-diagnostics-fetch-all.json", [sparse])
+    _save(directory, "td-ha-matter-ws-dashboard.json", {
+        "schemaVersion": "1.0.0", "devices": inventory,
+        "diagnostics": [sparse], "meshDiagnostics": [], "topology": [sparse],
+    })
+    return entry
+
+
+def test_transport_admission_correlates_sparse_members_but_never_crosses_fabrics():
+    wifi = _confirmed_non_thread_record()
+    sparse = {"matter": copy.deepcopy(wifi["matter"])}
+    other_fabric = {"matter": {"matterId": "2222333344445555-0000000000000002"}}
+    inputs = [("inventory.json", [wifi]), ("projection.json", [sparse, other_fabric])]
+    before = copy.deepcopy(inputs)
+    admitted, report = admit_ha_records(inputs)
+    validate_ha_transport_filtering(report)
+    assert inputs == before
+    assert admitted == {"inventory.json": [], "projection.json": [other_fabric]}
+    assert [item["excludedRecordCount"] for item in report["inputs"]] == [1, 1]
+    assert report["inputs"][1]["unknownRecordCount"] == 1
+    assert report == admit_ha_records(inputs)[1]
+
+
+def test_thread_evidence_admission_excludes_unknown_and_keeps_hybrids_and_sparse_projections():
+    unknown = _confirmed_non_thread_record()
+    unknown["endpoints"] = [{"endpointId": 0, "serverClusters": [29, 51]}]
+    interfaces = [{"interfaceType": kind, "isOperational": kind == "WiFi"}
+                  for kind in ("WiFi", "Ethernet", "Unspecified")]
+    unknown["networkInterfaces"] = interfaces
+    unknown["generalDiagnostics"]["networkInterfaces"] = copy.deepcopy(interfaces)
+    hybrids = []
+    for index, additional in enumerate((("WiFi",), ("Ethernet",), ("WiFi", "Ethernet")), 3):
+        device = _confirmed_non_thread_record(f"1111222233334444-{index:016X}")
+        device["networkInterfaces"] = [{"interfaceType": kind} for kind in ("Thread", *additional)]
+        device["generalDiagnostics"]["networkInterfaces"] = copy.deepcopy(device["networkInterfaces"])
+        hybrids.append(device)
+    sparse = [{"matter": copy.deepcopy(device["matter"])} for device in [unknown, *hybrids]]
+    inputs = [("inventory.json", [unknown, *hybrids]), ("projection.json", sparse)]
+    before = copy.deepcopy(inputs)
+    admitted, report = admit_ha_records(inputs, thread_evidence_only=True)
+    validate_ha_transport_filtering(report)
+    assert inputs == before
+    assert admitted["inventory.json"] == hybrids
+    assert admitted["projection.json"] == sparse[1:]
+    assert report["inputs"][0]["decisions"][0]["classification"] == "unknown"
+    assert report["inputs"][0]["decisions"][0]["disposition"] == "excluded"
+    assert report["inputs"][0]["unknownRecordCount"] == 1
+    assert all(decision["disposition"] == "admitted"
+               for decision in report["inputs"][0]["decisions"][1:])
+    corrupt = copy.deepcopy(report)
+    corrupt["inputs"][0]["decisions"][0]["disposition"] = "admitted"
+    with pytest.raises(MatterWsContractError):
+        validate_ha_transport_filtering(corrupt)
+
+
+def _diagnostic_topology_pair():
+    matter_id = "1111222233334444-0000000000000001"
+    reporter = {
+        "matterId": matter_id, "matter": {"matterId": matter_id},
+        "topologyId": "reporter", "extPanId": "0x" + NETWORK[7:],
+        "endpoints": [{"endpointId": 0, "serverClusters": [29, 53]}],
+    }
+    target = {"relationshipOnly": True, "topologyId": "target",
+              "extPanId": NETWORK[7:], "extAddress": "aabbcc3344556677", "rloc16": "0x1000"}
+    observation = {"source": "ThreadNetworkDiagnostics.RouteTable",
+                   "reporterMatterId": matter_id, "sourceId": "reporter", "targetId": "target",
+                   "entry": {"extAddress": "aabbcc3344556677", "rloc16": "0x1000"}}
+    reporter["route"] = {"routeData": [{"sourceId": "reporter", "targetId": "target",
+                                         "observations": [observation]}]}
+    return reporter, target
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda r, t: r["route"]["routeData"][0].update(identityConflicts=[{"field": "rloc16"}]),
+    lambda r, t: t.update(extPanId=OTHER_NETWORK[7:]),
+    lambda r, t: r["route"]["routeData"][0]["observations"][0].update(reporterMatterId="other"),
+    lambda r, t: r["route"]["routeData"][0]["observations"][0].update(source="nativeTopology"),
+    lambda r, t: r["route"]["routeData"][0]["observations"][0]["entry"].update(extAddress="8899aabbccddeeff"),
+    lambda r, t: r["route"]["routeData"][0]["observations"][0]["entry"].update(allocated=False),
+    lambda r, t: r["route"]["routeData"][0].update(sourceId="other"),
+    lambda r, t: r.update(endpoints=[{"endpointId": 0, "serverClusters": [29, 54]}]),
+])
+def test_thread_evidence_rejects_untrusted_topology_relationships(mutation):
+    reporter, target = _diagnostic_topology_pair()
+    mutation(reporter, target)
+    admitted, report = admit_ha_records(
+        [("td-ha-matter-ws-topology.json", [reporter, target])], thread_evidence_only=True,
+    )
+    validate_ha_transport_filtering(report)
+    assert target not in admitted["td-ha-matter-ws-topology.json"]
+    assert report["inputs"][0]["decisions"][1]["classification"] == "unknown"
+
+
+def test_thread_evidence_accepts_unambiguous_diagnostic_topology_relationships():
+    reporter, target = _diagnostic_topology_pair()
+    reporter["route"]["routeData"][0]["observations"][0]["entry"]["extAddress"] = "AABBCC3344556677"
+    admitted, report = admit_ha_records(
+        [("td-ha-matter-ws-topology.json", [reporter, target])], thread_evidence_only=True,
+    )
+    validate_ha_transport_filtering(report)
+    assert admitted["td-ha-matter-ws-topology.json"] == [reporter, target]
+    assert "thread-topology-relationship" in report["inputs"][0]["decisions"][1]["reasonCodes"]
+
+
+def test_thread_evidence_accepts_rloc_only_target_only_when_unambiguous():
+    reporter, target = _diagnostic_topology_pair()
+    target.pop("extAddress")
+    reporter["route"]["routeData"][0]["observations"][0]["entry"].pop("extAddress")
+    filename = "td-ha-matter-ws-topology.json"
+    admitted, _ = admit_ha_records([(filename, [reporter, target])], thread_evidence_only=True)
+    assert admitted[filename] == [reporter, target]
+    duplicate = copy.deepcopy(target)
+    duplicate["topologyId"] = "other"
+    admitted, _ = admit_ha_records([(filename, [reporter, target, duplicate])], thread_evidence_only=True)
+    assert admitted[filename] == [reporter]
+
+
+def test_v13_ha_admission_and_original_evidence_replay_remain_readable(tmp_path, monkeypatch):
+    entry = _seed_ha(tmp_path)
+    with monkeypatch.context() as previous:
+        previous.setattr(unified, "BUILDER_CONTRACT", "unified-assembly-v13")
+        legacy = unified.build_unified_dataset(tmp_path, entry["value"])
+    report = unified.read_generation(tmp_path, entry, verify_inputs=True)
+    assert legacy["rowCount"] == 2
+    assert report["coverage"]["haTransportFiltering"]["contractVersion"] == "ha-transport-admission-v1"
+    unified.read_original_evidence(tmp_path, entry)
+    upgraded = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert upgraded["rowCount"] == 1
+
+
+def test_transport_admission_retains_hybrids_read_errors_and_identity_conflicts():
+    wifi = _confirmed_non_thread_record()
+    thread = {"matter": copy.deepcopy(wifi["matter"]),
+              "endpoints": [{"endpointId": 0, "serverClusters": [29, 53]}]}
+    admitted, report = admit_ha_records([("inventory.json", [wifi]), ("thread.json", [thread])])
+    assert len(admitted["inventory.json"]) == len(admitted["thread.json"]) == 1
+    assert all(item["decisions"][0]["classification"] == "thread" for item in report["inputs"])
+    error = {"matter": copy.deepcopy(wifi["matter"]), "diagnosticCoverage": {
+        "generalDiagnostics": {"attributes": {"networkInterfaces": "readError"}},
+    }}
+    admitted, report = admit_ha_records([("inventory.json", [wifi]), ("error.json", [error])])
+    assert len(admitted["inventory.json"]) == 1
+    assert report["inputs"][0]["unknownRecordCount"] == 1
+    first, second = copy.deepcopy(wifi), copy.deepcopy(wifi)
+    first["extAddress"], second["extAddress"] = "0011223344556677", "8899aabbccddeeff"
+    admitted, report = admit_ha_records([("inventory.json", [first]), ("other.json", [second])])
+    assert len(admitted["inventory.json"]) == len(admitted["other.json"]) == 1
+    assert all(item["conflictingRecordCount"] == 1 for item in report["inputs"])
+
+
+def test_transport_admission_never_uses_rloc_or_ambiguous_native_fabric_identity():
+    wifi = _confirmed_non_thread_record()
+    wifi.update(extAddress="0011223344556677", extPanId=NETWORK[7:], rloc16="0x1000")
+    other = {"matter": {"matterId": "2222333344445555-0000000000000002"},
+             "extAddress": wifi["extAddress"], "extPanId": NETWORK[7:],
+             "endpoints": [{"endpointId": 0, "serverClusters": [29, 53]}]}
+    native = {"extAddress": wifi["extAddress"], "extPanId": NETWORK[7:]}
+    rloc_only = {"rloc16": "0x1000", "extPanId": NETWORK[7:]}
+    admitted, report = admit_ha_records([("inventory.json", [wifi, other]),
+                                       ("native.json", [native, rloc_only])])
+    assert admitted["inventory.json"] == [other]
+    assert admitted["native.json"] == [native, rloc_only]
+    assert report["inputs"][1]["unknownRecordCount"] == 2
+
+
+def test_transport_admission_preserves_thread_links_and_reports_filtered_endpoints():
+    thread = {"nativeNodeIds": ["router"], "diagnosticsDetail": {
+        "nativeTopology": {"node": {"network_type": "thread"}},
+    }, "nativeRelationships": [
+        {"nativeSourceId": "router", "nativeTargetId": "child", "sourceId": "router",
+         "targetId": "child", "networkType": "thread", "sourceToTarget": {"lqi": 3}},
+        {"nativeSourceId": "router", "nativeTargetId": "wifi", "sourceId": "router",
+         "targetId": "wifi", "networkType": "thread"},
+    ]}
+    child = {"nativeNodeIds": ["child"], "diagnosticsDetail": {
+        "nativeTopology": {"node": {"network_type": "thread"}},
+    }}
+    wifi = {"nativeNodeIds": ["wifi"], "diagnosticsDetail": {
+        "nativeTopology": {"node": {"network_type": "wifi"}},
+    }}
+    admitted, report = admit_ha_records([("native.json", [thread, child, wifi])])
+    router, kept_child = admitted["native.json"]
+    assert kept_child == child
+    assert router["nativeRelationships"][0] == thread["nativeRelationships"][0]
+    assert router["nativeRelationships"][1]["filteredEndpoints"] == ["wifi"]
+    assert report["inputs"][0]["filteredLinks"][0]["disposition"] == "unresolved"
+    validate_ha_transport_filtering(report)
+
+
+def test_transport_admission_rejects_invalid_identity_and_unsafe_filtered_records():
+    invalid = _confirmed_non_thread_record()
+    invalid["extPanId"] = "invalid"
+    with pytest.raises(MatterWsContractError, match="Thread identity"):
+        admit_ha_records([("inventory.json", [invalid])])
+    unsafe = _confirmed_non_thread_record()
+    unsafe["networkKey"] = "not-allowed"
+    with pytest.raises(MatterSnapshotSecurityError):
+        admit_ha_records([("inventory.json", [unsafe])])
+
+
+def test_ha_transport_primary_filters_every_projection_without_mutating_raw_inputs(tmp_path):
+    entry = _seed_ha_transport_members(tmp_path)
+    raw = {item["file"]: (tmp_path / item["file"]).read_bytes()
+           for item in entry["unified"]["inputs"] if (tmp_path / item["file"]).exists()}
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert result["rowCount"] == 1 and result["linkCount"] == 0
+    rows = json.loads((tmp_path / entry["files"][0]).read_text())
+    assert rows[0]["matter"]["matterId"].endswith("-0000000000000001")
+    filtering = result["coverage"]["haTransportFiltering"]
+    validate_ha_transport_filtering(filtering)
+    excluded = {item["filename"]: item["excludedRecordCount"] for item in filtering["inputs"]}
+    assert excluded["td-ha-matter-ws-devices-fetch-all.json"] == 1
+    assert excluded["td-ha-matter-ws-topology.json"] == 1
+    assert excluded["td-ha-matter-ws-diagnostics-fetch-all.json"] == 1
+    assert excluded["td-ha-matter-ws-dashboard.json"] == 1
+    assert all((tmp_path / name).read_bytes() == content for name, content in raw.items())
+    before = _artifacts(tmp_path, entry)
+    assert unified.build_unified_dataset(tmp_path, entry["value"])["noOp"] is True
+    assert _artifacts(tmp_path, entry) == before
+
+
+def test_all_filtered_ha_inventory_is_present_complete_and_does_not_invent_network(tmp_path):
+    entry = _seed_ha(tmp_path, empty=True)
+    _save(tmp_path, "td-ha-matter-ws-devices-fetch-all.json", [_confirmed_non_thread_record()])
+    outcome_file = "td-ha-matter-ws-collection.outcome.json"
+    outcome = json.loads((tmp_path / outcome_file).read_text())
+    _save(tmp_path, outcome_file, {**outcome, "nodeCount": 1, "normalizedNodeCount": 1})
+    for item in entry["unified"]["inputs"]:
+        scope_file = tmp_path / unified.network_scope_path(item["file"]).name
+        if scope_file.exists():
+            scope_file.unlink()
+    result = unified.build_unified_dataset(tmp_path, entry["value"])
+    report = unified.read_generation(tmp_path, entry, verify_inputs=True)
+    assert result["materializationState"] == "complete" and result["rowCount"] == 0
+    assert result["healthState"] == "unavailable" and report["networkInstance"] is None
+    assert report["coverage"]["commissionedInventory"] == {
+        "status": "selected", "selectedRecordCount": 0, "excludedRecordCount": 0,
+    }
+    assert report["coverage"]["missingRequired"] == []
+    assert report["coverage"]["haTransportFiltering"]["inputs"][0]["excludedRecordCount"] == 1
+
+
+def test_v12_ha_generation_remains_readable_and_explicit_build_upgrades_admission(tmp_path, monkeypatch):
+    entry = _seed_ha(tmp_path)
+    with monkeypatch.context() as previous:
+        previous.setattr(unified, "BUILDER_CONTRACT", "unified-assembly-v12")
+        legacy = unified.build_unified_dataset(tmp_path, entry["value"])
+    before = _artifacts(tmp_path, entry)
+    assert legacy["rowCount"] == 3 and legacy["linkCount"] == 1
+    assert unified.read_generation(tmp_path, entry)["builderContract"] == "unified-assembly-v12"
+    assert _artifacts(tmp_path, entry) == before
+    upgraded = unified.build_unified_dataset(tmp_path, entry["value"])
+    assert upgraded["noOp"] is False and upgraded["generationId"] != legacy["generationId"]
+    assert upgraded["rowCount"] == 1 and upgraded["linkCount"] == 0
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda report: report["inputs"][0].update(excludedRecordCount=99),
+    lambda report: report["inputs"][0]["decisions"][0].update(recordIndex=True),
+    lambda report: report.update(contractVersion="future"),
+    lambda report: report["inputs"][0]["decisions"][0].update(classification=[]),
+    lambda report: report["inputs"][0]["decisions"][0]["evidence"][0].update(cluster_id=True),
+])
+def test_transport_report_rejects_non_reconciling_or_unsupported_decisions(mutation):
+    _, report = admit_ha_records([("inventory.json", [_confirmed_non_thread_record()])])
+    mutation(report)
+    with pytest.raises(MatterWsContractError):
+        validate_ha_transport_filtering(report)
 
 
 def test_ha_dashboard_enriches_without_duplicate_members_or_substituting_missing_inventory(tmp_path):
@@ -1665,10 +1960,10 @@ def test_ha_dashboard_enriches_without_duplicate_members_or_substituting_missing
                  "topology": [devices[0]]}
     _save(tmp_path, "td-ha-matter-ws-dashboard.json", dashboard)
     complete = unified.build_unified_dataset(tmp_path, entry["value"])
-    assert complete["rowCount"] == 3
+    assert complete["rowCount"] == 1
     report = unified.read_generation(tmp_path, entry)
     dashboard_input = next(item for item in report["inputs"] if item["role"] == "projection")
-    assert dashboard_input["selectedRecordCount"] == 2
+    assert dashboard_input["selectedRecordCount"] == 1
     inventory_file.unlink()
     with pytest.raises(unified.UnifiedDatasetError, match="Missing required"):
         unified.build_unified_dataset(tmp_path, entry["value"])
@@ -1751,7 +2046,7 @@ def test_ha_multiple_networks_need_observed_selection_and_never_assign_unknown_r
     assert selected["materializationState"] == "partial"
     rows = json.loads((tmp_path / entry["files"][0]).read_text())
     assert all(row["_networkInstance"] in (None, NETWORK) for row in rows)
-    assert any(row["_networkInstance"] is None for row in rows)
+    assert not any(row.get("type") == "matterDevice" for row in rows)
 
 
 @pytest.mark.parametrize("change,reason", [
@@ -1775,9 +2070,10 @@ def test_ha_dangling_links_are_reported_and_do_not_connect_to_another_device(tmp
     filename = "td-ha-matter-ws-network-topology.json"
     payload = json.loads((tmp_path / filename).read_text())
     payload["topology"]["connections"][0]["target"] = "absent"
+    payload["topology"]["connections"][0]["network"] = "thread"
     _save(tmp_path, filename, payload)
     result = unified.build_unified_dataset(tmp_path, entry["value"])
-    assert result["rowCount"] == 3 and result["healthState"] == "degraded"
+    assert result["rowCount"] == 1 and result["healthState"] == "degraded"
     [link] = result["coverage"]["unresolvedNativeRelationships"]
     assert link["unresolvedEndpoints"] == ["absent"]
     assert link["targetId"] == "ha-native:absent"
@@ -1797,7 +2093,7 @@ def test_ha_shared_thread_address_never_collapses_different_matter_fabrics(tmp_p
     fabrics = {row["matter"]["matterId"] for row in rows if isinstance(row.get("matter"), dict)}
     assert other["matter"]["matterId"] in fabrics
     assert devices[0]["matter"]["matterId"] in fabrics
-    assert result["coverage"]["commissionedInventory"]["selectedRecordCount"] == 3
+    assert result["coverage"]["commissionedInventory"]["selectedRecordCount"] == 2
     assert result["healthState"] == "degraded"
     assert "ambiguous-native-or-merged-identity" in result["coverage"]["healthReasons"]
     by_id = {row["_unifiedRecordId"]: row for row in rows}

@@ -55,7 +55,9 @@ from util_data import network_scope_path, resolve_data_dir
 
 
 CONTRACT_VERSION = "unified-v1"
-BUILDER_CONTRACT = "unified-assembly-v12"
+BUILDER_CONTRACT = "unified-assembly-v14"
+HA_TRANSPORT_BUILDER_CONTRACT = "unified-assembly-v14"
+HA_TRANSPORT_BUILDER_CONTRACTS = frozenset({"unified-assembly-v13", HA_TRANSPORT_BUILDER_CONTRACT})
 _NETWORK = re.compile(r"extpan:[0-9a-f]{16}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -910,6 +912,9 @@ def _composition_inputs(data_dir: Path, entry: dict, catalog: dict, *,
     captured, inputs, sources, identities, missing, health_reasons = [], [], [], [], [], []
     raw_inputs, dependency_states, dependency_reports = [], {}, {}
     raw_payloads, raw_rows, raw_scopes = {}, {}, {}
+    ha_transport_filtering = (
+        _admit_ha_inputs([])[1] if BUILDER_CONTRACT in HA_TRANSPORT_BUILDER_CONTRACTS else None
+    )
     for dependency in _dependencies(catalog, entry):
         filename = dependency["files"][0]
         requested_network = None if dependency["source"] == "mdns" else network
@@ -984,6 +989,21 @@ def _composition_inputs(data_dir: Path, entry: dict, catalog: dict, *,
         if report["networkInstance"] is not None:
             identities.append((report["networkInstance"][7:], None, metadata))
         declared = {item["file"]: item for item in dependency["unified"]["inputs"]}
+        ha_admitted = None
+        if dependency["source"] == "ha-matter-ws" and BUILDER_CONTRACT in HA_TRANSPORT_BUILDER_CONTRACTS:
+            ha_inputs = []
+            for original in report["inputs"]:
+                if original["status"] != "selected" or original["role"] not in {"records", "projection"}:
+                    continue
+                raw = _read_stable(data_dir, original["filename"])
+                if raw.content is None or raw.digest != original["sha256"]:
+                    raise UnifiedDatasetError(f"Changing dependency evidence: {raw.filename}")
+                ha_inputs.append((raw.filename, _extract(
+                    declared[raw.filename], _parse(raw.content, raw.filename),
+                )))
+            ha_admitted, ha_transport_filtering = _admit_ha_inputs(ha_inputs)
+            if report["coverage"].get("haTransportFiltering") != ha_transport_filtering:
+                raise UnifiedDatasetError("HA transport admission differs from its dependency")
         for original in report["inputs"]:
             raw_inputs.append(deepcopy(original))
             raw = _read_stable(data_dir, original["filename"])
@@ -1002,6 +1022,8 @@ def _composition_inputs(data_dir: Path, entry: dict, catalog: dict, *,
             if original["role"] not in {"records", "projection"}:
                 continue
             records = _extract(declared[raw.filename], payload)
+            if ha_admitted is not None:
+                records = ha_admitted[raw.filename]
             raw_rows[raw.filename] = records
             from ha_matter_ws_unified import is_thread_record
             grouped: dict[str | None, list[dict]] = {}
@@ -1034,7 +1056,21 @@ def _composition_inputs(data_dir: Path, entry: dict, catalog: dict, *,
         "raw_inputs": raw_inputs, "dependency_states": dependency_states,
         "dependency_reports": dependency_reports, "raw_payloads": raw_payloads,
         "raw_rows": raw_rows, "raw_scopes": raw_scopes,
+        "ha_transport_filtering": ha_transport_filtering,
     }
+
+
+def _admit_ha_inputs(
+    inputs: list[tuple[str, list[dict]]], *, builder_contract: str | None = None,
+) -> tuple[dict[str, list[dict]], dict]:
+    from ha_matter_ws_unified import admit_ha_records
+    try:
+        contract = builder_contract if builder_contract is not None else BUILDER_CONTRACT
+        return admit_ha_records(
+            inputs, thread_evidence_only=contract == HA_TRANSPORT_BUILDER_CONTRACT,
+        )
+    except MatterWsContractError as exc:
+        raise UnifiedDatasetError(f"Invalid HA transport evidence: {exc}") from exc
 
 
 def read_generation(data_dir: Path, entry: dict, *, verify_inputs: bool = False,
@@ -1084,10 +1120,29 @@ def read_generation(data_dir: Path, entry: dict, *, verify_inputs: bool = False,
             "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
             "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
             "unified-assembly-v9", "unified-assembly-v10", "unified-assembly-v11",
+            "unified-assembly-v12", "unified-assembly-v13",
             BUILDER_CONTRACT,
         }:
             raise UnifiedDatasetError("Unsupported Unified assembly contract")
         generation_contract["builderContract"] = report["builderContract"]
+    if report.get("builderContract") in HA_TRANSPORT_BUILDER_CONTRACTS and entry["source"] in {
+        "ha-matter-ws", "multi-source",
+    }:
+        from ha_matter_ws_unified import (
+            HA_THREAD_EVIDENCE_FILTER_VERSION, HA_TRANSPORT_FILTER_VERSION,
+            validate_ha_transport_filtering,
+        )
+        filtering = report["coverage"].get("haTransportFiltering")
+        try:
+            validate_ha_transport_filtering(filtering)
+            expected_filter = (HA_THREAD_EVIDENCE_FILTER_VERSION
+                               if report["builderContract"] == HA_TRANSPORT_BUILDER_CONTRACT
+                               else HA_TRANSPORT_FILTER_VERSION)
+            if filtering["contractVersion"] != expected_filter:
+                raise MatterWsContractError("HA transport report version does not match assembly")
+        except MatterWsContractError as exc:
+            raise UnifiedDatasetError(f"Invalid HA transport report: {exc}") from exc
+        generation_contract["haTransportFilteringDigest"] = _fingerprint(filtering)
     if entry["source"] == "multi-source":
         generation_contract["rawInputsDigest"] = report.get("rawInputsDigest")
     expected_generation = _fingerprint(generation_contract)
@@ -1217,6 +1272,7 @@ def read_original_evidence(data_dir: Path, entry: dict, *, catalog: dict | None 
     if _parse(captures[0].content, captures[0].filename) != report:
         raise UnifiedDatasetError("Unified report changed before evidence extraction")
     payloads, all_payloads, rows, scopes = {}, {}, {}, {}
+    ha_inputs = []
     selected = report["networkInstance"]
     if selected is None or report["healthState"] == "unavailable":
         raise UnifiedDatasetError("One valid observed network is required for health")
@@ -1251,6 +1307,12 @@ def read_original_evidence(data_dir: Path, entry: dict, *, catalog: dict | None 
         payloads[raw.filename] = payload
         file_scope, _ = _scope(scope, raw)
         scopes[raw.filename] = file_scope
+        if (
+            report.get("builderContract") in HA_TRANSPORT_BUILDER_CONTRACTS
+            and declaration["source"] == "ha-matter-ws"
+            and item["role"] in {"records", "projection"}
+        ):
+            ha_inputs.append((raw.filename, _extract(declaration, payload)))
         if declaration["source"] == "mdns" or item["role"] != "records":
             continue
         records = []
@@ -1261,6 +1323,20 @@ def read_original_evidence(data_dir: Path, entry: dict, *, catalog: dict | None 
                 continue
             records.append(record)
         rows[raw.filename] = records
+    if report.get("builderContract") in HA_TRANSPORT_BUILDER_CONTRACTS and entry["source"] in {
+        "ha-matter-ws", "multi-source",
+    }:
+        ha_admitted, filtering = _admit_ha_inputs(
+            ha_inputs, builder_contract=report["builderContract"],
+        )
+        if report["coverage"].get("haTransportFiltering") != filtering:
+            raise UnifiedDatasetError("HA transport admission changed during original-evidence replay")
+        for filename, admitted in ha_admitted.items():
+            if declarations[filename]["role"] == "records":
+                rows[filename] = [
+                    record for record in admitted if is_thread_record(record)
+                    and _record_scope(record, scopes[filename]) == selected[7:]
+                ]
     _recheck(data_dir, captures)
     read_generation(data_dir, entry, verify_inputs=True, catalog=catalog)
     return {"report": report, "metadata": metadata, "declarations": declarations,
@@ -1414,6 +1490,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
         missing = composition["missing"]
         health_reasons = composition["health_reasons"]
     ha_payloads: dict[str, Any] = {}
+    ha_record_inputs = []
+    ha_transport_filtering = composition["ha_transport_filtering"] if composition else None
     ha_collection = None
     if ha_source:
         from ha_matter_ws_unified import is_thread_record, validate_canonical_rows
@@ -1496,6 +1574,11 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
         rows = _extract(item, payload)
         if ha_source:
             validate_canonical_rows(rows)
+            for record in rows:
+                if is_thread_record(record):
+                    _record_scope(record, file_scope)
+            ha_record_inputs.append((item, rows, file_scope, metadata))
+            continue
         table_reasons, candidates = _router_table_evidence(filename, rows)
         health_reasons.extend(table_reasons)
         tables_not_provided.extend(candidates)
@@ -1503,17 +1586,10 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
             child_coverage_payloads[filename] = rows
         by_scope: dict[str | None, list[dict]] = {}
         for record in rows:
-            if ha_source:
-                thread_record = is_thread_record(record)
-                record_scope = _record_scope(record, file_scope) if thread_record else None
-                if (thread_record and record_scope is not None and item["role"] == "records"
-                        and record.get("extPanId") is not None):
-                    identities.append((record_scope, record.get("networkName"), metadata))
-            else:
-                record_scope = _record_scope(
-                    record, None if entry["source"] == "mdns" and record.get("extPanId") is None
-                    else file_scope,
-                )
+            record_scope = _record_scope(
+                record, None if entry["source"] == "mdns" and record.get("extPanId") is None
+                else file_scope,
+            )
             by_scope.setdefault(record_scope, []).append(record)
         if file_scope is not None and not rows:
             by_scope[file_scope] = []
@@ -1538,12 +1614,50 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
             metadata["status"] = "excluded"
             if item["required"]:
                 missing.append(filename)
-        unknown_thread_scope = (any(is_thread_record(row) for row in by_scope.get(None, []))
-                                if ha_source else None in by_scope)
+        unknown_thread_scope = None in by_scope
         if rows and unknown_thread_scope and not filename.startswith("td-mdns-scopes-"):
             health_reasons.append(f"unknown-record-scope:{filename}")
     if ha_source:
         from ha_matter_ws_unified import assess_cached_outcomes
+        ha_inputs = [(item["file"], records) for item, records, _, _ in ha_record_inputs]
+        if BUILDER_CONTRACT in HA_TRANSPORT_BUILDER_CONTRACTS:
+            admitted, ha_transport_filtering = _admit_ha_inputs(ha_inputs)
+        else:
+            admitted = dict(ha_inputs)
+        for item, _, file_scope, metadata in ha_record_inputs:
+            filename = item["file"]
+            rows = admitted[filename]
+            by_scope = {}
+            for record in rows:
+                thread_record = is_thread_record(record)
+                record_scope = _record_scope(record, file_scope) if thread_record else None
+                if (thread_record and record_scope is not None and item["role"] == "records"
+                        and record.get("extPanId") is not None):
+                    identities.append((record_scope, record.get("networkName"), metadata))
+                by_scope.setdefault(record_scope, []).append(record)
+            if not rows:
+                by_scope[file_scope] = []
+            excluded_count = 0
+            selected_scopes = 0
+            for record_scope, records in by_scope.items():
+                if network is not None and record_scope is not None and record_scope != network[7:]:
+                    excluded_count += len(records)
+                    continue
+                selected_scopes += 1
+                sources.append((record_scope, filename, records))
+                if records or item["required"]:
+                    usable += 1
+            metadata["selectedRecordCount"] = sum(
+                len(records) for scope, records in by_scope.items()
+                if network is None or scope is None or scope == network[7:]
+            )
+            metadata["excludedRecordCount"] = excluded_count
+            if not selected_scopes:
+                metadata["status"] = "excluded"
+                if item["required"]:
+                    missing.append(filename)
+            if any(is_thread_record(row) for row in by_scope.get(None, [])):
+                health_reasons.append(f"unknown-record-scope:{filename}")
         health_reasons.extend(assess_cached_outcomes(ha_payloads, inputs))
     uncovered_reasons, tables_not_provided = _finalize_router_table_evidence(
         tables_not_provided, child_coverage_payloads,
@@ -1666,6 +1780,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
                            "networkInstance": selected, "builderContract": BUILDER_CONTRACT}
     if composition:
         generation_contract["rawInputsDigest"] = _fingerprint(composition["raw_inputs"])
+    if ha_transport_filtering is not None:
+        generation_contract["haTransportFilteringDigest"] = _fingerprint(ha_transport_filtering)
     generation = _fingerprint(generation_contract)
     marker = data_dir / recipe["reportFile"]
     previous_generation = None
@@ -1742,6 +1858,8 @@ def _build_locked(data_dir: Path, entry: dict, catalog: dict, *, allow_partial: 
         report["rawInputsDigest"] = generation_contract["rawInputsDigest"]
         report["coverage"]["sources"] = composition["dependency_states"]
         report["coverage"]["unresolvedNativeRelationships"] = unresolved_native
+    if ha_transport_filtering is not None:
+        report["coverage"]["haTransportFiltering"] = ha_transport_filtering
     if ha_source:
         inventory = next(item for item in inputs if item["filename"] == HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME)
         report["coverage"]["commissionedInventory"] = {

@@ -20,6 +20,7 @@ from td_health_sqlite import SQLiteHealthStore, _RetainedHistory
 from td_unified_dataset import build_unified_dataset, read_original_evidence
 from test_td_unified_dataset import (
     NETWORK, SOURCE_TIME, _entry, _save, _seed, _seed_ha, _seed_ha_controller,
+    _seed_ha_transport_members,
 )
 
 
@@ -47,6 +48,7 @@ def process(directory, dataset_id, store=None, **kwargs):
     "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
     "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",
     "unified-assembly-v9", "unified-assembly-v10", "unified-assembly-v11", "unified-assembly-v12",
+    "unified-assembly-v13",
 ])
 def test_original_samples_are_scoped_stable_and_reopenable(
     tmp_path, dataset_id, builder_contract, monkeypatch,
@@ -97,6 +99,45 @@ def test_unrecognized_assembly_contract_does_not_validate_retained_context(tmp_p
         validate_context(context, dataset, result.observation)
 
 
+@pytest.mark.parametrize("dataset_id", ["ha_matter_ws_unified", "multi_source_unified"])
+def test_current_health_originals_apply_admission_without_projection_resurrection(tmp_path, dataset_id):
+    if dataset_id == "multi_source_unified":
+        for item in ("otbr_cli_unified", "otbr_restapi_unified", "mdns_unified"):
+            _seed(tmp_path, item)
+    _seed_ha_transport_members(tmp_path)
+    build_unified_dataset(tmp_path, dataset_id)
+    view = read_original_evidence(tmp_path, _entry(dataset_id))
+    for filename, rows in view["rows"].items():
+        if filename.startswith("td-ha-matter-ws-"):
+            assert not any(row.get("matter", {}).get("matterId", "").endswith("-0000000000000002")
+                           for row in rows)
+    result = process(tmp_path, dataset_id)
+    assert result.observation.devices
+
+
+def test_v12_retained_health_reopens_after_v13_upgrade_without_reinterpreting_raw_cache(
+    tmp_path, monkeypatch,
+):
+    import td_unified_dataset
+    _seed_ha(tmp_path)
+    with monkeypatch.context() as previous:
+        previous.setattr(td_unified_dataset, "BUILDER_CONTRACT", "unified-assembly-v12")
+        build_unified_dataset(tmp_path, "ha_matter_ws_unified")
+        old = process(tmp_path, "ha_matter_ws_unified", SQLiteHealthStore(tmp_path / "hobat_v1.db"))
+        store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+        with closing(store._connect()) as connection:
+            before_retained = store._endpoint(connection, old.assessment.assessment_id)
+    build_unified_dataset(tmp_path, "ha_matter_ws_unified")
+    new = process(tmp_path, "ha_matter_ws_unified")
+    assert new.assessment.reproduction_context["unifiedHealth"]["reportContractDigest"] != (
+        old.assessment.reproduction_context["unifiedHealth"]["reportContractDigest"]
+    )
+    reopened = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    with closing(reopened._connect()) as connection:
+        endpoint = reopened._endpoint(connection, old.assessment.assessment_id)
+    assert endpoint[0] == old.observation and endpoint == before_retained
+
+
 @pytest.mark.parametrize("dataset_id", IDS)
 def test_qualification_profiles_and_no_ha_negative_authority(tmp_path, dataset_id):
     seed(tmp_path, dataset_id)
@@ -117,7 +158,10 @@ def test_qualification_profiles_and_no_ha_negative_authority(tmp_path, dataset_i
             "otbr-restapi" if dataset_id == "otbr_restapi_unified" else "otbr-cli")
 
 
-@pytest.mark.parametrize("builder,version", [("unified-assembly-v11", "snapshot-v18"), ("unified-assembly-v12", "snapshot-v19")])
+@pytest.mark.parametrize("builder,version", [
+    ("unified-assembly-v11", "snapshot-v18"), ("unified-assembly-v12", "snapshot-v19"),
+    ("unified-assembly-v13", "snapshot-v19"),
+])
 def test_typed_controller_health_is_complete_without_absence_authority(tmp_path, monkeypatch, builder, version):
     from td_health_unified import digest
     monkeypatch.setattr("td_unified_dataset.BUILDER_CONTRACT", builder)
@@ -862,6 +906,7 @@ def test_embedded_mdns_services_do_not_change_original_health_samples(tmp_path, 
     _save(tmp_path, "td-mdns-scopes-thread.json", [_hap_service()])
     _save(tmp_path, "td-ha-matter-ws-topology.json", [{
         "extAddress": "0011223344556677", "relationshipOnly": True,
+        "extPanId": NETWORK[7:],
         "sourceObservedAt": SOURCE_TIME,
     }])
     with monkeypatch.context() as legacy:

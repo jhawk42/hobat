@@ -93,8 +93,15 @@ merge are menu-hidden but explicitly resolvable; legacy precomputed Multi-source
 remains visible. The CLI and REST OTBR + mDNS alternatives stay in their
 original source groups.
 
-The HA converters preserve commissioned/non-Thread membership, full safe
-device/endpoint/power/operational fields and explicit roles. Native IDs stay in
+The HA converters preserve commissioned membership, full safe
+device/endpoint/power/operational fields and explicit roles. Assembly-v14
+applies a separate source-owned admission step requiring positive Thread
+diagnostic, Thread interface, native Thread topology or Border Router evidence,
+including validated diagnostic topology relationships. Hybrids remain; unknown
+and conflicting observations are excluded without claiming they are non-Thread.
+Missing evidence can hide a real Thread device. Original raw caches remain untouched, and original-evidence
+replay uses the same admission policy for current generations. Older generations
+keep their original reads and retained health semantics. Native IDs stay in
 `nativeNodeIds`, never Matter fabric/node IDs. Safe native details and original
 graph collection time remain under `diagnosticsDetail.nativeBorderRouter` or
 `diagnosticsDetail.nativeTopology`. Only validated IPv6 addresses are promoted
@@ -105,6 +112,9 @@ from the mixed-address Border Router inventory.
 `strength`, observations, and only present directional `sourceToTarget`/
 `targetToSource` metrics and route metadata. They are not copied into OTBR
 neighbor/child/Route64 tables. Exact duplicate native observations are removed.
+Wi-Fi/Ethernet links and confirmed non-Thread nodes are filtered from new
+Unified products with separate `coverage.haTransportFiltering` reasons, never
+manufactured replacement endpoints. Valid admitted Thread links remain intact.
 Dangling endpoints stay explicit in `unresolvedEndpoints` and merge conflicts;
 when neither endpoint exists, a relationship-only row retains the evidence
 without inventing a device. Native identity collisions retain separate

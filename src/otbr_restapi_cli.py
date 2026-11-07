@@ -358,15 +358,22 @@ def _add_diagnostics_commands(
         help=f"Server-side task timeout per device in seconds (default: {CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT})",
     )
     _add_child_diagnostic_options(diagnostics_fetch_all)
-    diagnostics_fetch_all.add_argument(
+    expansion_options = diagnostics_fetch_all.add_mutually_exclusive_group()
+    expansion_options.add_argument(
         "--children-expand-by-rloc",
         dest="children_expand_by_rloc",
         action="store_true",
-        default=False,
+        default=True,
         help=(
             "Expand child diagnostics from parent childTable using RLOC "
-            "destinations (default: disabled)"
+            "destinations (default: enabled; requires extended addressing)"
         ),
+    )
+    expansion_options.add_argument(
+        "--no-children-expand-by-rloc",
+        dest="children_expand_by_rloc",
+        action="store_false",
+        help="Disable child RLOC expansion (required for non-extended addressing)",
     )
     diagnostics_fetch_all.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,

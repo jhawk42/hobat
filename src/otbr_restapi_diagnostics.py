@@ -711,11 +711,12 @@ def _dispatch_diagnostics_fetch_all(
     finish: Callable[..., Any],
     output_path: str | Path | None,
 ) -> Any:
-    expand_by_rloc = bool(getattr(args, "children_expand_by_rloc", False))
+    expand_by_rloc = bool(getattr(args, "children_expand_by_rloc", True))
     if expand_by_rloc and args.destination_type != DestinationType.EXTENDED:
         raise OTBRUsageError(
-            "--children-expand-by-rloc requires --destination-type "
-            f"{DestinationType.EXTENDED}"
+            "Child RLOC expansion requires --destination-type "
+            f"{DestinationType.EXTENDED}; use --no-children-expand-by-rloc "
+            "with alternate destination types"
         )
     resolved_types = resolve_types(args)
     fallback_types = resolve_fallback_types(args)
@@ -804,9 +805,6 @@ def _dispatch_diagnostics_fetch_all(
         len(selected_devices), not getattr(args, "no_progress", False),
         command=_DIAGNOSTICS_COMMAND, stage="initial", expansion_stage="expansion",
     )
-    expansion_kwargs = (
-        {"children_expand_by_rloc": True} if expand_by_rloc else {}
-    )
     outcome = client.fetch_all_devices_diagnostics(
         selected_devices,
         types=resolved_types,
@@ -824,12 +822,12 @@ def _dispatch_diagnostics_fetch_all(
         child_retry_enabled=child_options["retry_enabled"],
         child_task_timeout=child_options["task_timeout"],
         child_poll_timeout=child_options["poll_timeout"],
+        children_expand_by_rloc=expand_by_rloc,
         raw=raw_arg,
         on_progress=progress_fn,
         on_rejected_progress=rejected_progress_fn,
         on_checkpoint=_on_checkpoint,
         on_pass_checkpoint=_on_pass_checkpoint,
-        **expansion_kwargs,
     )
     _log_diagnostic_facts(outcome)
     guard_affected = _has_unresolved_iid_skip(outcome)

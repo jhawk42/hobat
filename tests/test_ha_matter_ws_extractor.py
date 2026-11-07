@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import ipaddress
 import json
 from pathlib import Path
@@ -8,6 +9,11 @@ from pathlib import Path
 import pytest
 
 from ha_matter_ws_extractor import extract_nodes_info, parse_dump_file
+from ha_matter_ws_unified import (
+    HaTransportClassification,
+    classify_ha_transport,
+    combine_ha_transport_evidence,
+)
 from ha_matter_ws_snapshots import (
     MatterSnapshotSecurityError,
     build_device_snapshot,
@@ -15,6 +21,269 @@ from ha_matter_ws_snapshots import (
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ha_matter_ws_phase1_nodes.json"
+_MISSING = object()
+
+
+def _transport_record(
+    *,
+    interfaces=_MISSING,
+    interface_state=None,
+    root_clusters=None,
+):
+    record = {"type": "matterDevice", "thread": {}}
+    if interfaces is not _MISSING:
+        record["networkInterfaces"] = copy.deepcopy(interfaces)
+        record["generalDiagnostics"] = {
+            "networkInterfaces": copy.deepcopy(interfaces)
+        }
+    if interface_state is not None:
+        record["diagnosticCoverage"] = {
+            "generalDiagnostics": {
+                "attributes": {"networkInterfaces": interface_state}
+            }
+        }
+    if root_clusters is not None:
+        record["endpoints"] = [
+            {"endpointId": 0, "serverClusters": list(root_clusters)}
+        ]
+        record["serverClusters"] = list(root_clusters)
+    return record
+
+
+def test_transport_classifier_uses_complete_non_thread_interfaces_purely() -> None:
+    record = _transport_record(
+        interfaces=[
+            {"interfaceType": "WiFi"},
+            {"interfaceType": "Ethernet"},
+        ],
+        interface_state="populated",
+    )
+    before = copy.deepcopy(record)
+
+    result = classify_ha_transport(record, source="devices_fetch_all.json")
+
+    assert result.classification == "non-thread"
+    assert result.reason_codes == ("non-thread-interfaces-only",)
+    assert {
+        item.interface_type
+        for item in result.evidence
+        if item.interface_type is not None
+    } == {"WiFi", "Ethernet"}
+    assert all(item.source == "devices_fetch_all.json" for item in result.evidence)
+    assert record == before
+
+
+@pytest.mark.parametrize(
+    ("interfaces", "state"),
+    [
+        ([], None),
+        ([], "implementedEmpty"),
+        ([{"interfaceType": "WiFi"}], "notObserved"),
+        ([{"interfaceType": "WiFi"}], "null"),
+        ([{"interfaceType": "WiFi"}], "invalidValue"),
+        ([{"interfaceType": "WiFi"}], "attributeUnsupported"),
+        ([{"interfaceType": "WiFi"}], "readError"),
+        ([{"interfaceType": "Unknown (7)"}], "populated"),
+        ([{"interfaceType": 1}], "populated"),
+        ([{"interfaceType": True}], "populated"),
+        ([{}], "populated"),
+        ([None], "populated"),
+    ],
+)
+def test_transport_classifier_does_not_promote_incomplete_or_invalid_interfaces(
+    interfaces, state
+) -> None:
+    record = _transport_record(interfaces=interfaces, interface_state=state)
+
+    result = classify_ha_transport(record)
+
+    assert result.classification == "unknown"
+    if state == "readError":
+        assert result.reason_codes == ("transport-read-error",)
+    else:
+        assert result.reason_codes == ("insufficient-transport-evidence",)
+
+
+def test_transport_classifier_retains_thread_interface_and_diagnostic_hybrids() -> None:
+    interface_record = _transport_record(
+        interfaces=[{"interfaceType": "WiFi"}, {"interfaceType": "Thread"}],
+        interface_state="populated",
+    )
+    diagnostic_record = _transport_record(
+        interfaces=[{"interfaceType": "WiFi"}],
+        interface_state="populated",
+        root_clusters=[0x001D, 0x0033, 0x0035, 0x0036],
+    )
+
+    interface_result = classify_ha_transport(interface_record)
+    diagnostic_result = classify_ha_transport(diagnostic_record)
+
+    assert interface_result.classification == "thread"
+    assert interface_result.reason_codes == ("thread-interface-present",)
+    assert diagnostic_result.classification == "thread"
+    assert diagnostic_result.reason_codes == ("thread-diagnostics-present",)
+    assert {item.cluster_id for item in diagnostic_result.evidence} == {
+        0x0033,
+        0x0035,
+        0x0036,
+    }
+
+
+def test_transport_classifier_requires_root_validated_server_cluster_coverage() -> None:
+    root_wifi = _transport_record(
+        root_clusters=[0x001D, 0x0033, 0x0036]
+    )
+    root_wifi_read_error = _transport_record(
+        interfaces=[],
+        interface_state="readError",
+        root_clusters=[0x001D, 0x0033, 0x0036],
+    )
+    bridged_wifi = _transport_record(
+        root_clusters=[0x001D, 0x0033],
+    )
+    bridged_wifi["endpoints"].append(
+        {"endpointId": 1, "serverClusters": [0x001D, 0x0037]}
+    )
+    bridged_wifi["serverClusters"].append(0x0037)
+    malformed_root = _transport_record(root_clusters=[0x0036])
+
+    assert classify_ha_transport(root_wifi).classification == "non-thread"
+    assert classify_ha_transport(root_wifi).reason_codes == (
+        "non-thread-root-clusters-only",
+    )
+    assert classify_ha_transport(root_wifi_read_error).classification == "unknown"
+    assert classify_ha_transport(root_wifi_read_error).reason_codes == (
+        "transport-read-error",
+    )
+    assert classify_ha_transport(bridged_wifi).classification == "unknown"
+    assert classify_ha_transport(malformed_root).classification == "unknown"
+
+
+def test_transport_classifier_root_thread_cluster_beats_read_error_and_wifi() -> None:
+    record = _transport_record(
+        interfaces=[{"interfaceType": "WiFi"}],
+        interface_state="readError",
+        root_clusters=[0x001D, 0x0035, 0x0036],
+    )
+
+    result = classify_ha_transport(record)
+
+    assert result.classification == "thread"
+    assert result.reason_codes == ("thread-diagnostics-present",)
+
+
+def test_transport_classifier_ignores_aggregate_clusters_and_legacy_type() -> None:
+    record = {
+        "type": "wifiDevice",
+        "thread": {},
+        "serverClusters": [0x001D, 0x0036],
+        "endpoints": [
+            {"endpointId": 0, "serverClusters": [0x001D, 0x0033]},
+            {"endpointId": 1, "serverClusters": [0x001D, 0x0036]},
+        ],
+    }
+
+    result = classify_ha_transport(record)
+
+    assert result.classification == "unknown"
+    assert result.reason_codes == ("insufficient-transport-evidence",)
+
+
+def test_transport_classifier_uses_normalized_native_topology_and_border_router() -> None:
+    native_thread = {
+        "type": "nativeDevice",
+        "diagnosticsDetail": {
+            "nativeTopology": {
+                "node": {
+                    "id": "native-thread",
+                    "kind": "border_router",
+                    "network_type": "thread",
+                }
+            }
+        },
+    }
+    native_wifi = {
+        "diagnosticsDetail": {
+            "nativeTopology": {
+                "node": {
+                    "id": "native-wifi",
+                    "kind": "matter",
+                    "network_type": "wifi",
+                }
+            }
+        }
+    }
+    native_unknown = {
+        "diagnosticsDetail": {
+            "nativeTopology": {
+                "node": {
+                    "id": "native-unknown",
+                    "kind": "thread_unknown",
+                    "network_type": "unknown",
+                }
+            }
+        }
+    }
+    border_router_backhaul = {
+        "diagnosticsDetail": {
+            "nativeBorderRouter": {"extAddressHex": "0011223344556677"},
+            "nativeTopology": {
+                "node": {"network_type": "wifi", "kind": "matter"}
+            },
+        }
+    }
+
+    assert classify_ha_transport(native_thread).classification == "thread"
+    assert classify_ha_transport(native_wifi).classification == "non-thread"
+    assert classify_ha_transport(native_wifi).reason_codes == (
+        "native-non-thread-node",
+    )
+    assert classify_ha_transport(native_unknown).classification == "unknown"
+    assert classify_ha_transport(border_router_backhaul).classification == "thread"
+    assert classify_ha_transport(border_router_backhaul).reason_codes == (
+        "native-thread-node",
+    )
+
+
+def test_transport_classifier_conflict_and_identity_scoped_combination() -> None:
+    inconsistent = _transport_record(
+        interfaces=[{"interfaceType": "WiFi"}],
+        interface_state="populated",
+    )
+    inconsistent["generalDiagnostics"]["networkInterfaces"] = [
+        {"interfaceType": "Ethernet"}
+    ]
+    conflicting = classify_ha_transport(inconsistent)
+    thread = classify_ha_transport(
+        _transport_record(root_clusters=[0x001D, 0x0035])
+    )
+    non_thread = classify_ha_transport(
+        _transport_record(
+            interfaces=[{"interfaceType": "WiFi"}],
+            interface_state="populated",
+        )
+    )
+    unknown = classify_ha_transport(_transport_record())
+
+    assert conflicting.classification == "conflicting"
+    assert conflicting.reason_codes == ("transport-evidence-conflict",)
+    assert combine_ha_transport_evidence([thread, non_thread]).classification == "thread"
+    assert combine_ha_transport_evidence([non_thread, unknown]).classification == "unknown"
+    assert combine_ha_transport_evidence([]) == HaTransportClassification(
+        "unknown",
+        ("insufficient-transport-evidence",),
+        (),
+    )
+
+
+@pytest.mark.parametrize("interface_type", [True, False, "1"])
+def test_transport_classifier_does_not_exclude_boolean_or_string_interface_enums(interface_type):
+    from ha_matter_ws_extractor import extract_node_info
+    record = extract_node_info({"node_id": 2, "attributes": {
+        "0/51/0": [{"7": interface_type}],
+    }})
+    assert record["networkInterfaces"][0]["interfaceType"].startswith("Unknown")
+    assert classify_ha_transport(record).classification == "unknown"
 
 
 def test_phase1_fixture_parses_and_deduplicates_deterministically() -> None:
