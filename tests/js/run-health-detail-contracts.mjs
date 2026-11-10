@@ -230,13 +230,15 @@ assert.deepEqual(calls, [
   ["inspectRelatedDevice", "group", "related", "extaddr:0", "related-inspect:group:related:extaddr:0"],
 ]);
 
+const comparisonControls = new Element("section");
 for (const [state, expected, role] of [
   [{supportLoading: true}, "Loading comparison availability…", "status"],
   [{capabilityKnown: false}, "Comparison availability could not be determined.", "alert"],
   [{detailLoading: true}, "Loading comparison rows…", "status"],
   [{detailError: "failed"}, "Comparison rows could not be loaded: failed", "alert"],
 ]) {
-  renderHealthComparison(container, {total: 1, offset: 0, limit: 25, items: []}, null, state);
+  renderHealthComparison({controls: comparisonControls, results: container},
+    {total: 1, offset: 0, limit: 25, items: []}, null, state);
   const message = nodes(container).find((node) => node.textContent === expected);
   assert.ok(message, expected);
   assert.equal(message.attributes.role, role);
@@ -256,7 +258,8 @@ const fullValueComparison = {
     resetState: "known",
   }],
 };
-renderHealthComparison(container, {total: 1, offset: 0, limit: 25, items: []},
+renderHealthComparison({controls: comparisonControls, results: container},
+  {total: 1, offset: 0, limit: 25, items: []},
   fullValueComparison, {comparisonId: "pair", scope: "all", result: "all"});
 const disclosures = nodes(container).filter((node) => node.tagName === "details");
 assert.equal(disclosures.length, 3);
@@ -279,7 +282,7 @@ const incomparableComparison = {
 };
 const incomparableContainer = new Element("section");
 const resultActions = [];
-renderHealthComparison(incomparableContainer, {
+renderHealthComparison({controls: new Element("section"), results: incomparableContainer}, {
   total: 1, offset: 0, limit: 25, items: [{comparisonId: "pair"}],
 }, incomparableComparison, {
   comparisonId: "pair", result: "changed",

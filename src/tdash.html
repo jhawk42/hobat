@@ -48,6 +48,7 @@
       </div>
     </header>
 
+    <button id="health-functions-backdrop" type="button" aria-label="Close Insights controls" tabindex="-1" hidden></button>
     <aside id="panel-functions" class="layout-panel layout-panel-functions" aria-label="Dataset and filters">
 
     <!-- Fetch device status and network health bar -->
@@ -110,9 +111,10 @@
     <div id="panel-dataset" class="controls">
       <legend>
         <button class="legend-toggle-btn" id="btn-toggle-panel-dataset" aria-expanded="true">
-          <span class="legend-toggle-arrow">▶</span>Dataset
+          <span class="legend-toggle-arrow">▶</span><span id="panel-dataset-label">Dataset</span>
         </button>
       </legend>
+      <p id="health-functions-dataset-caption" hidden></p>
 
       <div id="fieldset-dataset">
         <div id="panel-dataset-inner">
@@ -256,6 +258,110 @@
       </div>
     </div>
 
+    <section id="health-functions-panel" hidden aria-labelledby="health-functions-heading">
+      <header id="health-functions-header">
+        <h2 id="health-functions-heading">Insights</h2>
+      </header>
+      <div id="health-insights-navigation" hidden>
+        <div id="health-insights-tabs" role="tablist" aria-label="Health insights">
+          <button id="health-tab-findings" type="button" role="tab" aria-controls="health-panel-findings" aria-selected="true" tabindex="0" title="Findings">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><path d="m3 6 2 2 3-4M11 6h10M3 13l2 2 3-4M11 13h10M3 20l2 2 3-4M11 20h10"/></svg>
+            <span>Findings <span id="health-findings-count" class="health-insights-count" aria-hidden="true"></span></span>
+          </button>
+          <button id="health-tab-comparison" type="button" role="tab" aria-controls="health-panel-comparison" aria-selected="false" tabindex="-1" title="Comparison" aria-label="Comparison">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><path d="M3 7h18l-5-5M21 17H3l5 5"/></svg>
+            <span>Comparison</span>
+          </button>
+          <button id="health-tab-roster" type="button" role="tab" aria-controls="health-panel-roster" aria-selected="false" tabindex="-1" title="Device Roster" aria-label="Device Roster">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><rect x="2" y="3" width="14" height="12" rx="2"/><rect x="15" y="9" width="7" height="13" rx="2"/><path d="M9 15v5M5 20h9"/></svg>
+            <span>Roster <span id="health-roster-count" class="health-insights-count" aria-hidden="true"></span></span>
+          </button>
+        </div>
+      </div>
+      <div id="health-functions-controls">
+        <section id="health-functions-assessment"><h3>Assessment</h3><div id="health-assessment-history"></div></section>
+        <section id="health-functions-findings">
+          <h3>Findings filters</h3>
+          <div id="health-insights-filters" class="health-insights-filters" hidden>
+            <label title="Choose actionable, healthy, or all finding groups.">View
+              <select id="health-view-filter" title="Choose which finding groups to show.">
+                <option value="all" selected>All</option>
+                <option value="actionable">Actionable</option>
+                <option value="going-well">Going Well</option>
+              </select>
+            </label>
+            <label title="Filter findings by their assessed health status.">Status
+              <select id="health-status-filter" title="Show only findings with the selected health status.">
+                <option value="all">All</option>
+                <option value="poor">Poor</option>
+                <option value="moderate">Moderate</option>
+                <option value="strong">Strong</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </label>
+            <label title="Filter findings by the network object they describe.">Scope
+              <select id="health-scope-filter" title="Show network-wide, device-specific, or relationship-specific findings.">
+                <option value="all">All</option>
+                <option value="network">Network</option>
+                <option value="device">Device</option>
+                <option value="relationship">Relationship</option>
+              </select>
+            </label>
+            <label title="Filter findings by the kind of evidence used.">Evidence
+              <select id="health-evidence-filter" title="Show findings backed by the selected evidence kind.">
+                <option value="all">All</option>
+                <option value="snapshot">Snapshot</option>
+                <option value="since-reset">Since reset</option>
+                <option value="historical">Historical</option>
+                <option value="expected-state">Expected state</option>
+                <option value="active-probe">Active probe</option>
+              </select>
+            </label>
+            <label title="Choose the order for finding groups. Column headings can also change the sort.">Sort by
+              <select id="health-findings-sort">
+                <option value="priority">Priority</option>
+                <option value="status">Status</option>
+                <option value="title">Finding</option>
+                <option value="affected">Affected</option>
+                <option value="scope">Scope</option>
+                <option value="confidence">Confidence</option>
+                <option value="evidence">Evidence</option>
+              </select>
+            </label>
+            <button id="btn-health-reset" type="button"
+              title="Reset Findings filters, sort, and selection only. Comparison and Roster are unchanged.">Reset Findings</button>
+            <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export assessment JSON</button>
+          </div>
+        </section>
+        <section id="health-functions-comparison" hidden>
+          <div id="health-comparison-controls"></div>
+          <button id="btn-health-comparison-reset" type="button"
+            title="Reset comparison selection, filters, and paging only. Findings and Roster are unchanged.">Reset comparison</button>
+        </section>
+        <section id="health-functions-roster" hidden>
+          <h3>Roster filters</h3>
+          <div class="health-roster-controls">
+            <label for="health-roster-search">Search name or canonical device ID
+              <input id="health-roster-search" type="search" maxlength="120" autocomplete="off">
+            </label>
+            <label>Presence <select id="health-roster-presence" title="Presence in the selected assessment, not network health">
+              <option value="observed">Observed</option><option value="missing">Missing</option>
+              <option value="offline">Offline</option><option value="not-assessed">Not assessed</option>
+              <option value="all">All</option>
+            </select></label>
+            <label>Roster designation <select id="health-roster-designation">
+              <option value="all">All</option><option value="expected">Expected</option>
+              <option value="intentionally-offline">Intentionally offline</option>
+              <option value="intermittent">Intermittent</option><option value="retired">Retired</option>
+              <option value="untracked">Untracked</option>
+            </select></label>
+            <button id="btn-health-roster-reset" type="button"
+              title="Reset Roster search, filters, sort, page, and selection only. Findings and Comparison are unchanged.">Reset Roster</button>
+          </div>
+        </section>
+        <div id="health-functions-dataset-dock"></div>
+      </div>
+    </section>
     </aside>
 
     <main id="panel-workspace" class="layout-panel layout-panel-workspace">
@@ -389,71 +495,20 @@
 
         <div id="view-insights" class="workspace-view workspace-placeholder" role="tabpanel"
           aria-labelledby="btn-insights" hidden>
-          <div class="health-insights-sticky">
-            <div id="health-insights-summary" hidden></div>
-            <div id="health-insights-navigation" hidden>
-              <div id="health-assessment-history"></div>
+          <div id="health-insights-results-header" hidden>
+            <h2 id="health-insights-title">Findings</h2>
+            <select id="health-insights-subview-select" aria-label="Health insights area" hidden>
+              <option value="findings">Findings</option>
+              <option value="comparison">Comparison</option>
+              <option value="roster">Device Roster</option>
+            </select>
+            <div id="health-insights-summary"></div>
+            <button id="btn-health-filters" type="button" aria-controls="panel-functions">Filters</button>
               <div id="health-roster-mutation-status" class="health-roster-mutation-status" hidden
                 role="status" aria-live="polite"></div>
-              <div id="health-insights-tabs" role="tablist" aria-label="Health insights">
-                <button id="health-tab-findings" type="button" role="tab" aria-controls="health-panel-findings" aria-selected="true" tabindex="0">Findings <span id="health-findings-count" class="health-insights-count" aria-hidden="true"></span></button>
-                <button id="health-tab-comparison" type="button" role="tab" aria-controls="health-panel-comparison" aria-selected="false" tabindex="-1">Comparison</button>
-                <button id="health-tab-roster" type="button" role="tab" aria-controls="health-panel-roster" aria-selected="false" tabindex="-1">Device Roster <span id="health-roster-count" class="health-insights-count" aria-hidden="true"></span></button>
-              </div>
-            </div>
           </div>
           <div id="health-insights-workspace" hidden>
             <section id="health-panel-findings" role="tabpanel" aria-labelledby="health-tab-findings">
-              <div id="health-insights-filters" class="health-insights-filters" hidden>
-                <label title="Choose actionable, healthy, or all finding groups.">View
-                  <select id="health-view-filter" title="Choose which finding groups to show.">
-                    <option value="all" selected>All</option>
-                    <option value="actionable">Actionable</option>
-                    <option value="going-well">Going Well</option>
-                  </select>
-                </label>
-                <label title="Filter findings by their assessed health status.">Status
-                  <select id="health-status-filter" title="Show only findings with the selected health status.">
-                    <option value="all">All</option>
-                    <option value="poor">Poor</option>
-                    <option value="moderate">Moderate</option>
-                    <option value="strong">Strong</option>
-                    <option value="unknown">Unknown</option>
-                  </select>
-                </label>
-                <label title="Filter findings by the network object they describe.">Scope
-                  <select id="health-scope-filter" title="Show network-wide, device-specific, or relationship-specific findings.">
-                    <option value="all">All</option>
-                    <option value="network">Network</option>
-                    <option value="device">Device</option>
-                    <option value="relationship">Relationship</option>
-                  </select>
-                </label>
-                <label title="Filter findings by the kind of evidence used.">Evidence
-                  <select id="health-evidence-filter" title="Show findings backed by the selected evidence kind.">
-                    <option value="all">All</option>
-                    <option value="snapshot">Snapshot</option>
-                    <option value="since-reset">Since reset</option>
-                    <option value="historical">Historical</option>
-                    <option value="expected-state">Expected state</option>
-                    <option value="active-probe">Active probe</option>
-                  </select>
-                </label>
-                <label title="Choose the order for finding groups. Column headings can also change the sort.">Sort by
-                  <select id="health-findings-sort">
-                    <option value="priority">Priority</option>
-                    <option value="status">Status</option>
-                    <option value="title">Finding</option>
-                    <option value="affected">Affected</option>
-                    <option value="scope">Scope</option>
-                    <option value="confidence">Confidence</option>
-                    <option value="evidence">Evidence</option>
-                  </select>
-                </label>
-                <button id="btn-health-reset" type="button"
-                  title="Reset Findings filters, sort, and selection only. Comparison and Roster are unchanged.">Reset Findings</button>
-                <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export JSON</button>
-              </div>
               <div id="health-insights-evidence"></div>
               <div id="health-finding-table-wrap" class="health-finding-table-wrap">
                 <table id="health-finding-table">
@@ -464,31 +519,9 @@
               <div id="health-insights-empty"></div>
             </section>
             <section id="health-panel-comparison" role="tabpanel" aria-labelledby="health-tab-comparison" hidden>
-              <div class="health-comparison-panel-actions">
-                <button id="btn-health-comparison-reset" type="button"
-                  title="Reset comparison selection, filters, and paging only. Findings and Roster are unchanged.">Reset comparison</button>
-              </div>
               <section id="health-comparison" aria-label="Stored comparison"></section>
             </section>
             <section id="health-panel-roster" role="tabpanel" aria-labelledby="health-tab-roster" hidden>
-              <div class="health-roster-controls">
-                <label for="health-roster-search">Search name or canonical device ID
-                  <input id="health-roster-search" type="search" maxlength="120" autocomplete="off">
-                </label>
-                <label>Presence <select id="health-roster-presence" title="Presence in the selected assessment, not network health">
-                  <option value="observed">Observed</option><option value="missing">Missing</option>
-                  <option value="offline">Offline</option><option value="not-assessed">Not assessed</option>
-                  <option value="all">All</option>
-                </select></label>
-                <label>Roster designation <select id="health-roster-designation">
-                  <option value="all">All</option><option value="expected">Expected</option>
-                  <option value="intentionally-offline">Intentionally offline</option>
-                  <option value="intermittent">Intermittent</option><option value="retired">Retired</option>
-                  <option value="untracked">Untracked</option>
-                </select></label>
-                <button id="btn-health-roster-reset" type="button"
-                  title="Reset Roster search, filters, sort, page, and selection only. Findings and Comparison are unchanged.">Reset Roster</button>
-              </div>
               <section id="health-roster" aria-label="Device roster"></section>
             </section>
             <p id="health-insights-announcement" class="visually-hidden" role="status" aria-live="polite"></p>

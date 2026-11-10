@@ -621,7 +621,10 @@ export function renderHealthAssessmentHistory(container, state, actions = {}) {
   const active = document.activeElement;
   const focusKey = container.contains(active)
     ? active?.dataset?.healthHistoryFocus
-    : container.dataset.healthHistoryPendingFocus;
+    : (!active || active === document.body ? container.dataset.healthHistoryPendingFocus : null);
+  if (active && active !== document.body && !container.contains(active)) {
+    delete container.dataset.healthHistoryPendingFocus;
+  }
   container.replaceChildren();
   const toolbar = appendText(container, "div", "", "health-assessment-toolbar");
   const toolbarLabel = appendText(toolbar, "strong", "Time", "health-assessment-label");
@@ -872,18 +875,12 @@ export function renderHealthAssessmentHistory(container, state, actions = {}) {
     appendText(container, "p", "Loading retained run list…", "health-assessment-history-note");
   }
   if (focusKey) {
-    const canFocus = (element) => {
-      if (!element || element.disabled) return false;
-      for (let parent = element; parent && parent !== container; parent = parent.parentNode) {
-        if (parent.hidden) return false;
-      }
-      return true;
-    };
+    const canFocus = isVisibleFocusTarget;
     const target = container.querySelector(`[data-health-history-focus="${focusKey}"]`);
     if (canFocus(target)) {
       delete container.dataset.healthHistoryPendingFocus;
       target.focus({ preventScroll: true });
-    } else if (state.loading || state.pageLoading) {
+    } else if ((state.loading || state.pageLoading) && isVisibleFocusTarget(container)) {
       container.dataset.healthHistoryPendingFocus = focusKey;
     } else {
       delete container.dataset.healthHistoryPendingFocus;
@@ -895,11 +892,32 @@ export function renderHealthAssessmentHistory(container, state, actions = {}) {
   }
 }
 
+export function healthActiveRestrictions(tab, findings, roster) {
+  const restrictions = tab === "findings"
+    ? [
+      ["#health-view-filter", findings.view !== "all"],
+      ["#health-status-filter", findings.filters.status !== "all"],
+      ["#health-scope-filter", findings.filters.scope !== "all"],
+      ["#health-evidence-filter", findings.filters.evidenceKind !== "all"],
+    ]
+    : tab === "comparison" ? [
+      ['[data-comparison-control="search"]', Boolean(findings.comparisonSearch.trim())],
+      ['[data-comparison-control="scope"]', findings.comparisonScope !== "all"],
+      ['[data-comparison-control="result"]', findings.comparisonResult !== "all"],
+    ] : [
+      ["#health-roster-search", Boolean(roster.search.trim())],
+      ["#health-roster-presence", roster.presence !== "all"],
+      ["#health-roster-designation", roster.rosterState !== "all"],
+    ];
+  return { first: restrictions[0][0], active: restrictions.filter(([, active]) => active).map(([selector]) => selector) };
+}
+
 function appendEndpointPicker(controls, side, page, selectedId, selected, loading, actions) {
   const label = appendText(controls, "label", side === "before" ? "Before" : "After",
     "health-comparison-endpoint-control");
   const picker = document.createElement("select");
   picker.setAttribute("aria-label", side === "before" ? "Before assessment" : "After assessment");
+  picker.setAttribute("data-comparison-control", `${side}-endpoint`);
   picker.disabled = loading || !page || !page.total;
   const now = Date.now();
   const appendOption = (endpoint, isSelected = false) => {
@@ -929,12 +947,14 @@ function appendEndpointHistoryNavigation(container, side, page, loading, actions
   const title = side === "before" ? "Before assessments" : "After assessments";
   const previous = appendText(navigation, "button", `Previous ${title}`);
   previous.type = "button";
+  previous.setAttribute("data-comparison-control", `${side}-previous`);
   previous.disabled = loading || !page || page.offset === 0;
   previous.addEventListener("click", () => actions.endpointPage?.(
     side, Math.max(0, page.offset - page.limit),
   ));
   const next = appendText(navigation, "button", `Next ${title}`);
   next.type = "button";
+  next.setAttribute("data-comparison-control", `${side}-next`);
   next.disabled = loading || !page || page.offset + page.items.length >= page.total;
   next.addEventListener("click", () => actions.endpointPage?.(
     side, page.offset + page.limit,
@@ -959,6 +979,7 @@ function appendComparisonPresets(controls, viewState, actions, liveStatus) {
     const unavailable = `Not enough history for ${label}: no retained baseline at least ${duration} before the latest assessment.`;
     const button = appendText(group, "button", label);
     button.type = "button";
+    button.setAttribute("data-comparison-control", `preset-${interval}`);
     button.disabled = Boolean(loading || !viewState.afterAssessmentId || !candidate);
     button.setAttribute("aria-pressed", String(viewState.intent === interval));
     button.title = loading
@@ -980,8 +1001,8 @@ function appendComparisonPresets(controls, viewState, actions, liveStatus) {
   custom.setAttribute("aria-controls", "health-comparison-custom-controls");
   custom.addEventListener("click", () => actions.customOpen?.(viewState.customOpen !== true));
   if (loading) statusMessages.push("Resolving the selected interval against the latest assessment.");
-  if (viewState.presetError) statusMessages.push(viewState.presetError);
-  liveStatus.textContent = statusMessages.join(" ");
+  const message = statusMessages.join(" ");
+  if (liveStatus.textContent !== message) liveStatus.textContent = message;
 }
 
 function formatElapsedInterval(seconds) {
@@ -1118,30 +1139,69 @@ function appendComparisonRowPagination(container, comparison, loading, actions) 
   navigation.appendChild(sizeSelect);
 }
 
-export function renderHealthComparison(container, page, comparison, viewState = {}, actions = {}) {
-  if (!container) return;
-  const focusedDisclosureId = document.activeElement?.getAttribute?.("aria-controls");
-  const focusedPageAction = document.activeElement?.getAttribute?.("data-comparison-page-action");
-  const focusedControl = document.activeElement?.getAttribute?.("data-comparison-control");
-  const appendError = (message) => {
-    const error = appendText(container, "p", message, "error");
+function isVisibleFocusTarget(element) {
+  if (!element || element.disabled) return false;
+  for (let parent = element; parent; parent = parent.parentNode) {
+    if (parent.hidden) return false;
+  }
+  return typeof element.getClientRects !== "function" || element.getClientRects().length > 0;
+}
+
+export function renderHealthComparison(destinations, page, comparison, viewState = {}, actions = {}) {
+  const { controls, results } = destinations || {};
+  if (!controls || !results) return;
+  const active = document.activeElement;
+  const owns = (host, element) => {
+    if (typeof host.contains === "function") return host.contains(element);
+    for (let node = element; node; node = node.parentNode) {
+      if (node === host) return true;
+    }
+    return false;
+  };
+  let owner = owns(controls, active) ? controls : owns(results, active) ? results : null;
+  if (active && active !== document.body && !owner) {
+    controls.comparisonPendingFocus = null;
+    results.comparisonPendingFocus = null;
+  }
+  if (!owner && (!active || active === document.body)) {
+    owner = controls.comparisonPendingFocus ? controls : results.comparisonPendingFocus ? results : null;
+  }
+  const pending = owner?.comparisonPendingFocus;
+  const focusedDisclosureId = active?.getAttribute?.("aria-controls") || pending?.disclosure;
+  const focusedPageAction = active?.getAttribute?.("data-comparison-page-action") || pending?.page;
+  const focusedControl = active?.getAttribute?.("data-comparison-control") || pending?.control;
+  const selection = focusedControl === "search" && typeof active.selectionStart === "number"
+    ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
+  const appendError = (host, message) => {
+    const error = appendText(host, "p", message, "error");
     error.setAttribute("role", "alert");
     return error;
   };
-  const appendRetry = (retryAction = actions.retry) => {
-    const retry = appendText(container, "button", "Retry comparison read");
+  const appendRetry = (host, retryAction = actions.retry) => {
+    const retry = appendText(host, "button", "Retry comparison read");
     retry.type = "button";
     retry.addEventListener("click", () => retryAction?.());
   };
   const restoreDisclosureFocus = () => {
-    if (!container.querySelectorAll) return;
-    if (focusedDisclosureId) {
-      const replacement = Array.from(container.querySelectorAll("button[aria-controls]"))
-        .find((button) => button.getAttribute("aria-controls") === focusedDisclosureId);
-      replacement?.focus?.({ preventScroll: true });
+    if (!owner || !owner.querySelectorAll) return;
+    if (!isVisibleFocusTarget(owner)) {
+      owner.comparisonPendingFocus = null;
+      return;
     }
-    if (viewState.focusTarget) {
-      const pageControls = Array.from(container.querySelectorAll("[data-comparison-page-action]"));
+    let restored = false;
+    const focus = (target) => {
+      if (!isVisibleFocusTarget(target)) return false;
+      target.focus?.({ preventScroll: true });
+      restored = true;
+      return true;
+    };
+    if (focusedDisclosureId) {
+      const replacement = Array.from(owner.querySelectorAll("button[aria-controls]"))
+        .find((button) => button.getAttribute("aria-controls") === focusedDisclosureId);
+      focus(replacement);
+    }
+    if (owner === results && focusedPageAction && viewState.focusTarget) {
+      const pageControls = Array.from(results.querySelectorAll("[data-comparison-page-action]"));
       const replacement = pageControls.find(
         (control) => control.getAttribute("data-comparison-page-action") === viewState.focusTarget,
       );
@@ -1149,53 +1209,79 @@ export function renderHealthComparison(container, page, comparison, viewState = 
         ? replacement
         : pageControls.find((control) => control.getAttribute("data-comparison-page-action") === "page"
           && !control.disabled);
-      focusTarget?.focus?.({ preventScroll: true });
-      if (focusTarget) actions.focusRestored?.();
+      if (focus(focusTarget)) actions.focusRestored?.();
     } else if (focusedPageAction) {
-      const pageControls = Array.from(container.querySelectorAll("[data-comparison-page-action]"));
+      const pageControls = Array.from(owner.querySelectorAll("[data-comparison-page-action]"));
       const replacement = pageControls.find(
         (control) => control.getAttribute("data-comparison-page-action") === focusedPageAction,
       );
-      replacement?.focus?.({ preventScroll: true });
+      focus(replacement);
     }
-    const controlTarget = viewState.controlFocusTarget || focusedControl;
+    const controlTarget = owner === controls ? focusedControl : null;
     if (controlTarget) {
-      const controls = Array.from(container.querySelectorAll("[data-comparison-control]"));
-      const replacement = controls.find(
+      const controlElements = Array.from(controls.querySelectorAll("[data-comparison-control]"));
+      const replacement = controlElements.find(
         (control) => control.getAttribute("data-comparison-control") === controlTarget,
       );
-      replacement?.focus?.({ preventScroll: true });
-      if (replacement && viewState.controlFocusTarget) actions.controlFocusRestored?.();
+      if (focus(replacement)) {
+        if (selection && typeof replacement.setSelectionRange === "function") {
+          replacement.setSelectionRange(...selection);
+        }
+        if (viewState.controlFocusTarget === controlTarget) actions.controlFocusRestored?.();
+      }
     }
+    owner.comparisonPendingFocus = !restored && (focusedDisclosureId || focusedPageAction || focusedControl)
+      && (viewState.listLoading || viewState.endpointPairLoading || viewState.detailLoading
+        || viewState.presetLoading || viewState.endpointLoading?.before || viewState.endpointLoading?.after)
+      ? { disclosure: focusedDisclosureId, page: focusedPageAction, control: focusedControl }
+      : null;
   };
   const endpointSelection = viewState.endpointSelection === true;
+  const liveStatusClass = "visually-hidden health-comparison-shortcut-status";
+  let liveStatus = Array.from(controls.children).find((child) => child.className === liveStatusClass);
+  if (!liveStatus) {
+    liveStatus = document.createElement("span");
+    liveStatus.className = liveStatusClass;
+    liveStatus.setAttribute("role", "status");
+    liveStatus.setAttribute("aria-live", "polite");
+    liveStatus.setAttribute("aria-atomic", "true");
+  }
+  if (liveStatus.parentNode === controls && typeof liveStatus.remove === "function") {
+    Array.from(controls.children).forEach((child) => {
+      if (child !== liveStatus) child.remove();
+    });
+  } else {
+    controls.replaceChildren();
+    controls.appendChild(liveStatus);
+  }
+  results.replaceChildren();
   if (viewState.supportLoading) {
-    container.replaceChildren();
-    const status = appendText(container, "p", "Loading comparison availability…");
+    liveStatus.textContent = "";
+    const status = appendText(results, "p", "Loading comparison availability…");
     status.setAttribute("role", "status");
     restoreDisclosureFocus();
     return;
   }
   if (viewState.assessmentError && !viewState.assessmentAvailable) {
-    container.replaceChildren();
-    appendError(`The selected assessment is unavailable: ${viewState.assessmentError}`);
-    appendRetry();
+    liveStatus.textContent = "";
+    appendError(results, `The selected assessment is unavailable: ${viewState.assessmentError}`);
+    appendRetry(results);
     restoreDisclosureFocus();
     return;
   }
   if (viewState.supportError || viewState.capabilityKnown === false) {
-    container.replaceChildren();
-    appendError(viewState.supportError
+    liveStatus.textContent = "";
+    appendError(results, viewState.supportError
       ? `Comparison availability could not be loaded: ${viewState.supportError}`
       : "Comparison availability could not be determined.");
-    appendRetry();
+    appendRetry(results);
     restoreDisclosureFocus();
     return;
   }
   if (viewState.capabilityKnown === true && !viewState.comparisonReadModel) {
-    container.replaceChildren();
+    liveStatus.textContent = "";
     const status = appendText(
-      container,
+      results,
       "p",
       "Comparison is unavailable because this health service does not support comparison reads.",
     );
@@ -1203,56 +1289,44 @@ export function renderHealthComparison(container, page, comparison, viewState = 
     restoreDisclosureFocus();
     return;
   }
-  const liveStatusClass = "visually-hidden health-comparison-shortcut-status";
-  let liveStatus = endpointSelection
-    ? Array.from(container.children).find((child) => child.className === liveStatusClass)
-    : null;
-  if (liveStatus) {
-    Array.from(container.children).forEach((child) => {
-      if (child !== liveStatus) child.remove();
-    });
-  } else if (endpointSelection) {
-    container.replaceChildren();
-    liveStatus = document.createElement("span");
-    liveStatus.className = liveStatusClass;
-    liveStatus.setAttribute("role", "status");
-    liveStatus.setAttribute("aria-live", "polite");
-    liveStatus.setAttribute("aria-atomic", "true");
-    container.appendChild(liveStatus);
-  } else {
-    container.replaceChildren();
-  }
-  if (liveStatus) liveStatus.textContent = "";
   if (endpointSelection && viewState.listLoading
       && !viewState.endpointPages?.after && !viewState.endpointPages?.before) {
-    liveStatus.textContent = "Loading retained assessments.";
-    appendText(container, "p", "Loading retained assessments…").setAttribute("role", "status");
+    liveStatus.textContent = "";
+    appendText(results, "p", "Loading retained assessments…").setAttribute("role", "status");
     restoreDisclosureFocus();
     return;
   }
   if (!endpointSelection && viewState.listLoading && !page) {
-    appendText(container, "p", "Loading stored comparisons…").setAttribute("role", "status");
+    liveStatus.textContent = "";
+    appendText(results, "p", "Loading stored comparisons…").setAttribute("role", "status");
     restoreDisclosureFocus();
     return;
   }
   if (!endpointSelection && viewState.listError && !page) {
-    appendError(`Comparison read failed: ${viewState.listError}`);
-    appendRetry();
+    liveStatus.textContent = "";
+    appendError(controls, `Comparison read failed: ${viewState.listError}`);
+    appendRetry(controls);
+    appendText(results, "p", "Stored comparison history could not be loaded.");
     restoreDisclosureFocus();
     return;
   }
   if (!endpointSelection && (!page || !Array.isArray(page.items))) {
-    appendError("Stored comparison history is unavailable.");
-    appendRetry();
+    liveStatus.textContent = "";
+    appendError(controls, "Stored comparison history is unavailable.");
+    appendRetry(controls);
+    appendText(results, "p", "Stored comparison history is unavailable.");
     restoreDisclosureFocus();
     return;
   }
   if (!endpointSelection && viewState.listError) {
-    appendError(`Comparison read failed: ${viewState.listError}`);
-    appendRetry();
+    liveStatus.textContent = "";
+    appendError(controls, `Comparison read failed: ${viewState.listError}`);
+    appendRetry(controls);
+    appendText(results, "p", "Stored comparison history could not be refreshed.");
   }
   if (!endpointSelection && !page.total) {
-    const status = appendText(container, "p", "Not enough retained history for a comparison yet.");
+    liveStatus.textContent = "";
+    const status = appendText(results, "p", "Not enough retained history for a comparison yet.");
     status.setAttribute("role", "status");
     restoreDisclosureFocus();
     return;
@@ -1260,23 +1334,28 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   const selectedComparisonId = endpointSelection
     ? comparison?.comparisonId || ""
     : viewState.comparisonId || comparison?.comparisonId || "";
+  if (!endpointSelection) liveStatus.textContent = "";
   renderHealthComparisonControls(
-    container, page, comparison, viewState, actions, liveStatus, selectedComparisonId,
-    appendError, appendRetry,
+    controls, results, page, comparison, viewState, actions, liveStatus, selectedComparisonId,
+    (message) => appendError(controls, message), () => appendRetry(controls),
   );
   renderSelectedHealthComparison(
-    container, comparison, viewState, actions, selectedComparisonId, appendError, appendRetry,
+    controls, results, comparison, viewState, actions, selectedComparisonId,
+    (message) => appendError(results, message), (action) => appendRetry(results, action),
   );
   restoreDisclosureFocus();
 }
 
 function renderHealthComparisonControls(
-  container, page, comparison, viewState, actions, liveStatus, selectedComparisonId,
+  container, results, page, comparison, viewState, actions, liveStatus, selectedComparisonId,
   appendError, appendRetry,
 ) {
   const endpointSelection = viewState.endpointSelection === true;
   const controls = appendText(container, "div", "", "health-comparison-controls");
   if (endpointSelection) {
+    if (viewState.endpointErrors?.before || viewState.endpointErrors?.after || viewState.presetError) {
+      appendText(results, "p", "Comparison endpoint selection could not be fully loaded.");
+    }
     renderHealthComparisonEndpointControls(container, controls, viewState, actions, liveStatus);
   } else {
     renderHealthComparisonStoredControls(controls, page, comparison, selectedComparisonId, actions);
@@ -1302,19 +1381,21 @@ function renderHealthComparisonControls(
         "health-comparison-endpoint-unavailable",
       );
       status.setAttribute("role", "status");
+      appendText(results, "p", status.textContent);
     } else if (viewState.endpointPages?.after?.total === 0) {
       const status = appendText(
         container, "p",
         "Not enough history: no retained assessments are available for this network and dataset.",
       );
       status.setAttribute("role", "status");
+      appendText(results, "p", status.textContent);
     } else if (viewState.presetLoading) {
-      appendText(container, "p", "Resolving the latest retained After assessment…")
-        .setAttribute("role", "status");
+      appendText(results, "p", "Resolving the latest retained After assessment…");
     } else if (!viewState.afterAssessmentId) {
       if (!viewState.presetError && !viewState.listLoading) {
         const status = appendText(container, "p", "Not enough history: no retained After assessment is available.");
         status.setAttribute("role", "status");
+        appendText(results, "p", status.textContent);
       }
     } else if (!viewState.beforeAssessmentId) {
       const status = appendText(
@@ -1322,15 +1403,18 @@ function renderHealthComparisonControls(
         "Not enough history for the selected interval. Open Custom to choose retained endpoints.",
       );
       status.setAttribute("role", "status");
+      appendText(results, "p", status.textContent);
     }
   } else {
     const nav = appendText(container, "div", "", "health-comparison-navigation");
     const previous = appendText(nav, "button", "Previous pairs");
     previous.type = "button";
+    previous.setAttribute("data-comparison-control", "stored-previous");
     previous.disabled = page.offset === 0;
     previous.addEventListener("click", () => actions.page?.(Math.max(0, page.offset - page.limit)));
     const next = appendText(nav, "button", "Next pairs");
     next.type = "button";
+    next.setAttribute("data-comparison-control", "stored-next");
     next.disabled = page.offset + page.items.length >= page.total;
     next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
   }
@@ -1356,6 +1440,7 @@ function renderHealthComparisonEndpointControls(container, controls, viewState, 
 function renderHealthComparisonStoredControls(controls, page, comparison, selectedComparisonId, actions) {
   const picker = document.createElement("select");
   picker.setAttribute("aria-label", "Stored comparison");
+  picker.setAttribute("data-comparison-control", "stored-pair");
   const now = Date.now();
   const comparisonLabel = (item) => `Before: ${formatComparisonTime(item.beforeObservedAt, now)} · After: ${formatComparisonTime(item.afterObservedAt, now)}`;
   const prompt = document.createElement("option");
@@ -1382,10 +1467,85 @@ function renderHealthComparisonStoredControls(controls, page, comparison, select
   controls.appendChild(picker);
 }
 
+function renderHealthComparisonFilters(controls, viewState, actions, selectedComparisonId) {
+  const endpointSelection = viewState.endpointSelection === true;
+  const filterRow = appendText(controls, "div", "", "health-comparison-filter-row");
+  const searchLabel = appendText(filterRow, "label", "Subject");
+  const search = document.createElement("input");
+  search.type = "search";
+  search.maxLength = 120;
+  search.autocomplete = "off";
+  search.placeholder = "Name or canonical ID";
+  search.setAttribute("aria-label", "Search comparison subjects");
+  search.setAttribute("data-comparison-control", "search");
+  search.value = viewState.q ?? viewState.search ?? "";
+  search.addEventListener("input", () => actions.search?.(search.value));
+  searchLabel.appendChild(search);
+  const filter = document.createElement("select");
+  filter.setAttribute("aria-label", "Comparison scope");
+  filter.setAttribute("data-comparison-control", "scope");
+  ["all", "network", "device", "relationship"].forEach((scope) => {
+    const option = document.createElement("option");
+    option.value = scope;
+    option.textContent = scope === "all" ? "All scopes" : scope;
+    filter.appendChild(option);
+  });
+  filter.value = viewState.scope || "all";
+  filter.addEventListener("change", () => actions.scope?.(filter.value));
+  filterRow.appendChild(filter);
+  const resultFilter = document.createElement("select");
+  resultFilter.setAttribute("aria-label", "Result");
+  resultFilter.setAttribute("data-comparison-control", "result");
+  [
+    ["changed", "Changed"],
+    ["unchanged", "Unchanged"],
+    ["unknown", "Unknown"],
+    ["all", "All results"],
+  ].forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    resultFilter.appendChild(option);
+  });
+  resultFilter.value = viewState.result || "changed";
+  resultFilter.disabled = endpointSelection
+    ? !viewState.beforeAssessmentId || !viewState.afterAssessmentId
+    : !selectedComparisonId;
+  resultFilter.addEventListener("change", () => actions.result?.(resultFilter.value));
+  filterRow.appendChild(resultFilter);
+  const orderLabel = appendText(filterRow, "label", "Order");
+  const order = document.createElement("select");
+  order.setAttribute("aria-label", "Comparison order");
+  order.setAttribute("data-comparison-control", "order");
+  [
+    ["subject:ascending", "Subject ID (A to Z)"],
+    ["subject:descending", "Subject ID (Z to A)"],
+    ["evidence:ascending", "Evidence (A to Z)"],
+    ["evidence:descending", "Evidence (Z to A)"],
+    ["result:ascending", "Result (Changed first)"],
+    ["result:descending", "Result (Unknown first)"],
+  ].forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    order.appendChild(option);
+  });
+  order.value = `${viewState.sort || "subject"}:${viewState.direction || "ascending"}`;
+  order.addEventListener("change", () => {
+    const [sort, direction] = order.value.split(":");
+    actions.order?.(sort, direction);
+  });
+  orderLabel.appendChild(order);
+}
+
 function renderSelectedHealthComparison(
-  container, comparison, viewState, actions, selectedComparisonId, appendError, appendRetry,
+  controls, container, comparison, viewState, actions, selectedComparisonId, appendError, appendRetry,
 ) {
   const endpointSelection = viewState.endpointSelection === true;
+  const pairSelected = endpointSelection
+    ? viewState.beforeAssessmentId && viewState.afterAssessmentId && !viewState.endpointUnavailable
+    : selectedComparisonId;
+  if (pairSelected) renderHealthComparisonFilters(controls, viewState, actions, selectedComparisonId);
   if (viewState.endpointPairLoading || viewState.detailLoading) {
     appendText(container, "p", "Loading comparison rows…").setAttribute("role", "status");
     return;
@@ -1395,13 +1555,16 @@ function renderSelectedHealthComparison(
     appendRetry(endpointSelection ? actions.retry : actions.retryDetail);
     return;
   }
+  if (endpointSelection && viewState.endpointUnavailable) return;
   if (!comparison || (!endpointSelection && comparison.comparisonId !== selectedComparisonId)) {
+    if (pairSelected) appendText(container, "p", "Comparison results are unavailable for the selected pair.");
     return;
   }
   if (endpointSelection && (
     comparison.beforeAssessmentId !== viewState.beforeAssessmentId
     || comparison.afterAssessmentId !== viewState.afterAssessmentId
   )) {
+    if (pairSelected) appendText(container, "p", "Comparison results are unavailable for the selected pair.");
     return;
   }
   const heading = appendText(container, "p",
@@ -1460,75 +1623,8 @@ function renderSelectedHealthComparison(
         "health-comparison-origin");
     }
   }
-  const filterRow = appendText(container, "div", "", "health-comparison-filter-row");
-  const searchLabel = appendText(filterRow, "label", "Subject");
-  const search = document.createElement("input");
-  search.type = "search";
-  search.maxLength = 120;
-  search.autocomplete = "off";
-  search.placeholder = "Name or canonical ID";
-  search.setAttribute("aria-label", "Search comparison subjects");
-  search.setAttribute("data-comparison-control", "search");
-  search.value = viewState.search || "";
-  search.addEventListener("input", () => actions.search?.(search.value));
-  searchLabel.appendChild(search);
-  const filter = document.createElement("select");
-  filter.setAttribute("aria-label", "Comparison scope");
-  filter.setAttribute("data-comparison-control", "scope");
-  ["all", "network", "device", "relationship"].forEach((scope) => {
-    const option = document.createElement("option");
-    option.value = scope;
-    option.textContent = scope === "all" ? "All scopes" : scope;
-    filter.appendChild(option);
-  });
-  filter.value = viewState.scope || "all";
-  filter.addEventListener("change", () => actions.scope?.(filter.value));
-  filterRow.appendChild(filter);
-  const resultFilter = document.createElement("select");
-  resultFilter.setAttribute("aria-label", "Result");
-  resultFilter.setAttribute("data-comparison-control", "result");
-  [
-    ["changed", "Changed"],
-    ["unchanged", "Unchanged"],
-    ["unknown", "Unknown"],
-    ["all", "All results"],
-  ].forEach(([value, label]) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    resultFilter.appendChild(option);
-  });
-  resultFilter.value = viewState.result || "changed";
-  resultFilter.disabled = endpointSelection
-    ? !viewState.beforeAssessmentId || !viewState.afterAssessmentId
-    : !selectedComparisonId;
-  resultFilter.addEventListener("change", () => actions.result?.(resultFilter.value));
-  filterRow.appendChild(resultFilter);
-  const orderLabel = appendText(filterRow, "label", "Order");
-  const order = document.createElement("select");
-  order.setAttribute("aria-label", "Comparison order");
-  order.setAttribute("data-comparison-control", "order");
-  [
-    ["subject:ascending", "Subject ID (A to Z)"],
-    ["subject:descending", "Subject ID (Z to A)"],
-    ["evidence:ascending", "Evidence (A to Z)"],
-    ["evidence:descending", "Evidence (Z to A)"],
-    ["result:ascending", "Result (Changed first)"],
-    ["result:descending", "Result (Unknown first)"],
-  ].forEach(([value, label]) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    order.appendChild(option);
-  });
-  order.value = `${viewState.sort || "subject"}:${viewState.direction || "ascending"}`;
-  order.addEventListener("change", () => {
-    const [sort, direction] = order.value.split(":");
-    actions.order?.(sort, direction);
-  });
-  orderLabel.appendChild(order);
   const count = appendText(
-    filterRow, "span",
+    container, "span",
     comparison.filteredItemCount === 0
       ? "0 matching rows"
       : comparison.items.length
@@ -1539,7 +1635,7 @@ function renderSelectedHealthComparison(
   count.setAttribute("role", "status");
   count.setAttribute("aria-live", "polite");
   appendText(
-    filterRow, "span",
+    container, "span",
     `${formatComparisonCount(comparison.itemCount)} total rows`,
     "health-comparison-total-count",
   );

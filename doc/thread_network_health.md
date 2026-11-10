@@ -1152,8 +1152,30 @@ describes the assessment pinned to Findings and Device Roster. It must not be
 read as the health of an arbitrary comparison pair or necessarily its After
 endpoint.
 
-The Insights heading, selected-assessment summary, and peer tabs share one
-compact sticky header. Findings' numeric badge is the current filtered matching
+In Insights, the Functions panel contains symbol tabs for **Findings**,
+**Comparison**, and **Roster**, followed by only the active area's controls.
+Findings and Roster share the **Assessment** history controls; Comparison has
+independent endpoint controls. **Source and dataset** starts closed in Insights,
+shows the selected source/dataset and pending/error status, and retains Sync
+and cancellation inside the disclosure. Returning to Topology/Table restores
+their original Devices, Dataset and Filters controls and disclosure state.
+
+The compact results heading retains the accepted assessment's observation time
+and Latest/Pinned context for Findings and Roster. With Functions collapsed, its
+area selector still switches subviews without reopening the panel. **Filters**
+(or **1 filter** / **N filters**) opens controls and focuses the first active
+restriction. Counts include non-All filters and nonempty search, not sorting,
+paging, assessment pinning or Comparison endpoints; default Observed roster
+presence and Changed comparison results each count as one restriction.
+At 720px and below, controls open in a modal drawer, initially closed; close it
+with its close button, Escape or backdrop. Desktop collapse preference is
+independent. Tabs and close remain reachable while the controls body scrolls.
+
+**Export assessment JSON** exports the selected assessment, even with active
+Findings filters; it is not an export of just the visible rows. Each area's
+Reset affects only that area's filters, sorting, paging and selection.
+
+Findings' numeric badge is the current filtered matching
 group count; Device Roster's badge is the current filtered matching-device
 count. These are not population totals. Zero remains visible, but an unavailable
 roster count is blank and its accessible tab name has no count. Comparison has
@@ -1161,7 +1183,7 @@ no tab badge; its result count remains local to its panel. Badge text is hidden
 from assistive technology because each counted tab exposes the full count and
 unit in its accessible name.
 
-One **Time** toolbar is shared by Findings, Device Roster, and health
+One **Time** toolbar in the Assessment section is shared by Findings, Device Roster, and health
 coloring. Its label and date-button tooltips explain that the time is the
 observation time (UTC), not when the health assessment was processed; the date
 button also exposes this explanation to assistive technology.

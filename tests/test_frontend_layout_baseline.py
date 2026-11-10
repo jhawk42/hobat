@@ -575,11 +575,11 @@ def test_health_insights_toolbar_icon_preserves_panel_ownership() -> None:
     parser.feed(html)
 
     for element_id, parent_id in (
-        ("health-insights-summary", "view-insights"),
-        ("health-insights-navigation", "view-insights"),
+        ("health-insights-summary", "health-insights-results-header"),
+        ("health-insights-navigation", "health-functions-panel"),
         ("health-insights-tabs", "health-insights-navigation"),
     ):
-        assert parser.inside_health_insights_sticky_by_id[element_id]
+        assert not parser.inside_health_insights_sticky_by_id[element_id]
         assert not parser.inside_health_insights_workspace_by_id[element_id]
         assert parser.parent_by_id[element_id] == parent_id
     assert parser.inside_health_insights_workspace_by_id["health-panel-findings"]
@@ -607,6 +607,47 @@ def test_health_insights_toolbar_icon_preserves_panel_ownership() -> None:
     assert "#view-status-health-icon[hidden] { display: none; }" in css
     assert 'toggleAttribute("hidden", currentView !== "insights")' in _read_text(UI_JS)
     assert "min-height: 44px;" in css[css.index("#health-insights-tabs button {"):]
+
+def test_health_contextual_control_and_result_hosts_are_separate() -> None:
+    parser = _IdParentParser()
+    parser.feed(_read_text(HTML))
+    for element, parent in (
+        ("health-functions-panel", "panel-functions"),
+        ("health-assessment-history", "health-functions-assessment"),
+        ("health-insights-filters", "health-functions-findings"),
+        ("health-comparison-controls", "health-functions-comparison"),
+        ("health-roster-search", "health-functions-roster"),
+        ("health-functions-dataset-dock", "health-functions-controls"),
+        ("health-insights-subview-select", "health-insights-results-header"),
+    ):
+        assert parser.parent_by_id[element] == parent
+        assert not parser.inside_health_insights_workspace_by_id[element]
+    for element in ("health-insights-evidence", "health-finding-table", "health-roster", "health-comparison"):
+        assert parser.inside_health_insights_workspace_by_id[element]
+    assert parser.attributes_by_id["health-insights-subview-select"]["aria-label"] == "Health insights area"
+    assert 'Export assessment JSON' in _read_text(HTML)
+
+def test_insights_drawer_is_context_scoped_and_transient() -> None:
+    css = _read_text(CSS)
+    ui = _read_text(UI_JS)
+    parser = _IdParentParser()
+    parser.feed(_read_text(HTML))
+    assert parser.parent_by_id["health-functions-backdrop"] is None
+    assert "hidden" in parser.attributes_by_id["health-functions-backdrop"]
+    assert '.dashboard-shell.insights-context.health-functions-drawer-open #panel-functions' in css
+    assert 'height: calc(100dvh - env(safe-area-inset-top' in css
+    assert 'const healthFunctionsNarrow = window.matchMedia("(max-width: 720px)")' in ui
+    assert 'panel.setAttribute("role", "dialog")' in ui
+    assert 'panel.setAttribute("aria-modal", "true")' in ui
+    assert 'panel.removeAttribute("aria-modal")' in ui
+    assert 'healthFunctionsLayout.inertRegions.forEach((child) => { child.inert = false; })' in ui
+    assert 'document.body.style.overflow = healthFunctionsLayout.bodyOverflow' in ui
+    assert 'if (event.key === "Escape")' in ui
+    assert 'else if (event.key === "Tab")' in ui
+    assert 'activateHealthTab(event.target.value, "selector")' in ui
+    modal_start = ui.index('if (drawer !== healthFunctionsLayout.modal)')
+    assert 'statusDisclosure.close();' in ui[modal_start:modal_start + 200]
+    assert 'healthFunctionsLayout.scrollPending === controlsKey && isVisibleHealthControl(controls)' in ui
 
 
 def test_topology_controls_use_container_layout_and_native_legend_disclosure() -> None:
@@ -947,7 +988,11 @@ def test_device_status_close_button_toggles_functions_panel() -> None:
     header = re.search(r"#device-status > legend\s*\{([^}]+)\}", css)
     assert header is not None
     assert "padding: 10px;" in header[1]
-    assert re.search(r"\.device-status-close\s*\{", css) is None
+    assert re.search(r"(?m)^\.device-status-close\s*\{", css) is None
+    assert '#health-functions-header .device-status-close' in css
+    assert 'document.getElementById("health-functions-header").appendChild(close)' in ui_text
+    assert 'document.querySelector("#device-status legend").appendChild(close)' in ui_text
+    assert 'document.getElementById("device-status").after(dataset)' in ui_text
     assert (
         'document.getElementById("btn-functions-panel-toggle")?.addEventListener("click", toggleFunctionsPanel);'
         in ui_text

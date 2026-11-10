@@ -9,6 +9,79 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def test_contextual_restrictions_count_only_active_filters() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import {healthActiveRestrictions} from "./src/js/tdash-health.js";
+      const findings = {view: "all", filters: {status: "all", scope: "all", evidenceKind: "all"},
+        comparisonSearch: "", comparisonScope: "all", comparisonResult: "changed",
+        sort: {column: "title"}, beforeAssessmentId: "pinned"};
+      const roster = {search: "", presence: "observed", rosterState: "all", offset: 100};
+      assert.equal(healthActiveRestrictions("findings", findings, roster).active.length, 0);
+      assert.equal(healthActiveRestrictions("comparison", findings, roster).active.length, 1);
+      assert.equal(healthActiveRestrictions("roster", findings, roster).active.length, 1);
+      findings.view = "actionable";
+      findings.filters.evidenceKind = "historical";
+      assert.deepEqual(healthActiveRestrictions("findings", findings, roster).active,
+        ["#health-view-filter", "#health-evidence-filter"]);
+      findings.comparisonSearch = "   ";
+      findings.comparisonResult = "all";
+      assert.equal(healthActiveRestrictions("comparison", findings, roster).active.length, 0);
+      roster.search = "lamp"; roster.rosterState = "expected";
+      assert.equal(healthActiveRestrictions("roster", findings, roster).active.length, 3);
+    """
+    result = subprocess.run(
+        ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+def test_collapsed_area_selector_uses_shared_activation_without_hidden_focus() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import vm from "node:vm";
+      const source = fs.readFileSync("src/js/tdash-ui.js", "utf8");
+      const start = source.indexOf("function activateHealthTab(");
+      const end = source.indexOf('\ndocument.getElementById("health-insights-subview-select")', start);
+      const focus = [];
+      const element = (id, visible = true) => ({id, visible, scrollTop: 70, scrollLeft: 15,
+        classList: {add() {}, remove() {}}, focus() {focus.push(id);}});
+      const nodes = Object.fromEntries(["device-details", "health-finding-table-wrap",
+        "health-insights-subview-select", "health-tab-findings", "health-tab-comparison",
+        "health-tab-roster"].map(id => [id, element(id, !id.startsWith("health-tab-"))]));
+      let comparisons = 0, renders = 0;
+      const state = {detailsOpen: false, selectedGroupId: null};
+      const context = {
+        HEALTH_INSIGHTS_TABS: ["findings", "comparison", "roster"].map(id => ({id})),
+        healthInsightsTab: "findings", rosterNavigationGeneration: 0,
+        healthInsightsViewState: state, healthRosterViewState: {},
+        healthInsightsState: {roster: {}, rosterDetail: null},
+        document: {getElementById: id => nodes[id], querySelector: () => null},
+        isVisibleHealthControl: element => Boolean(element?.visible),
+        setContextDetailsMode() {}, contextDetailsController: {setCollapsed() {}},
+        renderNetworkInsights() {renders++;},
+        ensureHealthComparisonLoaded() {comparisons++;},
+      };
+      vm.createContext(context);
+      vm.runInContext(source.slice(start, end), context);
+      context.activateHealthTab("comparison", "selector");
+      assert.equal(state.tableScrollTop, 70);
+      assert.equal(state.tableScrollLeft, 15);
+      assert.deepEqual(focus, ["health-insights-subview-select"]);
+      assert.equal(comparisons, 1);
+      context.activateHealthTab("roster", "selector");
+      assert.equal(state.tableScrollTop, 70, "hidden Findings must not overwrite scroll");
+      context.activateHealthTab("findings");
+      assert.equal(focus.length, 2, "hidden symbol tab must not receive focus");
+      assert.equal(renders, 3);
+    """
+    result = subprocess.run(
+        ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
 
 def test_roster_submit_saving_feedback_preserves_retry_and_refresh_paths() -> None:
     script = r"""
@@ -456,20 +529,21 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
       const paged = [];
       const resultFilters = [];
       const container = new Element("section");
-      renderHealthComparison(container, page, comparison, {}, {
+      const controlsHost = new Element("section");
+      renderHealthComparison({controls: controlsHost, results: container}, page, comparison, {}, {
         select: (id) => selected.push(id), page: (offset) => paged.push(offset),
         result: (value) => resultFilters.push(value),
       });
-      const controls = container.children.find((item) => item.className === "health-comparison-controls");
+      const controls = controlsHost.children.find((item) => item.className === "health-comparison-controls");
       const picker = controls.children[0];
-      const filterRow = container.children.find((item) => item.className === "health-comparison-filter-row");
+      const filterRow = controlsHost.children.find((item) => item.className === "health-comparison-filter-row");
       const resultFilter = filterRow.children.find(
         (item) => item["aria-label"] === "Result",
       );
       const orderControl = filterRow.children.find(
         (item) => item.children?.some((child) => child["aria-label"] === "Comparison order"),
       ).children.find((item) => item["aria-label"] === "Comparison order");
-      const navigation = container.children.find((item) => item.className === "health-comparison-navigation");
+      const navigation = controlsHost.children.find((item) => item.className === "health-comparison-navigation");
       const heading = container.children.find((item) => item.className === "health-comparison-pair-summary");
       const selectedValue = picker.value;
       picker.value = "pair-1";
@@ -483,8 +557,8 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
         orderOptions: orderControl.children.map(({value, textContent}) => [value, textContent]),
         selectedValue, selected, resultFilters, paged, heading: heading.textContent,
       headingTitle: heading.title,
-      count: filterRow.children.find((item) => item.className === "health-comparison-row-count").textContent,
-      total: filterRow.children.find((item) => item.className === "health-comparison-total-count").textContent,
+      count: container.children.find((item) => item.className === "health-comparison-row-count").textContent,
+      total: container.children.find((item) => item.className === "health-comparison-total-count").textContent,
       }));
     """
     completed = subprocess.run(
@@ -769,8 +843,9 @@ def test_comparison_show_in_table_targets_only_the_current_row_device() -> None:
       }]};
       const render = (canInspect) => {
         const container = new Element("section");
+        const controlsHost = new Element("section");
         const inspected = [];
-        renderHealthComparison(container, page, comparison, {
+        renderHealthComparison({controls: controlsHost, results: container}, page, comparison, {
           capabilityKnown: true, comparisonReadModel: true, assessmentAvailable: true,
           endpointSelection: false, comparisonId: "pair", scope: "all", result: "changed",
         }, {
@@ -842,7 +917,8 @@ def test_comparison_delta_formats_floating_point_values_to_one_decimal_place() -
       };
       const page = {total: 1, offset: 0, limit: 25, items: [{comparisonId: "pair"}]};
       const container = new Element("section");
-      renderHealthComparison(container, page, comparison, {
+      const controlsHost = new Element("section");
+      renderHealthComparison({controls: controlsHost, results: container}, page, comparison, {
         capabilityKnown: true, comparisonReadModel: true, assessmentAvailable: true,
         endpointSelection: false, comparisonId: "pair", scope: "all", result: "all",
       }, {});
@@ -911,7 +987,8 @@ def test_comparison_evidence_labels_relationship_types_and_preserves_other_rows(
       };
       const page = {total: 1, offset: 0, limit: 25, items: [{comparisonId: "pair"}]};
       const container = new Element("section");
-      renderHealthComparison(container, page, comparison, {
+      const controlsHost = new Element("section");
+      renderHealthComparison({controls: controlsHost, results: container}, page, comparison, {
         capabilityKnown: true, comparisonReadModel: true, assessmentAvailable: true,
         endpointSelection: false, comparisonId: "pair", scope: "all", result: "all",
       }, {});
@@ -1017,8 +1094,9 @@ def test_comparison_device_labels_keep_canonical_identity_and_scope() -> None:
       };
       const page = {total: 1, offset: 0, limit: 25, items: [{comparisonId: "pair"}]};
       const container = new Element("section");
+      const controlsHost = new Element("section");
       const inspected = [];
-      renderHealthComparison(container, page, comparison, {
+      renderHealthComparison({controls: controlsHost, results: container}, page, comparison, {
         capabilityKnown: true, comparisonReadModel: true, assessmentAvailable: true,
         endpointSelection: false, comparisonId: "pair", scope: "all", result: "all",
       }, {
@@ -1147,7 +1225,9 @@ def test_health_comparison_availability_and_empty_history_states_are_distinct() 
       };
       const render = (state, actions = {}, page = null, comparison = null) => {
         const container = new Element("section");
-        renderHealthComparison(container, page, comparison, state, actions);
+        const controlsHost = new Element("section");
+        renderHealthComparison({controls: controlsHost, results: container}, page, comparison, state, actions);
+        container.controlsHost = controlsHost;
         return container;
       };
       const textContent = (element) => [
@@ -1202,7 +1282,7 @@ def test_health_comparison_availability_and_empty_history_states_are_distinct() 
         endpointErrors: {before: "", after: ""},
       });
       const emptyLegacy = new Element("section");
-      renderHealthComparison(emptyLegacy, {total: 0, offset: 0, limit: 25, items: []}, null, {
+      renderHealthComparison({controls: new Element("section"), results: emptyLegacy}, {total: 0, offset: 0, limit: 25, items: []}, null, {
         capabilityKnown: true,
         comparisonReadModel: true,
         endpointSelection: false,
@@ -1442,6 +1522,7 @@ def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
       const shortcuts = [];
       const pages = [];
       const container = new Element("section");
+      const controlsHost = new Element("section");
       const viewState = {
         endpointSelection: true,
         latestPresetPage: endpointPage,
@@ -1462,10 +1543,10 @@ def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
         endpointPage: (side, offset) => pages.push([side, offset]),
         preset: (interval) => shortcuts.push([interval]),
       };
-      renderHealthComparison(container, null, comparison, viewState, actions);
-      const controls = container.children.find((item) => item.className === "health-comparison-controls");
-      const customControls = container.children.find((item) => item.className === "health-comparison-custom");
-      const liveStatus = container.children.find(
+      renderHealthComparison({controls: controlsHost, results: container}, null, comparison, viewState, actions);
+      const controls = controlsHost.children.find((item) => item.className === "health-comparison-controls");
+      const customControls = controlsHost.children.find((item) => item.className === "health-comparison-custom");
+      const liveStatus = controlsHost.children.find(
         (item) => item.className === "visually-hidden health-comparison-shortcut-status",
       );
       const beforeGroup = customControls.children[0];
@@ -1481,11 +1562,11 @@ def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
       buttons[1].listeners.click();
       const firstLiveStatus = liveStatus;
       viewState.endpointLoading.after = true;
-      renderHealthComparison(container, null, comparison, viewState, actions);
-      const loadingStatus = container.children.find(
+      renderHealthComparison({controls: controlsHost, results: container}, null, comparison, viewState, actions);
+      const loadingStatus = controlsHost.children.find(
         (item) => item.className === "visually-hidden health-comparison-shortcut-status",
       );
-      const loadingButtons = container.children.find(
+      const loadingButtons = controlsHost.children.find(
         (item) => item.className === "health-comparison-controls",
       ).children[0].children.filter((item) => item.tagName === "button");
       loadingButtons[0].listeners.click();
@@ -1590,7 +1671,8 @@ def test_health_comparison_row_ranges_and_direct_pagination() -> None:
       const requested = [];
       const render = (comparison, viewState = {}) => {
         const container = new Element("section");
-        renderHealthComparison(container, list, comparison, {
+        const controlsHost = new Element("section");
+        renderHealthComparison({controls: controlsHost, results: container}, list, comparison, {
           comparisonId: "pair", result: "changed", scope: "all", ...viewState,
         }, {
           items: (offset, action) => requested.push([offset, action]),
@@ -1747,32 +1829,33 @@ def test_comparison_presets_stay_latest_anchored_and_disclosures_keep_focus() ->
       const requestedPresets = [];
       const selectedEndpoints = [];
       const container = new Element("section");
+      const controlsHost = new Element("section");
       const actions = {
         preset: (interval) => requestedPresets.push(interval),
         endpointSelect: (side, id) => selectedEndpoints.push([side, id]),
         customOpen: () => {},
         detailsOpen: () => {},
       };
-      renderHealthComparison(container, null, comparison, viewState, actions);
-      const controls = find(container, "health-comparison-controls");
+      renderHealthComparison({controls: controlsHost, results: container}, null, comparison, viewState, actions);
+      const controls = find(controlsHost, "health-comparison-controls");
       const presetButtons = controls.children[0].children.filter((element) => element.tagName === "button");
       const custom = presetButtons[3];
-      const customControls = find(container, "health-comparison-custom");
+      const customControls = find(controlsHost, "health-comparison-custom");
       const closedHasSelectors = Boolean(find(customControls, "health-comparison-endpoint-control"));
       presetButtons[1].listeners.click();
       document.activeElement = custom;
       viewState.customOpen = true;
-      renderHealthComparison(container, null, comparison, viewState, actions);
-      const reopenedControls = find(container, "health-comparison-controls");
+      renderHealthComparison({controls: controlsHost, results: container}, null, comparison, viewState, actions);
+      const reopenedControls = find(controlsHost, "health-comparison-controls");
       const reopenedCustom = reopenedControls.children[0].children
         .filter((element) => element.tagName === "button")[3];
-      const openedCustomControls = find(container, "health-comparison-custom");
+      const openedCustomControls = find(controlsHost, "health-comparison-custom");
       const customFocusRestored = document.activeElement === reopenedCustom;
-      const filterRow = find(container, "health-comparison-filter-row");
+      const filterRow = find(controlsHost, "health-comparison-filter-row");
       const detailToggle = container.children.find((element) => element.textContent === "Details");
       document.activeElement = detailToggle;
       viewState.detailsOpen = true;
-      renderHealthComparison(container, null, comparison, viewState, actions);
+      renderHealthComparison({controls: controlsHost, results: container}, null, comparison, viewState, actions);
       const expandedDetailsToggle = container.children.find((element) => element.textContent === "Details");
       const expandedDetails = find(container, "health-comparison-details");
       const status = container.children.find((element) => element.className === "health-comparison-primary-status");
@@ -1816,6 +1899,175 @@ def test_comparison_presets_stay_latest_anchored_and_disclosures_keep_focus() ->
             ["health-comparison-details", {"preventScroll": True}],
         ],
     }
+
+
+def test_comparison_two_hosts_transition_focus_and_retries() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import {renderHealthComparison} from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tag) {
+          Object.assign(this, {tagName: tag, children: [], attributes: {}, listeners: {},
+            parentNode: null, dataset: {}, hidden: false});
+        }
+        appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
+        remove() {
+          if (!this.parentNode) return;
+          this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+          if (this.contains(document.activeElement)) document.activeElement = document.body;
+          this.parentNode = null;
+        }
+        replaceChildren() { [...this.children].forEach((child) => child.remove()); }
+        contains(node) { for (; node; node = node.parentNode) if (node === this) return true; return false; }
+        setAttribute(name, value) { this.attributes[name] = value; }
+        getAttribute(name) { return this.attributes[name] ?? null; }
+        addEventListener(name, fn) { this.listeners[name] = fn; }
+        focus(options) { assert.deepEqual(options, {preventScroll: true}); document.activeElement = this; }
+        setSelectionRange(start, end, direction) { this.selectionStart = start; this.selectionEnd = end; this.selectionDirection = direction; }
+        querySelectorAll(selector) {
+          return nodes(this).slice(1).filter((node) =>
+            selector === "button[aria-controls]" ? node.tagName === "button" && node.getAttribute("aria-controls")
+              : selector === "[data-comparison-control]" ? node.getAttribute("data-comparison-control")
+                : selector === "[data-comparison-page-action]" ? node.getAttribute("data-comparison-page-action") : false);
+        }
+      }
+      globalThis.document = {createElement: (tag) => new Element(tag), body: new Element("body")};
+      document.activeElement = document.body;
+      const nodes = (root) => [root, ...root.children.flatMap(nodes)];
+      const find = (root, cls) => nodes(root).find((node) => node.className === cls);
+      const text = (root) => nodes(root).map((node) => node.textContent || "").join(" ");
+      const attr = (root, key, value) => nodes(root).find((node) => node.getAttribute(key) === value);
+      const controls = new Element("section"), results = new Element("section");
+      document.body.appendChild(controls); document.body.appendChild(results);
+      const hosts = {controls, results};
+      const endpoint = (id) => ({assessmentId: id, observedAt: "2026-10-01T00:00:00Z",
+        assessedAt: "2026-10-01T00:00:00Z", completeness: "complete"});
+      const before = endpoint("before"), after = endpoint("after");
+      const endpointPages = {
+        before: {total: 2, offset: 0, limit: 1, items: [before]},
+        after: {total: 2, offset: 0, limit: 1, items: [after]},
+      };
+      const comparison = {comparisonId: "pair", beforeAssessmentId: "before", afterAssessmentId: "after",
+        beforeObservedAt: before.observedAt, afterObservedAt: after.observedAt, elapsedSeconds: 0,
+        comparable: false, reasons: ["sample-contract-mismatch"], resetState: "unknown",
+        itemCount: 30, filteredItemCount: 30, offset: 0, limit: 25, items: []};
+      const state = {endpointSelection: true, comparisonReadModel: true, capabilityKnown: true,
+        endpointPages, beforeAssessmentId: "before", afterAssessmentId: "after", before, after,
+        customOpen: true, q: "abcdef", result: "all"};
+      let retry = 0, detailRetry = 0, restored = 0;
+      const actions = {retry: () => retry++, retryDetail: () => detailRetry++,
+        focusRestored: () => restored++};
+      const render = (s = state, c = comparison, p = null) =>
+        renderHealthComparison(hosts, p, c, s, actions);
+      render();
+      const live = find(controls, "visually-hidden health-comparison-shortcut-status");
+      assert.ok(find(controls, "health-comparison-filter-row"));
+      assert.ok(find(controls, "health-comparison-custom"));
+      assert.ok(find(results, "health-comparison-row-pagination"));
+      assert.ok(find(results, "health-comparison-row-count"));
+      assert.equal(find(controls, "health-comparison-row-pagination"), undefined);
+      assert.match(text(results), /sample-contract-mismatch/);
+      let search = attr(controls, "data-comparison-control", "search");
+      search.focus({preventScroll: true}); search.setSelectionRange(2, 4, "forward");
+      render({...state, endpointPairLoading: true});
+      search = attr(controls, "data-comparison-control", "search");
+      assert.equal(document.activeElement, search);
+      assert.deepEqual([search.value, search.selectionStart, search.selectionEnd, search.selectionDirection],
+        ["abcdef", 2, 4, "forward"]);
+      assert.match(text(results), /Loading comparison rows/);
+      assert.equal(find(results, "health-comparison-row-pagination"), undefined);
+      const outside = new Element("button"); document.body.appendChild(outside); outside.focus({preventScroll: true});
+      render();
+      assert.equal(document.activeElement, outside);
+      controls.hidden = true;
+      attr(controls, "data-comparison-control", "search").focus({preventScroll: true});
+      render();
+      assert.notEqual(document.activeElement, attr(controls, "data-comparison-control", "search"));
+      controls.hidden = false;
+      render();
+      let next = attr(results, "data-comparison-page-action", "next");
+      next.focus({preventScroll: true});
+      render({...state, endpointPairLoading: true, focusTarget: "next"});
+      assert.equal(document.activeElement, document.body);
+      render({...state, focusTarget: "next"});
+      assert.equal(document.activeElement, attr(results, "data-comparison-page-action", "next"));
+      assert.equal(restored, 1);
+      next = attr(results, "data-comparison-page-action", "next");
+      next.focus({preventScroll: true});
+      render({...state, endpointPairLoading: true, focusTarget: "next"});
+      outside.focus({preventScroll: true});
+      render({...state, focusTarget: "next"});
+      assert.equal(document.activeElement, outside);
+      const beforePicker = attr(controls, "data-comparison-control", "before-endpoint");
+      beforePicker.focus({preventScroll: true});
+      render({...state, endpointLoading: {before: true}});
+      assert.equal(document.activeElement, document.body);
+      render(state);
+      assert.equal(document.activeElement, attr(controls, "data-comparison-control", "before-endpoint"));
+      render({...state, endpointUnavailable: true});
+      assert.match(text(results), /no longer retained/);
+      assert.equal(find(results, "health-comparison-pair-summary"), undefined);
+      assert.equal(find(controls, "health-comparison-filter-row"), undefined);
+      render({...state, beforeAssessmentId: "different"});
+      assert.equal(find(results, "health-comparison-pair-summary"), undefined);
+      render({...state, endpointErrors: {before: "offline"}, presetError: "preset failed"});
+      assert.match(text(controls), /Before assessment history read failed/);
+      assert.match(text(results), /endpoint selection could not be fully loaded/);
+      assert.equal(nodes(controls).filter((node) => node.getAttribute("role") === "alert").length, 2);
+      assert.doesNotMatch(live.textContent, /preset failed/);
+      nodes(controls).find((node) => node.textContent === "Retry comparison read").listeners.click();
+      assert.equal(retry, 1);
+      render({...state, endpointPairError: "pair failed"});
+      assert.match(text(results), /pair failed/);
+      nodes(results).find((node) => node.textContent === "Retry comparison read").listeners.click();
+      assert.equal(retry, 2);
+      for (const [s, expected] of [
+        [{supportLoading: true}, /Loading comparison availability/],
+        [{assessmentError: "bad", assessmentAvailable: false}, /selected assessment is unavailable/],
+        [{supportError: "offline"}, /availability could not be loaded/],
+        [{capabilityKnown: true, comparisonReadModel: false}, /does not support comparison/],
+        [{endpointSelection: true, listLoading: true}, /Loading retained assessments/],
+        [{listLoading: true}, /Loading stored comparisons/],
+        [{listError: "offline"}, /history could not be loaded/],
+        [{}, /history is unavailable/],
+      ]) {
+        render(); render(s, null);
+        assert.match(text(results), expected);
+        assert.equal(find(results, "health-comparison-pair-summary"), undefined);
+        assert.equal(find(controls, "health-comparison-filter-row"), undefined);
+        assert.equal(find(controls, "visually-hidden health-comparison-shortcut-status"), live);
+      }
+      const storedPage = {total: 1, offset: 0, limit: 25, items: [{comparisonId: "pair"}]};
+      render({comparisonId: "pair", listError: "offline"}, comparison, storedPage);
+      assert.match(text(results), /history could not be refreshed/);
+      assert.match(text(controls), /Comparison read failed/);
+      render({comparisonId: "pair", detailError: "detail failed"}, comparison, storedPage);
+      assert.match(text(results), /detail failed/);
+      nodes(results).find((node) => node.textContent === "Retry comparison read").listeners.click();
+      assert.equal(detailRetry, 1);
+      render({comparisonId: "pair", detailLoading: true}, comparison, storedPage);
+      assert.match(text(results), /Loading comparison rows/);
+      render({comparisonId: "other"}, comparison, storedPage);
+      assert.equal(find(results, "health-comparison-pair-summary"), undefined);
+      render({listError: "offline"}, null);
+      nodes(controls).find((node) => node.textContent === "Retry comparison read").listeners.click();
+      assert.equal(retry, 3);
+      render({}, null, {total: 0, offset: 0, limit: 25, items: []});
+      assert.match(text(results), /Not enough retained history/);
+      render({...state, endpointPages: {...endpointPages, after: {...endpointPages.after, total: 0}}},
+        null);
+      assert.match(text(results), /no retained assessments/);
+      render({...state, beforeAssessmentId: "", afterAssessmentId: "after"}, null);
+      assert.match(text(results), /Not enough history for the selected interval/);
+      render(state, comparison);
+      assert.equal(find(controls, "visually-hidden health-comparison-shortcut-status"), live);
+      assert.equal(nodes(controls).filter((node) => node.className === live.className).length, 1);
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        capture_output=True, text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_health_detail_sections_preserve_dom_and_action_contracts() -> None:
@@ -3041,6 +3293,23 @@ def test_health_assessment_history_renders_bounded_accessible_navigation() -> No
       renderHealthAssessmentHistory(container, state);
       const singlePagePagerHidden = container.querySelector('[data-health-history-focus="older-page"]').parentNode.hidden;
       const focusEscapedHiddenPager = document.activeElement.dataset.healthHistoryFocus === "newer";
+      const outside = new Element("button");
+      container.dataset.healthHistoryPendingFocus = "older";
+      outside.focus();
+      renderHealthAssessmentHistory(container, state);
+      if (document.activeElement !== outside || container.dataset.healthHistoryPendingFocus) {
+        throw new Error("History stole outside focus");
+      }
+      container.hidden = true;
+      container.dataset.healthHistoryPendingFocus = "newer";
+      document.activeElement = null;
+      state.loading = true;
+      renderHealthAssessmentHistory(container, state);
+      if (document.activeElement || container.dataset.healthHistoryPendingFocus) {
+        throw new Error("Hidden history retained or restored focus");
+      }
+      container.hidden = false;
+      state.loading = false;
       console.log(JSON.stringify({
         options, actions, focusRetained, compactStructure, navigationLabels, collapsed, expanded,
         detailsPreserved, multipagePagerVisible, singlePagePagerHidden, focusEscapedHiddenPager,

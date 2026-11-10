@@ -145,6 +145,7 @@ import {
   renderHealthStatus,
   buildHealthInsightsStatus,
   formatHealthInsightsTabAccessibleName,
+  healthActiveRestrictions,
   startHealthProcessing,
 } from "./tdash-health.js";
 import {
@@ -532,6 +533,7 @@ const healthInsightsViewState = {
   selectedFindingId: null,
   selectedEndpointId: null,
   tableScrollTop: 0,
+  tableScrollLeft: 0,
   detailsOpen: false,
   restCoverageOpen: false,
   sortWasChanged: false,
@@ -1563,10 +1565,236 @@ function setContextDetailsMode(mode) {
   contextDetailsController.setMode(mode);
 }
 
+const healthFunctionsLayout = {
+  insights: false,
+  disclosure: { standard: true, insights: false },
+  scroll: {},
+  controlsKey: null,
+  scrollPending: null,
+  drawerOpen: false,
+  modal: false,
+  returnFocus: null,
+  panelFocus: null,
+  bodyOverflow: "",
+  inertRegions: [],
+};
+const healthFunctionsNarrow = window.matchMedia("(max-width: 720px)");
+
+function isVisibleHealthControl(element) {
+  return Boolean(element && !element.closest("[hidden]") && element.getClientRects().length);
+}
+
+function updateHealthFunctionsContext() {
+  const insights = currentView === "insights";
+  const eligible = currentDataset?.entry?.healthEligible === true;
+  const panel = document.getElementById("panel-functions");
+  const dataset = document.getElementById("panel-dataset");
+  const disclosure = document.getElementById("btn-toggle-panel-dataset");
+  const close = document.getElementById("btn-device-status-close");
+  const controls = document.getElementById("health-functions-controls");
+  const controlsKey = insights ? healthInsightsTab : "standard";
+  if (healthFunctionsLayout.controlsKey !== controlsKey) {
+    if (healthFunctionsLayout.controlsKey && isVisibleHealthControl(controls)) {
+      healthFunctionsLayout.scroll[healthFunctionsLayout.controlsKey] = controls.scrollTop;
+    }
+    healthFunctionsLayout.scrollPending = controlsKey;
+    healthFunctionsLayout.controlsKey = controlsKey;
+  }
+  if (healthFunctionsLayout.insights !== insights) {
+    healthFunctionsLayout.drawerOpen = false;
+    healthFunctionsLayout.disclosure[healthFunctionsLayout.insights ? "insights" : "standard"] =
+      disclosure.getAttribute("aria-expanded") === "true";
+    if (insights) {
+      document.getElementById("health-functions-dataset-dock").appendChild(dataset);
+      document.getElementById("health-functions-header").appendChild(close);
+    } else {
+      document.getElementById("device-status").after(dataset);
+      document.querySelector("#device-status legend").appendChild(close);
+    }
+    const expanded = healthFunctionsLayout.disclosure[insights ? "insights" : "standard"];
+    dataset.classList.toggle("collapsed", !expanded);
+    disclosure.setAttribute("aria-expanded", String(expanded));
+    healthFunctionsLayout.insights = insights;
+  }
+  document.querySelector(".dashboard-shell")?.classList.toggle("insights-context", insights);
+  panel.setAttribute("aria-label", insights ? "Insights navigation and controls" : "Dataset and filters");
+  document.getElementById("health-functions-panel").hidden = !insights;
+  document.getElementById("device-status").hidden = insights;
+  document.getElementById("panel-node-link-filters").hidden = insights;
+  document.getElementById("panel-dataset-label").textContent = insights ? "Source and dataset" : "Dataset";
+  const caption = document.getElementById("health-functions-dataset-caption");
+  caption.hidden = !insights;
+  const source = document.getElementById("datasource-filter");
+  const selected = document.getElementById("dataset-select");
+  const fetchStatus = document.getElementById("fetch-status-line-content")?.textContent?.trim();
+  caption.textContent = [
+    source.selectedOptions[0]?.textContent, selected.selectedOptions[0]?.textContent, fetchStatus,
+  ].filter(Boolean).join(" · ");
+  document.getElementById("health-insights-navigation").hidden = !eligible;
+  document.getElementById("health-insights-results-header").hidden = !eligible;
+  for (const area of ["assessment", "findings", "comparison", "roster"]) {
+    document.getElementById(`health-functions-${area}`).hidden = !eligible
+      || (area === "assessment" ? healthInsightsTab === "comparison" : area !== healthInsightsTab);
+  }
+  if (!insights) healthFunctionsLayout.drawerOpen = false;
+  const drawer = insights && healthFunctionsNarrow.matches && healthFunctionsLayout.drawerOpen;
+  document.querySelector(".dashboard-shell").classList.toggle("health-functions-drawer-open", drawer);
+  const backdrop = document.getElementById("health-functions-backdrop");
+  backdrop.hidden = !drawer;
+  if (drawer !== healthFunctionsLayout.modal) {
+    if (drawer) {
+      statusDisclosure.close();
+      healthFunctionsLayout.bodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      healthFunctionsLayout.inertRegions = Array.from(document.querySelector(".dashboard-shell").children)
+        .filter((child) => child !== panel && child !== backdrop && !child.inert);
+      healthFunctionsLayout.inertRegions.forEach((child) => { child.inert = true; });
+      panel.setAttribute("role", "dialog");
+      panel.setAttribute("aria-modal", "true");
+      panel.setAttribute("aria-labelledby", "health-functions-heading");
+    } else {
+      document.body.style.overflow = healthFunctionsLayout.bodyOverflow;
+      healthFunctionsLayout.inertRegions.forEach((child) => { child.inert = false; });
+      healthFunctionsLayout.inertRegions = [];
+      panel.removeAttribute("role");
+      panel.removeAttribute("aria-modal");
+      panel.removeAttribute("aria-labelledby");
+    }
+    healthFunctionsLayout.modal = drawer;
+  }
+  const unavailable = insights && healthFunctionsNarrow.matches
+    ? !drawer : document.querySelector(".dashboard-shell").classList.contains("functions-panel-collapsed");
+  const selector = document.getElementById("health-insights-subview-select");
+  selector.hidden = !unavailable;
+  selector.value = healthInsightsTab;
+  document.getElementById("health-insights-title").hidden = unavailable;
+  for (const id of ["btn-functions-panel-toggle", "btn-device-status-close"]) {
+    const button = document.getElementById(id);
+    button.setAttribute("aria-expanded", String(!unavailable));
+    button.setAttribute("aria-label", `${unavailable ? "Expand" : "Collapse"} functions panel`);
+    button.title = button.getAttribute("aria-label");
+  }
+  document.getElementById("btn-functions-panel-toggle").textContent = unavailable ? "▶" : "◀";
+  if (healthFunctionsLayout.scrollPending === controlsKey && isVisibleHealthControl(controls)) {
+    queueMicrotask(() => {
+      if (healthFunctionsLayout.controlsKey === controlsKey
+          && healthFunctionsLayout.scrollPending === controlsKey && isVisibleHealthControl(controls)) {
+        controls.scrollTop = healthFunctionsLayout.scroll[controlsKey] ?? 0;
+        healthFunctionsLayout.scrollPending = null;
+      }
+    });
+  }
+  if (panel.contains(document.activeElement) && !isVisibleHealthControl(document.activeElement)) {
+    const target = unavailable ? document.getElementById("btn-functions-panel-toggle")
+      : document.getElementById(eligible ? `health-tab-${healthInsightsTab}` : "btn-toggle-panel-dataset");
+    if (isVisibleHealthControl(target)) target.focus({ preventScroll: true });
+  }
+}
+
+const healthDatasetCaptionObserver = new MutationObserver(() => updateHealthFunctionsContext());
+healthDatasetCaptionObserver.observe(document.getElementById("fetch-status-line-content"), {
+  childList: true, subtree: true, characterData: true,
+});
+for (const id of ["datasource-filter", "dataset-select"]) {
+  document.getElementById(id).addEventListener("change", () => {
+    queueMicrotask(updateHealthFunctionsContext);
+  });
+}
+
+healthFunctionsNarrow.addEventListener("change", () => {
+  const focusedInPanel = document.getElementById("panel-functions").contains(document.activeElement);
+  healthFunctionsLayout.drawerOpen = false;
+  updateHealthFunctionsContext();
+  if (currentView === "insights" && focusedInPanel
+      && !isVisibleHealthControl(document.activeElement)) {
+    document.getElementById("btn-functions-panel-toggle").focus({ preventScroll: true });
+  }
+});
+
+document.getElementById("health-functions-backdrop")?.addEventListener("click", () => {
+  setFunctionsPanelCollapsed(true);
+});
+document.addEventListener("keydown", (event) => {
+  if (!healthFunctionsLayout.modal) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setFunctionsPanelCollapsed(true);
+  } else if (event.key === "Tab") {
+    const focusable = Array.from(document.getElementById("panel-functions")
+      .querySelectorAll('button:not(:disabled), select:not(:disabled), input:not(:disabled), summary, [tabindex="0"]'))
+      .filter((element) => element.tabIndex !== -1 && isVisibleHealthControl(element));
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
+});
+document.addEventListener("focusin", (event) => {
+  const panel = document.getElementById("panel-functions");
+  if (healthFunctionsLayout.modal && !panel.contains(event.target)) {
+    document.getElementById("btn-device-status-close").focus({ preventScroll: true });
+  }
+});
+
+function renderHealthResultsContext() {
+  const title = { findings: "Findings", comparison: "Comparison", roster: "Device Roster" }[healthInsightsTab];
+  document.getElementById("health-insights-title").textContent = title;
+  const assessment = healthInsightsState.assessment;
+  const context = [];
+  if (healthInsightsTab !== "comparison") {
+    if (assessment) {
+      const observedAt = Date.parse(assessment.observedAt);
+      context.push(Number.isFinite(observedAt)
+        ? `Observed ${new Date(observedAt).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC")}`
+        : "Observation time unavailable");
+      context.push(healthAssessmentHistoryState.mode === "pinned" ? "Pinned" : "Latest");
+      if (healthInsightsTab === "findings") {
+        const rows = projectHealthSummaryRows(assessment.findingGroups || [], healthInsightsViewState);
+        context.push(`${rows.length} matching groups`);
+      } else if (healthInsightsState.roster) {
+        context.push(`${healthInsightsState.roster.filteredTotal} matching / ${healthInsightsState.roster.total} roster devices`);
+      } else context.push(healthInsightsState.rosterError || "Loading roster…");
+    } else context.push(healthInsightsState.error || (healthInsightsState.loading ? "Loading assessment…" : "Assessment unavailable"));
+  }
+  document.getElementById("health-insights-summary").textContent = context.join(" · ");
+  const { active } = healthActiveRestrictions(healthInsightsTab, healthInsightsViewState, healthRosterViewState);
+  const filters = document.getElementById("btn-health-filters");
+  filters.textContent = active.length === 0 ? "Filters" : `${active.length} filter${active.length === 1 ? "" : "s"}`;
+  filters.setAttribute("aria-label", `${title}: ${filters.textContent}. Open controls`);
+}
+
+document.getElementById("btn-health-filters")?.addEventListener("click", () => {
+  setFunctionsPanelCollapsed(false);
+  const { first, active } = healthActiveRestrictions(healthInsightsTab, healthInsightsViewState, healthRosterViewState);
+  const restriction = document.querySelector(active[0] || first);
+  const target = isVisibleHealthControl(restriction) ? restriction
+    : Array.from(document.querySelectorAll(`#health-functions-${healthInsightsTab} button:not(:disabled), #health-functions-${healthInsightsTab} select:not(:disabled)`))
+      .find(isVisibleHealthControl) || document.getElementById("btn-device-status-close");
+  if (isVisibleHealthControl(target)) {
+    healthFunctionsLayout.scrollPending = null;
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ block: "nearest" });
+  }
+});
+
 function setFunctionsPanelCollapsed(isCollapsed) {
   const shell = document.querySelector(".dashboard-shell");
   const toggleButton = document.getElementById("btn-functions-panel-toggle");
-  shell?.classList.toggle("functions-panel-collapsed", isCollapsed);
+  const closingFocus = isCollapsed && document.getElementById("panel-functions")?.contains(document.activeElement);
+  const controls = document.getElementById("health-functions-controls");
+  if (isCollapsed && isVisibleHealthControl(controls)) {
+    healthFunctionsLayout.scroll[healthFunctionsLayout.controlsKey] = controls.scrollTop;
+  } else if (!isCollapsed) healthFunctionsLayout.scrollPending = healthFunctionsLayout.controlsKey;
+  const narrowInsights = currentView === "insights" && healthFunctionsNarrow.matches;
+  if (!isCollapsed) healthFunctionsLayout.returnFocus = document.activeElement;
+  if (closingFocus) healthFunctionsLayout.panelFocus = document.activeElement;
+  if (narrowInsights) healthFunctionsLayout.drawerOpen = !isCollapsed;
+  else shell?.classList.toggle("functions-panel-collapsed", isCollapsed);
   const closeButton = document.getElementById("btn-device-status-close");
   const action = isCollapsed ? "Expand" : "Collapse";
   [toggleButton, closeButton].forEach((button) => {
@@ -1579,12 +1807,24 @@ function setFunctionsPanelCollapsed(isCollapsed) {
   if (toggleButton) {
     toggleButton.textContent = isCollapsed ? "▶" : "◀";
   }
+  updateHealthFunctionsContext();
+  if (closingFocus || (narrowInsights && isCollapsed)) {
+    const returnFocus = healthFunctionsLayout.returnFocus;
+    (isVisibleHealthControl(returnFocus) && !document.getElementById("panel-functions").contains(returnFocus)
+      ? returnFocus : toggleButton)?.focus({ preventScroll: true });
+  } else if (!isCollapsed) {
+    const target = isVisibleHealthControl(healthFunctionsLayout.panelFocus)
+      ? healthFunctionsLayout.panelFocus : document.getElementById(`health-tab-${healthInsightsTab}`);
+    if (currentView === "insights" && isVisibleHealthControl(target)) target.focus({ preventScroll: true });
+    else if (narrowInsights) document.getElementById("btn-device-status-close").focus({ preventScroll: true });
+  }
   resizeAndFitTopology();
 }
 
 function toggleFunctionsPanel() {
   const shell = document.querySelector(".dashboard-shell");
-  setFunctionsPanelCollapsed(!shell?.classList.contains("functions-panel-collapsed"));
+  setFunctionsPanelCollapsed(currentView === "insights" && healthFunctionsNarrow.matches
+    ? healthFunctionsLayout.drawerOpen : !shell?.classList.contains("functions-panel-collapsed"));
 }
 
 document.getElementById("btn-functions-panel-toggle")?.addEventListener("click", toggleFunctionsPanel);
@@ -1697,6 +1937,7 @@ function switchView(newView) {
   }
   if (newView === "insights") enableHealthColoringOnFirstInsightsVisit();
   updateHealthPresentationControls();
+  updateHealthFunctionsContext();
   nextView.onActivate?.();
 }
 
@@ -2753,13 +2994,12 @@ function renderNetworkInsights() {
   publishHealthInsightsStatus();
   const contentEl = document.getElementById("network-insights-content");
   const healthWorkspaceEl = document.getElementById("health-insights-workspace");
-  const summaryEl = document.getElementById("health-insights-summary");
   const navigationEl = document.getElementById("health-insights-navigation");
   const tableWrapEl = document.getElementById("health-finding-table-wrap");
   if (!contentEl) return;
   const healthEligible = currentDataset?.entry?.healthEligible === true;
   navigationEl?.toggleAttribute("hidden", !healthEligible);
-  summaryEl?.replaceChildren();
+  updateHealthFunctionsContext();
   document.getElementById("health-insights-filters")?.toggleAttribute("hidden", !healthEligible);
   healthWorkspaceEl?.toggleAttribute("hidden", !healthEligible);
   contentEl.toggleAttribute("hidden", healthEligible);
@@ -2790,8 +3030,10 @@ function renderNetworkInsights() {
     },
   );
   if (healthEligible) {
-    if (tableWrapEl && !healthWorkspaceEl.hidden) {
+    if (currentView === "insights" && healthInsightsTab === "findings"
+        && isVisibleHealthControl(tableWrapEl)) {
       healthInsightsViewState.tableScrollTop = tableWrapEl.scrollTop;
+      healthInsightsViewState.tableScrollLeft = tableWrapEl.scrollLeft;
     }
     const assessment = healthInsightsState.assessment;
     if (assessment) {
@@ -2834,8 +3076,9 @@ function renderNetworkInsights() {
       restCoverageOpen: (open) => { healthInsightsViewState.restCoverageOpen = open; },
     });
     document.getElementById("health-findings-sort").value = healthInsightsViewState.sort.column;
-    const findingCount = projectHealthSummaryRows(assessment?.findingGroups || [], healthInsightsViewState).length;
-    document.getElementById("health-findings-count").textContent = String(findingCount);
+    const findingCount = assessment
+      ? projectHealthSummaryRows(assessment.findingGroups || [], healthInsightsViewState).length : null;
+    document.getElementById("health-findings-count").textContent = findingCount === null ? "" : String(findingCount);
     document.getElementById("health-tab-findings").setAttribute("aria-label",
       formatHealthInsightsTabAccessibleName("Findings", findingCount, "group"));
     const rosterCount = healthInsightsState.roster
@@ -2852,7 +3095,8 @@ function renderNetworkInsights() {
       document.getElementById(panelId).hidden = !active;
     }
     const rosterWrap = document.querySelector(".health-roster-table-wrap");
-    if (rosterWrap && healthInsightsTab === "roster") {
+    if (currentView === "insights" && healthInsightsTab === "roster"
+        && isVisibleHealthControl(rosterWrap)) {
       healthRosterViewState.tableScrollTop = rosterWrap.scrollTop;
       healthRosterViewState.tableScrollLeft = rosterWrap.scrollLeft;
     }
@@ -2880,14 +3124,18 @@ function renderNetworkInsights() {
     const endpointSelectionAvailable =
       healthInsightsState.capabilities?.comparisonEndpointSelection === 1;
     const previousComparisonWrap = document.querySelector(".health-comparison-table-wrap");
-    if (previousComparisonWrap && healthInsightsTab === "comparison") {
+    if (currentView === "insights" && healthInsightsTab === "comparison"
+        && isVisibleHealthControl(previousComparisonWrap)) {
       healthInsightsViewState.comparisonTableScrollTop = previousComparisonWrap.scrollTop;
       healthInsightsViewState.comparisonTableScrollLeft = previousComparisonWrap.scrollLeft;
     }
     const comparisonEl = document.getElementById("health-comparison");
     if (tableWrapEl) tableWrapEl.hidden = false;
     if (healthInsightsTab === "comparison" && currentView === "insights") {
-      renderHealthComparison(comparisonEl, healthInsightsState.comparisonPage,
+      renderHealthComparison({
+        controls: document.getElementById("health-comparison-controls"),
+        results: comparisonEl,
+      }, healthInsightsState.comparisonPage,
         healthInsightsState.comparison, {
           supportLoading: healthInsightsState.loading && !healthInsightsState.capabilities
             && !healthInsightsState.error,
@@ -2970,9 +3218,13 @@ function renderNetworkInsights() {
       updatedComparisonWrap.scrollTop = healthInsightsViewState.comparisonTableScrollTop;
       updatedComparisonWrap.scrollLeft = healthInsightsViewState.comparisonTableScrollLeft;
     }
-    if (tableWrapEl) tableWrapEl.scrollTop = healthInsightsViewState.tableScrollTop;
+    if (tableWrapEl) {
+      tableWrapEl.scrollTop = healthInsightsViewState.tableScrollTop;
+      tableWrapEl.scrollLeft = healthInsightsViewState.tableScrollLeft;
+    }
     renderSelectedHealthFinding();
     renderHealthRefreshStatus();
+    renderHealthResultsContext();
     return;
   }
   renderLegacyNetworkInsights(contentEl, currentDataset);
@@ -5595,12 +5847,15 @@ function ensureHealthComparisonLoaded() {
   }
 }
 
-function activateHealthTab(tab) {
+function activateHealthTab(tab, focusDestination = "tab") {
   if (!HEALTH_INSIGHTS_TABS.some(({ id }) => id === tab)) return;
   if (healthInsightsTab !== tab) rosterNavigationGeneration += 1;
-  if (healthInsightsTab === "findings") {
+  if (healthInsightsTab === "findings"
+      && isVisibleHealthControl(document.getElementById("health-finding-table-wrap"))) {
     healthInsightsViewState.tableScrollTop =
       document.getElementById("health-finding-table-wrap")?.scrollTop ?? 0;
+    healthInsightsViewState.tableScrollLeft =
+      document.getElementById("health-finding-table-wrap")?.scrollLeft ?? 0;
   }
   if (healthInsightsTab === "comparison") {
     healthInsightsViewState.comparisonTableScrollTop =
@@ -5626,13 +5881,19 @@ function activateHealthTab(tab) {
     contextDetailsController.setCollapsed(true);
   }
   renderNetworkInsights();
-  document.getElementById(`health-tab-${tab}`)?.focus();
+  const focusTarget = document.getElementById(focusDestination === "selector"
+    ? "health-insights-subview-select" : `health-tab-${tab}`);
+  if (isVisibleHealthControl(focusTarget)) focusTarget.focus({ preventScroll: true });
   if (tab === "comparison" && tabChanged) ensureHealthComparisonLoaded();
   if (tab === "roster" && tabChanged && !healthInsightsState.roster
       && !healthInsightsState.rosterLoading && healthInsightsState.assessment) {
     void loadRosterPage(healthRosterViewState.offset);
   }
 }
+
+document.getElementById("health-insights-subview-select")?.addEventListener("change", (event) => {
+  activateHealthTab(event.target.value, "selector");
+});
 
 for (const { id, buttonId } of HEALTH_INSIGHTS_TABS) {
   const button = document.getElementById(buttonId);
