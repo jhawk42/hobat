@@ -414,6 +414,8 @@ address when RLOC16 is unavailable), followed by **Role**, **Vendor**, and
 `vendorName`/`vendorModel` or `vendor`/`model`; absent values are omitted.
 Popups include supplementary metadata merged into Device details, such as
 mDNS vendor and model information for OTBR topology nodes.
+Use the close button in a node or edge popup to dismiss it without changing
+the selected device, including on touch screens.
 
 The same operation is available through the CLI:
 

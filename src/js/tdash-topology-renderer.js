@@ -88,15 +88,29 @@ const THEME_TOKENS = Object.freeze({
 let activeThemePalette = null;
 let activePaletteTheme = null;
 
-export function buildTopologyHoverContent(title, isNode) {
+export function buildTopologyHoverContent(title, isNode, closePopup) {
   const content = document.createElement("div");
-  content.className = "topology-hover-details";
+  content.className = `topology-hover-details topology-hover-${isNode ? "node" : "edge"}`;
   const lines = title.split("\n");
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "topology-hover-close";
+  close.setAttribute("aria-label", `Close ${isNode ? "node" : "edge"} popover`);
+  close.textContent = "×";
+  close.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closePopup();
+  });
   if (isNode) {
+    const header = document.createElement("div");
+    header.className = "topology-hover-header";
     const heading = document.createElement("div");
     heading.className = "topology-hover-heading";
     heading.textContent = lines.shift();
-    content.append(heading);
+    header.append(heading, close);
+    content.append(header);
+  } else {
+    content.append(close);
   }
   const list = document.createElement("dl");
   list.className = "topology-hover-list";
@@ -117,6 +131,14 @@ export function buildTopologyHoverContent(title, isNode) {
   }
   content.append(list);
   return content;
+}
+
+export function closeTopologyPopup(network) {
+  // Keep vis-network's popup state in sync so the same item can reopen it.
+  const interaction = network.interactionHandler;
+  interaction.popupObj = undefined;
+  interaction.popup.hide();
+  network.body.emitter.emit("hidePopup");
 }
 
 export function readThemePalette() {
@@ -584,13 +606,15 @@ export function renderTopologyForDataset(
   viewModel = themed.viewModel;
   const nodeStyles = new Map(themed.nodeUpdates.map((patch) => [patch.id, patch]));
   const edgeStyles = new Map(themed.edgeUpdates.map((patch) => [patch.id, patch]));
+  let network;
+  const closePopup = () => closeTopologyPopup(network);
   const nodesDataset = new vis.DataSet(viewModel.nodes.map((node) => ({
     ...node, ...nodeStyles.get(node.id),
-    title: node.title ? buildTopologyHoverContent(node.title, true) : node.title,
+    title: node.title ? buildTopologyHoverContent(node.title, true, closePopup) : node.title,
   })));
   const edgesDataset = new vis.DataSet(viewModel.edges.map((edge) => ({
     ...edge, ...edgeStyles.get(edge.id),
-    title: edge.title ? buildTopologyHoverContent(edge.title, false) : edge.title,
+    title: edge.title ? buildTopologyHoverContent(edge.title, false, closePopup) : edge.title,
   })));
   const optionsWithProfile = Object.assign({}, VIS_OPTIONS, {
     physics: Object.assign({}, VIS_OPTIONS.physics, {
@@ -604,12 +628,22 @@ export function renderTopologyForDataset(
     : Object.assign({}, VIS_OPTIONS, {
       physics: Object.assign({}, optionsWithProfile.physics, { enabled: false }),
     });
-  const network = new vis.Network(
+  network = new vis.Network(
     container,
     { nodes: nodesDataset, edges: edgesDataset },
     effectiveOptions,
   );
   const bindings = createTopologyEventBindings();
+  bindings.listen(container, "mousemove", (event) => {
+    const popup = network.interactionHandler.popup;
+    if (!popup || popup.hidden) return;
+    const tooltip = container.querySelector(".vis-tooltip");
+    const rect = tooltip.getBoundingClientRect();
+    if (event.clientX >= rect.left - 10 && event.clientX <= rect.right + 10
+        && event.clientY >= rect.top - 10 && event.clientY <= rect.bottom + 10) {
+      event.stopPropagation();
+    }
+  }, true);
   decorateTopologyNavigation(container, network, bindings);
   let currentSearchState = createTopologySearchState("", false, viewModel);
   let styleMode = "canonical";

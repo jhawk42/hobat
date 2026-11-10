@@ -1171,7 +1171,30 @@ button.active {
   background: var(--surface);
   color: var(--text);
 }
-.topology-hover-heading { font-weight: 700; overflow-wrap: anywhere; }
+.topology-hover-details { pointer-events: auto; }
+.topology-hover-edge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: start;
+}
+.topology-hover-edge .topology-hover-close { grid-column: 2; grid-row: 1; }
+.topology-hover-edge .topology-hover-list { grid-column: 1 / -1; grid-row: 2; }
+.topology-hover-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.topology-hover-heading { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.topology-hover-close {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -5px -5px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+.topology-hover-close:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
 .topology-hover-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

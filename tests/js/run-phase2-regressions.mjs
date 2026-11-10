@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { runAdaptor } from "../../src/js/tdash-adaptors.js";
 import { resolveLayoutCollisions } from "../../src/js/tdash-layouts.js";
-import { assignParallelEdgeCurves, buildTopologyHoverContent } from "../../src/js/tdash-topology-renderer.js";
+import { assignParallelEdgeCurves, buildTopologyHoverContent, closeTopologyPopup } from "../../src/js/tdash-topology-renderer.js";
 import { buildNodeHoverLabel, buildVisNodeData } from "../../src/js/tdash-topology-utils.js";
 
 function mergedEdges(row) {
@@ -112,21 +112,45 @@ assert.equal(visNodes[0].title, "Unknown node\nIdentifier: unavailable");
 globalThis.document = {
   createElement(tagName) {
     return {
-      tagName, children: [], className: "", textContent: "",
+      tagName, children: [], className: "", textContent: "", attributes: {}, handlers: {},
       append(...children) { this.children.push(...children); },
+      setAttribute(name, value) { this.attributes[name] = value; },
+      addEventListener(name, handler) { this.handlers[name] = handler; },
     };
   },
 };
-const nodeHover = buildTopologyHoverContent("Router: A\nRloc16: 0x1000\nVendor: A: B", true);
-assert.equal(nodeHover.children[0].textContent, "Router: A");
+let closes = 0;
+let stopped = 0;
+const nodeHover = buildTopologyHoverContent("Router: A\nRloc16: 0x1000\nVendor: A: B", true, () => { closes += 1; });
+assert.equal(nodeHover.children[0].children[0].textContent, "Router: A");
+const close = nodeHover.children[0].children[1];
+assert.equal(close.tagName, "button");
+assert.equal(close.attributes["aria-label"], "Close node popover");
+close.handlers.click({ stopPropagation() { stopped += 1; } });
+assert.equal(closes, 1);
+assert.equal(stopped, 1);
+const events = [];
+const network = {
+  interactionHandler: { popupObj: { id: "node" }, popup: { hide() { events.push("hidden"); } } },
+  body: { emitter: { emit(name) { events.push(name); } } },
+};
+closeTopologyPopup(network);
+assert.equal(network.interactionHandler.popupObj, undefined);
+assert.deepEqual(events, ["hidden", "hidePopup"]);
 assert.deepEqual(nodeHover.children[1].children.map(({ tagName, textContent }) => [tagName, textContent]), [
   ["dt", "Rloc16:"], ["dd", "0x1000"], ["dt", "Vendor:"], ["dd", "A: B"],
 ]);
-const edgeHover = buildTopologyHoverContent("from: <router>\nto: node\nLQI: 3 ▂▄▆", false);
-assert.deepEqual(edgeHover.children[0].children.map(({ tagName, textContent }) => [tagName, textContent]), [
+const edgeHover = buildTopologyHoverContent("from: <router>\nto: node\nLQI: 3 ▂▄▆", false, () => { closes += 1; });
+const edgeClose = edgeHover.children[0];
+assert.equal(edgeClose.tagName, "button");
+assert.equal(edgeClose.attributes["aria-label"], "Close edge popover");
+edgeClose.handlers.click({ stopPropagation() { stopped += 1; } });
+assert.equal(closes, 2);
+assert.equal(stopped, 2);
+assert.deepEqual(edgeHover.children[1].children.map(({ tagName, textContent }) => [tagName, textContent]), [
   ["dt", "from:"], ["dd", "<router>"], ["dt", "to:"], ["dd", "node"], ["dt", "LQI:"], ["dd", "3 ▂▄▆"],
 ]);
 const plainHover = buildTopologyHoverContent("standalone", false);
-assert.equal(plainHover.children[0].children[0].textContent, "standalone");
+assert.equal(plainHover.children[1].children[0].textContent, "standalone");
 
 process.stdout.write("phase2 regressions passed\n");
