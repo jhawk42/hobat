@@ -9,7 +9,7 @@ import math
 import os
 import sqlite3
 import uuid
-from contextlib import closing
+from contextlib import ExitStack, closing
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -803,13 +803,16 @@ class SQLiteHealthStore:
             )
         else:
             connection = sqlite3.connect(self.path, timeout=5.0)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=5000")
-        if self.read_only:
-            connection.execute("PRAGMA query_only=ON")
-        else:
-            connection.execute("PRAGMA journal_mode=WAL")
+        with ExitStack() as cleanup:
+            cleanup.callback(connection.close)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=5000")
+            if self.read_only:
+                connection.execute("PRAGMA query_only=ON")
+            else:
+                connection.execute("PRAGMA journal_mode=WAL")
+            cleanup.pop_all()
         return connection
 
     def _connect_existing_write(self) -> sqlite3.Connection:

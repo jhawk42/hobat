@@ -315,6 +315,37 @@ def test_atomic_save_is_idempotent_and_sets_sqlite_guards(tmp_path) -> None:
         ).fetchone() == ("snapshot-test", "profile-test")
 
 
+def test_locked_database_closes_failed_connection_and_allows_retry(tmp_path, monkeypatch) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    connect = sqlite3.connect
+    connections = []
+
+    def track(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    with closing(connect(store.path)) as blocker:
+        blocker.execute("PRAGMA journal_mode=DELETE")
+        blocker.execute("BEGIN EXCLUSIVE")
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(sqlite3, "connect", track)
+                try:
+                    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+                        store.compare_assessments("before", "after")
+                    assert len(connections) == 1
+                    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                        connections[0].execute("SELECT 1")
+                finally:
+                    for connection in connections:
+                        connection.close()
+        finally:
+            blocker.rollback()
+
+    assert store.save_processing_result(*_result()).observation_created
+
+
 def test_initialized_schema_matches_frozen_contract(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
 
