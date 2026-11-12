@@ -464,7 +464,7 @@ validate safe filename and FILE_ACTION_MAP/checkpoint membership
         +-- checkpoint or STATIC --> serve existing file or 404
         |
         v
-evaluate request cache controls and file freshness
+normalize request max-age (invalid --> 400), then evaluate freshness
         |
         +-- Cache Only and missing/stale --> explicit cache-only failure
         +-- fresh -----------------------> 200 or conditional 304
@@ -482,6 +482,15 @@ deduplicate by filename -> create background job -> 202 + Location
 estimated cost, and `force_async`. Checkpoint filenames are derived from dynamic
 entries with the `.partial.json` suffix and are served as non-regenerating,
 zero-max-age files.
+
+For dynamic files, request `Cache-Control: max-age=N` overrides the configured
+age, including when the request permits an older snapshot. Nonnegative integers
+and quoted ASCII decimal values such as `max-age="60"` are supported.
+`max-age=0` or `no-cache` requests regeneration; `only-if-cached` forbids it and
+returns 404 if the snapshot is missing or stale under the requested policy.
+Invalid ages, including negative, empty, bare, or nonnumeric values, return
+HTTP 400 before dispatch rather than falling back to another age policy.
+Static files and checkpoints bypass regeneration-age validation.
 
 A catalog recipe can reuse an already registered filename by changing only the
 [manifest](../src/td-dataset-manifest.json). A new snapshot filename also needs
@@ -506,6 +515,11 @@ share one source lock so concurrent dashboard requests do not load the Matter
 controller in parallel. Native dashboard actions never add diagnostics
 `--force` or topology `--refresh`.
 
+Short actions repeat the same request-aware freshness decision after acquiring
+their source lock. A snapshot refreshed while the request waited can be reused
+only if it meets that request's bound. Joining an already-running collection
+does not start a second refresh or retry a successful `max-age=0` request.
+
 ## Background Jobs and Cancellation
 
 Jobs use five states:
@@ -516,15 +530,26 @@ Jobs use five states:
 - `done`
 - `error`
 
-Only `running` jobs are cancellable. `cancelled`, `done`, and `error` are
-terminal. A successful DELETE transitions a running job to `cancelling`,
+Only `running` jobs begin a new cancellation. `cancelled`, `done`, and `error`
+are terminal. A successful DELETE transitions a running job to `cancelling`,
 cancels its task, terminates the tracked subprocess, and uses a force-kill
 fallback if graceful termination does not finish in time. Unknown jobs return
-404; terminal or otherwise non-cancellable jobs return 409.
+404; terminal or otherwise non-cancellable jobs return 409. Repeated DELETE
+while cancellation is still active returns 202 without cancelling the task
+again.
+
+Task completion callbacks finalize `cancelled` status even when a worker was
+cancelled before its coroutine started. The same finalization is used for
+generic data jobs, health processing, and device actions; device actions retain
+their cancelled result and invocation metadata.
 
 Completed job records are retained temporarily so clients can poll the result.
-The cleanup loop removes terminal jobs after 15 minutes and shutdown cancels
-cleanup and remaining background tasks.
+Each minute, cleanup removes terminal records older than 15 minutes measured
+from job creation. Shutdown cancels cleanup and remaining background tasks.
+
+Health-processing requests reuse the active job for their dataset. Completion,
+cancellation, and expiry release a dataset's deduplication index only when it
+still belongs to that job, so an older job cannot remove a newer job's entry.
 
 The unified `/api/jobs` resource projects only `running` and `cancelling`
 records from the generic and device-action registries. Stable kind and source
@@ -532,8 +557,10 @@ metadata lives on status records rather than transient runtime handles. The
 projection excludes command arguments, action request payloads, subprocess
 output, and credentials. Bulk cancellation snapshots jobs in creation-time and
 job-ID order and delegates to the same request-independent helpers used by the
-individual DELETE routes. A missing runtime handle transitions a running job to
-`cancelled` instead of leaving it indefinitely in `cancelling`.
+individual DELETE routes. A missing runtime handle or completed task transitions
+a `running` or stale `cancelling` record to `cancelled` instead of leaving it
+indefinitely pending. Terminal cancelled jobs disappear from this projection
+but remain individually pollable until TTL cleanup.
 
 Listing and bulk cancellation are server-wide administrative operations. The
 same-origin browser model is not authentication; deployments outside a trusted

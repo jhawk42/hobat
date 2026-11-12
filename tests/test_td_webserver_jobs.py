@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -13,10 +15,12 @@ from webserver_test_support import reset_webserver_state
 class _DummyTask:
     def __init__(self, *, done: bool = False) -> None:
         self.cancel_called = False
+        self.cancel_count = 0
         self._done = done
 
     def cancel(self) -> bool:
         self.cancel_called = True
+        self.cancel_count += 1
         return True
 
     def done(self) -> bool:
@@ -150,6 +154,8 @@ class UnifiedJobsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(second.text), json.loads(first.text))
         self.assertTrue(generic_task.cancel_called)
         self.assertTrue(action_task.cancel_called)
+        self.assertEqual(generic_task.cancel_count, 1)
+        self.assertEqual(action_task.cancel_count, 1)
 
     async def test_missing_runtime_becomes_terminal_instead_of_stuck(self) -> None:
         td_webserver._job_registry["generic"] = td_webserver.JobStatus(
@@ -181,6 +187,96 @@ class UnifiedJobsApiTests(unittest.IsolatedAsyncioTestCase):
             td_webserver._device_action_job_registry["action"].status,
             td_webserver.JOB_STATUS_CANCELLED,
         )
+
+    async def test_cancelling_records_with_missing_or_done_runtime_are_reconciled(self) -> None:
+        for done_runtime in (False, True):
+            with self.subTest(done_runtime=done_runtime):
+                generic = td_webserver.JobStatus(
+                    job_id="generic", filename="", status="cancelling",
+                    dataset="health-dataset", detail="existing detail", created_at=20,
+                )
+                action = td_webserver.DeviceActionJobStatus(
+                    job_id="action", invocation_id="invocation", request=_action_request(),
+                    status="cancelling", detail="existing detail", created_at=10,
+                )
+                td_webserver._job_registry[generic.job_id] = generic
+                td_webserver._device_action_job_registry[action.job_id] = action
+                td_webserver._health_job_id_by_dataset["health-dataset"] = generic.job_id
+                if done_runtime:
+                    task = MagicMock(spec=asyncio.Task)
+                    task.done.return_value = True
+                    td_webserver._job_runtime_registry[generic.job_id] = td_webserver.JobRuntime(
+                        job_id=generic.job_id, filename="", source="health", task=task,
+                    )
+                    td_webserver._device_action_runtime_registry[action.job_id] = td_webserver.DeviceActionJobRuntime(
+                        job_id=action.job_id, source="otbr-cli", task=task,
+                    )
+                response = await td_webserver.handle_jobs_cancel_api(MagicMock())
+                self.assertEqual(
+                    json.loads(response.text),
+                    {"requested": 2, "jobs": [
+                        {"jobId": "action", "status": "cancelled"},
+                        {"jobId": "generic", "status": "cancelled"},
+                    ]},
+                )
+                self.assertEqual(generic.detail, "existing detail")
+                self.assertEqual(action.detail, "existing detail")
+                self.assertEqual(action.result, {
+                    "action": "otbr-cli-ping", "targetKind": "ipv6",
+                    "target": "fd00::10", "status": "cancelled",
+                })
+                self.assertNotIn("health-dataset", td_webserver._health_job_id_by_dataset)
+
+    async def test_cancelled_callbacks_do_not_rewrite_terminal_records(self) -> None:
+        async def never_started():
+            self.fail("Cancelled worker must not start")
+
+        for status in ("done", "error", "cancelled"):
+            for kind in ("generic", "action"):
+                with self.subTest(status=status, kind=kind):
+                    if kind == "generic":
+                        job = td_webserver.JobStatus(
+                            job_id="generic", filename="", status=status,
+                            detail="retained", result={"retained": True},
+                        )
+                        registry = td_webserver._job_registry
+                        reverse = td_webserver._job_id_by_task
+                        callback = td_webserver._on_background_task_done
+                    else:
+                        job = td_webserver.DeviceActionJobStatus(
+                            job_id="action", invocation_id="invocation", request=_action_request(),
+                            status=status, detail="retained", result={"retained": True},
+                        )
+                        registry = td_webserver._device_action_job_registry
+                        reverse = td_webserver._device_action_job_id_by_task
+                        callback = td_webserver._on_device_action_task_done
+                    registry[job.job_id] = job
+                    completed = asyncio.Event()
+                    task = asyncio.create_task(never_started())
+                    reverse[task] = job.job_id
+                    task.add_done_callback(callback)
+                    task.add_done_callback(lambda _: completed.set())
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    await asyncio.wait_for(completed.wait(), timeout=1)
+                    self.assertEqual((job.status, job.detail, job.result), (
+                        status, "retained", {"retained": True},
+                    ))
+
+    async def test_missing_runtime_matter_cancellation_keeps_node_target(self) -> None:
+        request = replace(
+            _action_request(), action="ha-matter-ws-ping", source="ha-matter-ws",
+            node_id=42, target=None, family=None,
+        )
+        job = td_webserver.DeviceActionJobStatus(
+            job_id="matter", invocation_id="invocation", request=request, status="running",
+        )
+        td_webserver._device_action_job_registry[job.job_id] = job
+        self.assertEqual(td_webserver._cancel_device_action_job(job.job_id), "cancelled")
+        self.assertEqual(job.result, {
+            "action": "ha-matter-ws-ping", "targetKind": "matter-node",
+            "target": 42, "status": "cancelled",
+        })
 
     def test_main_registers_unified_job_routes_before_static_assets(self) -> None:
         source = Path(td_webserver.__file__).read_text(encoding="utf-8")

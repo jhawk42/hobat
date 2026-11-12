@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from unittest.mock import MagicMock
 
 import aiohttp.web
@@ -26,6 +27,7 @@ from td_health_processor import process_health
 from td_health_roster import RosterFact
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
+from webserver_test_support import reset_webserver_state, run_job_cleanup_sweep
 
 
 def _request(data_dir, *, query=None, match_info=None):
@@ -862,6 +864,140 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             )
             with self.assertRaises(aiohttp.web.HTTPBadRequest):
                 await td_webserver.handle_health_findings_api(request)
+
+
+class HealthJobLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    dataset = "otbr_cli_diagnostics_fetch"
+
+    def setUp(self) -> None:
+        reset_webserver_state()
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self._tmpdir.name)
+
+    async def asyncTearDown(self) -> None:
+        tasks = list(td_webserver._background_tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        reset_webserver_state()
+        self._tmpdir.cleanup()
+
+    def _process_request(self):
+        request = _request(self.data_dir)
+        request.json = AsyncMock(return_value={"dataset": self.dataset})
+        return request
+
+    async def test_prestart_health_cancel_finalizes_status_and_releases_index(self) -> None:
+        completed = asyncio.Event()
+        with patch.object(td_webserver, "run_device_action_cli", new_callable=AsyncMock) as runner:
+            response = await td_webserver.handle_health_process_dataset_api(self._process_request())
+            job_id = json.loads(response.text)["job_id"]
+            task = td_webserver._job_runtime_registry[job_id].task
+            task.add_done_callback(lambda _: completed.set())
+            cancelled = await td_webserver.handle_job_cancel_api(
+                _request(self.data_dir, match_info={"job_id": job_id}),
+            )
+            self.assertEqual(cancelled.status, 202)
+            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(completed.wait(), timeout=1)
+            poll = await td_webserver.handle_job_api(
+                _request(self.data_dir, match_info={"job_id": job_id}),
+            )
+            self.assertEqual(json.loads(poll.text), {
+                "status": "cancelled", "detail": td_webserver._JOB_CANCEL_GRACE_DETAIL,
+                "task": "health-process-dataset", "dataset": self.dataset,
+            })
+            self.assertEqual(poll.headers["Cache-Control"], "no-store")
+            self.assertNotIn(self.dataset, td_webserver._health_job_id_by_dataset)
+            self.assertNotIn(job_id, td_webserver._job_runtime_registry)
+            self.assertNotIn(task, td_webserver._job_id_by_task)
+            self.assertNotIn(task, td_webserver._background_tasks)
+            self.assertEqual(td_webserver._project_pending_jobs(), [])
+            next_response = await td_webserver.handle_health_process_dataset_api(self._process_request())
+            next_id = json.loads(next_response.text)["job_id"]
+            self.assertNotEqual(next_id, job_id)
+            self.assertEqual(td_webserver._health_job_id_by_dataset[self.dataset], next_id)
+            next_task = td_webserver._job_runtime_registry[next_id].task
+            td_webserver._cancel_generic_job(next_id)
+            await asyncio.gather(next_task, return_exceptions=True)
+            runner.assert_not_awaited()
+
+    async def test_expired_health_job_cleanup_preserves_active_request_deduplication(self) -> None:
+        td_webserver._job_registry["old"] = td_webserver.JobStatus(
+            job_id="old", filename="", status="done", dataset=self.dataset, created_at=0,
+        )
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def run(*args, **kwargs):
+            started.set()
+            await release.wait()
+            return 0, b'{"assessmentCreated":false,"observationCreated":false}', b"", 0.1
+
+        with patch.object(td_webserver.time, "time", return_value=1000), patch.object(
+            td_webserver, "run_device_action_cli", side_effect=run
+        ) as runner:
+            response = await td_webserver.handle_health_process_dataset_api(self._process_request())
+            job_id = json.loads(response.text)["job_id"]
+            try:
+                await asyncio.wait_for(started.wait(), timeout=1)
+                await run_job_cleanup_sweep()
+                self.assertNotIn("old", td_webserver._job_registry)
+                self.assertIn(job_id, td_webserver._job_runtime_registry)
+                self.assertEqual(td_webserver._health_job_id_by_dataset[self.dataset], job_id)
+                duplicate = await td_webserver.handle_health_process_dataset_api(self._process_request())
+                self.assertEqual(json.loads(duplicate.text)["job_id"], job_id)
+                self.assertEqual(duplicate.status, 202)
+                self.assertEqual(duplicate.headers["Location"], response.headers["Location"])
+                self.assertEqual(duplicate.headers["Cache-Control"], "no-store")
+                self.assertEqual(len(td_webserver._job_registry), 1)
+                runner.assert_awaited_once()
+            finally:
+                release.set()
+                await asyncio.gather(*list(td_webserver._background_tasks), return_exceptions=True)
+
+    async def test_cleanup_releases_only_expired_jobs_owned_dataset_index(self) -> None:
+        for indexed in (True, False):
+            with self.subTest(indexed=indexed):
+                td_webserver._job_registry["old"] = td_webserver.JobStatus(
+                    job_id="old", filename="", status="done", dataset=self.dataset, created_at=0,
+                )
+                td_webserver._health_job_id_by_dataset["other-dataset"] = "other-job"
+                if indexed:
+                    td_webserver._health_job_id_by_dataset[self.dataset] = "old"
+                with patch.object(td_webserver.time, "time", return_value=1000):
+                    await run_job_cleanup_sweep()
+                self.assertNotIn("old", td_webserver._job_registry)
+                self.assertEqual(
+                    td_webserver._health_job_id_by_dataset, {"other-dataset": "other-job"},
+                )
+
+    async def test_older_health_worker_finally_preserves_newer_dataset_index(self) -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def run(*args, **kwargs):
+            started.set()
+            await release.wait()
+            return 0, b'{"assessmentCreated":false,"observationCreated":false}', b"", 0.1
+
+        with patch.object(td_webserver, "run_device_action_cli", side_effect=run):
+            response = await td_webserver.handle_health_process_dataset_api(self._process_request())
+            job_id = json.loads(response.text)["job_id"]
+            task = td_webserver._job_runtime_registry[job_id].task
+            try:
+                await asyncio.wait_for(started.wait(), timeout=1)
+                td_webserver._health_job_id_by_dataset[self.dataset] = "newer"
+                td_webserver._health_job_id_by_dataset["other-dataset"] = "other-job"
+                release.set()
+                await asyncio.wait_for(task, timeout=1)
+                self.assertEqual(td_webserver._health_job_id_by_dataset, {
+                    self.dataset: "newer", "other-dataset": "other-job",
+                })
+                self.assertEqual(td_webserver._job_registry[job_id].status, "done")
+            finally:
+                release.set()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):

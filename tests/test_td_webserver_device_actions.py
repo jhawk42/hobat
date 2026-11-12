@@ -301,6 +301,39 @@ class DeviceActionApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job.status, "cancelled")
         self.assertEqual(job.result["status"], "cancelled")
 
+    async def test_prestart_cancel_preserves_envelope_and_cleans_runtime(self) -> None:
+        completed = asyncio.Event()
+        payload = self._ping_payload() | {"invocationId": "prestart-invocation"}
+        with patch.object(td_webserver, "run_device_action_cli", new_callable=AsyncMock) as runner:
+            response = await td_webserver.handle_device_actions_api(self._request(payload))
+            job_id = json.loads(response.text)["job_id"]
+            task = td_webserver._device_action_runtime_registry[job_id].task
+            task.add_done_callback(lambda _: completed.set())
+            request = MagicMock()
+            request.match_info = {"job_id": job_id}
+            cancel_response = await td_webserver.handle_device_action_job_cancel_api(request)
+            self.assertEqual(cancel_response.status, 202)
+            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.wait_for(completed.wait(), timeout=1)
+            poll = await td_webserver.handle_device_action_job_api(request)
+            self.assertEqual(json.loads(poll.text), {
+                "job_id": job_id, "invocationId": "prestart-invocation",
+                "action": ACTION_OTBR_PING, "status": "cancelled",
+                "detail": td_webserver._JOB_CANCEL_GRACE_DETAIL,
+                "result": {
+                    "action": ACTION_OTBR_PING, "targetKind": "ipv6",
+                    "target": "fd00::10", "status": "cancelled",
+                },
+            })
+            self.assertEqual(poll.headers["Cache-Control"], "no-store")
+            self.assertNotIn(job_id, td_webserver._device_action_runtime_registry)
+            self.assertNotIn(task, td_webserver._device_action_job_id_by_task)
+            self.assertNotIn(task, td_webserver._device_action_background_tasks)
+            self.assertNotIn(job_id, {item["jobId"] for item in td_webserver._project_pending_jobs()})
+            again = await td_webserver.handle_device_action_job_cancel_api(request)
+            self.assertEqual(again.status, 409)
+            runner.assert_not_awaited()
+
     async def test_bounded_stream_retains_only_limit(self) -> None:
         stream = asyncio.StreamReader()
         stream.feed_data(b"x" * (td_webserver._DEVICE_ACTION_OUTPUT_LIMIT_BYTES + 100))

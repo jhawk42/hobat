@@ -484,6 +484,20 @@ def parse_request_cache_control(header_value: str | None) -> dict:
     return result
 
 
+def _parse_request_max_age(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        token = value.strip()
+        if len(token) >= 2 and token.startswith('"') and token.endswith('"'):
+            token = token[1:-1]
+        if token.isascii() and token.isdecimal():
+            return int(token)
+    elif isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    raise ValueError("max-age must be a non-negative integer")
+
+
 def build_cache_response_headers(max_age_s: int, file_mtime: float) -> dict[str, str]:
     """Return HTTP response headers for cache control.
 
@@ -708,6 +722,12 @@ _job_registry: dict[str, JobStatus] = {}
 
 _health_job_id_by_dataset: dict[str, str] = {}
 
+
+def _release_health_job_index(dataset: str, job_id: str) -> None:
+    if _health_job_id_by_dataset.get(dataset) == job_id:
+        _health_job_id_by_dataset.pop(dataset, None)
+
+
 # Phase 2 runtime index: O(1) lookup of active job task/process by job_id.
 _job_runtime_registry: dict[str, JobRuntime] = {}
 
@@ -732,12 +752,45 @@ _PROCESS_TERMINATE_GRACE_S = 2.0
 _JOB_LIST_LIMIT = 500
 
 
+def _mark_job_cancelled(job: JobStatus) -> None:
+    if job.status not in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}:
+        return
+    job.status = JOB_STATUS_CANCELLED
+    if not job.detail:
+        job.detail = _JOB_CANCEL_GRACE_DETAIL
+
+
+def _mark_device_action_job_cancelled(job: DeviceActionJobStatus) -> None:
+    if job.status not in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}:
+        return
+    job.status = JOB_STATUS_CANCELLED
+    if not job.detail:
+        job.detail = _JOB_CANCEL_GRACE_DETAIL
+    action_request = job.request
+    job.result = {
+        "action": action_request.action,
+        "targetKind": (
+            "matter-node" if action_request.node_id is not None else action_request.family
+        ),
+        "target": (
+            action_request.node_id if action_request.node_id is not None else action_request.target
+        ),
+        "status": "cancelled",
+    }
+
+
 def _on_background_task_done(task: "asyncio.Task[None]") -> None:
     """Done-callback: discard the task from the anchor set and log any exception."""
     _background_tasks.discard(task)
 
     job_id = _job_id_by_task.pop(task, None)
     if job_id is not None:
+        job = _job_registry.get(job_id)
+        if job is not None:
+            if task.cancelled():
+                _mark_job_cancelled(job)
+            if job.dataset and _is_terminal_job_status(job.status):
+                _release_health_job_index(job.dataset, job_id)
         _clear_job_runtime(job_id)
 
     if not task.cancelled():
@@ -763,7 +816,7 @@ async def _cleanup_job_registry_loop() -> None:
         for jid in expired:
             job = _job_registry.get(jid)
             if job is not None and job.dataset:
-                _health_job_id_by_dataset.pop(job.dataset, None)
+                _release_health_job_index(job.dataset, jid)
             _job_registry.pop(jid, None)
             _clear_job_runtime(jid)
         expired_action_jobs = [
@@ -1073,9 +1126,7 @@ async def _dispatch_long_cost(
                     if j is None:
                         return
                     if j.status == JOB_STATUS_CANCELLING:
-                        j.status = JOB_STATUS_CANCELLED
-                        if not j.detail:
-                            j.detail = _JOB_CANCEL_GRACE_DETAIL
+                        _mark_job_cancelled(j)
                         return
 
                     try:
@@ -1110,10 +1161,8 @@ async def _dispatch_long_cost(
                         }
             except asyncio.CancelledError:
                 j = _job_registry.get(jid)
-                if j is not None and j.status == JOB_STATUS_CANCELLING:
-                    j.status = JOB_STATUS_CANCELLED
-                    if not j.detail:
-                        j.detail = _JOB_CANCEL_GRACE_DETAIL
+                if j is not None:
+                    _mark_job_cancelled(j)
                 raise
             except Exception as exc:
                 j = _job_registry.get(jid)
@@ -1129,9 +1178,7 @@ async def _dispatch_long_cost(
             if j is None:
                 return
             if j.status == JOB_STATUS_CANCELLING:
-                j.status = JOB_STATUS_CANCELLED
-                if not j.detail:
-                    j.detail = _JOB_CANCEL_GRACE_DETAIL
+                _mark_job_cancelled(j)
                 return
             if exit_code == 0:
                 j.status = JOB_STATUS_DONE
@@ -1171,6 +1218,8 @@ async def _dispatch_short_cost(
     data_dir: Path,
     file_action: "FileAction",
     no_cache: bool,
+    *,
+    request_max_age_s: int | None = None,
 ) -> None:
     """Run a short-cost action synchronously, blocking until td_cli exits.
 
@@ -1209,9 +1258,7 @@ async def _dispatch_short_cost(
         async with lock:
             # Re-check freshness: another coroutine may have generated this
             # file while we waited for the source lock.
-            if is_file_fresh(file_path, file_action.max_age_s) and not no_cache:
-                pass  # fall through to serve the now-fresh file
-            else:
+            if _should_regenerate(file_path, file_action, no_cache, request_max_age_s):
                 task: asyncio.Task[int] = asyncio.create_task(
                     run_td_cli(
                         action_args,
@@ -1244,9 +1291,16 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     cc = parse_request_cache_control(request.headers.get("Cache-Control"))
     no_cache = bool(cc.get("no-cache", False))
     only_if_cached = bool(cc.get("only-if-cached", False))
-    request_max_age_s = cc.get("max-age")
 
     file_action, file_path = _resolve_and_validate(filename, data_dir)
+    request_max_age_s = None
+    if file_action.action != "STATIC":
+        try:
+            request_max_age_s = _parse_request_max_age(cc.get("max-age"))
+        except ValueError as exc:
+            raise aiohttp.web.HTTPBadRequest(
+                reason="Invalid Cache-Control max-age: expected a non-negative integer"
+            ) from exc
 
     logging.debug(">>>>>>>>>")
     logging.debug("Request for %s (no_cache=%s); file action: %s; file path: %s",
@@ -1271,7 +1325,10 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
             action_args.insert(1, "--log-thread-secrets")
         if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
             return await _dispatch_long_cost(filename, action_args, data_dir, file_action)
-        await _dispatch_short_cost(filename, action_args, data_dir, file_action, no_cache)
+        await _dispatch_short_cost(
+            filename, action_args, data_dir, file_action, no_cache,
+            request_max_age_s=request_max_age_s,
+        )
 
     logging.debug("Serving file %s for request (no_cache=%s)", file_path, no_cache)
     logging.debug("<<<<<<<<<")
@@ -1841,7 +1898,7 @@ async def handle_health_process_dataset_api(
                     if current_job is None:
                         return
                     if current_job.status == JOB_STATUS_CANCELLING:
-                        current_job.status = JOB_STATUS_CANCELLED
+                        _mark_job_cancelled(current_job)
                         return
                     exit_code, stdout, _stderr, _elapsed = await run_device_action_cli(
                         ["health", "process-dataset", "--dataset", dataset, "--allow-partial", "--json"],
@@ -1855,7 +1912,7 @@ async def handle_health_process_dataset_api(
                     if current_job is None:
                         return
                     if current_job.status == JOB_STATUS_CANCELLING:
-                        current_job.status = JOB_STATUS_CANCELLED
+                        _mark_job_cancelled(current_job)
                     elif exit_code == 0:
                         result = json.loads(stdout.decode("utf-8"))
                         if not isinstance(result, dict):
@@ -1871,9 +1928,7 @@ async def handle_health_process_dataset_api(
             except asyncio.CancelledError:
                 current_job = _job_registry.get(jid)
                 if current_job is not None:
-                    current_job.status = JOB_STATUS_CANCELLED
-                    if not current_job.detail:
-                        current_job.detail = _JOB_CANCEL_GRACE_DETAIL
+                    _mark_job_cancelled(current_job)
                 raise
             except Exception as exc:
                 current_job = _job_registry.get(jid)
@@ -1881,7 +1936,7 @@ async def handle_health_process_dataset_api(
                     current_job.status = JOB_STATUS_ERROR
                     current_job.detail = f"{type(exc).__name__}: {exc}"[:512]
             finally:
-                _health_job_id_by_dataset.pop(dataset, None)
+                _release_health_job_index(dataset, jid)
 
         task = asyncio.create_task(_run_health_job())
         _job_runtime_registry[job_id] = JobRuntime(
@@ -2037,16 +2092,17 @@ def _cancel_generic_job(job_id: str) -> str:
     job = _job_registry.get(job_id)
     if job is None:
         return "not-found"
-    if job.status == JOB_STATUS_CANCELLING:
-        return JOB_STATUS_CANCELLING
-    if not _is_cancellable_job_status(job.status):
+    if not _is_cancellable_job_status(job.status) and job.status != JOB_STATUS_CANCELLING:
         return "already-terminal"
 
     runtime = _job_runtime_registry.get(job_id)
     if runtime is None or runtime.task.done():
-        job.status = JOB_STATUS_CANCELLED
-        job.detail = _JOB_CANCEL_GRACE_DETAIL
+        _mark_job_cancelled(job)
+        if job.dataset:
+            _release_health_job_index(job.dataset, job_id)
         return JOB_STATUS_CANCELLED
+    if job.status == JOB_STATUS_CANCELLING:
+        return JOB_STATUS_CANCELLING
 
     job.status = JOB_STATUS_CANCELLING
     if not job.detail:
@@ -2304,6 +2360,9 @@ def _on_device_action_task_done(task: "asyncio.Task[None]") -> None:
     _device_action_background_tasks.discard(task)
     job_id = _device_action_job_id_by_task.pop(task, None)
     if job_id is not None:
+        job = _device_action_job_registry.get(job_id)
+        if job is not None and task.cancelled():
+            _mark_device_action_job_cancelled(job)
         _device_action_runtime_registry.pop(job_id, None)
     if not task.cancelled():
         error = task.exception()
@@ -2376,8 +2435,7 @@ async def handle_device_actions_api(
                 if current is None:
                     return
                 if current.status == JOB_STATUS_CANCELLING:
-                    current.status = JOB_STATUS_CANCELLED
-                    current.detail = _JOB_CANCEL_GRACE_DETAIL
+                    _mark_device_action_job_cancelled(current)
                     return
                 try:
                     exit_code, stdout, stderr, duration = await run_device_action_cli(
@@ -2426,22 +2484,7 @@ async def handle_device_actions_api(
         except asyncio.CancelledError:
             current = _device_action_job_registry.get(job_id)
             if current is not None:
-                current.status = JOB_STATUS_CANCELLED
-                current.detail = _JOB_CANCEL_GRACE_DETAIL
-                current.result = {
-                    "action": action_request.action,
-                    "targetKind": (
-                        "matter-node"
-                        if action_request.node_id is not None
-                        else action_request.family
-                    ),
-                    "target": (
-                        action_request.node_id
-                        if action_request.node_id is not None
-                        else action_request.target
-                    ),
-                    "status": "cancelled",
-                }
+                _mark_device_action_job_cancelled(current)
             raise
         except Exception as exc:
             current = _device_action_job_registry.get(job_id)
@@ -2479,19 +2522,19 @@ def _cancel_device_action_job(job_id: str) -> str:
     job = _device_action_job_registry.get(job_id)
     if job is None:
         return "not-found"
-    if job.status == JOB_STATUS_CANCELLING:
-        return JOB_STATUS_CANCELLING
-    if not _is_cancellable_job_status(job.status):
+    if not _is_cancellable_job_status(job.status) and job.status != JOB_STATUS_CANCELLING:
         return "already-terminal"
 
     runtime = _device_action_runtime_registry.get(job_id)
     if runtime is None or runtime.task.done():
-        job.status = JOB_STATUS_CANCELLED
-        job.detail = _JOB_CANCEL_GRACE_DETAIL
+        _mark_device_action_job_cancelled(job)
         return JOB_STATUS_CANCELLED
+    if job.status == JOB_STATUS_CANCELLING:
+        return JOB_STATUS_CANCELLING
 
     job.status = JOB_STATUS_CANCELLING
-    job.detail = _JOB_CANCEL_GRACE_DETAIL
+    if not job.detail:
+        job.detail = _JOB_CANCEL_GRACE_DETAIL
     runtime.task.cancel()
     return JOB_STATUS_CANCELLING
 

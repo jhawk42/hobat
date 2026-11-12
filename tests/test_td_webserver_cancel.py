@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp.web
 import td_webserver
 from webserver_test_support import reset_webserver_state as _reset_state
+from webserver_test_support import run_job_cleanup_sweep
 
 
 class _DummyTask:
@@ -102,6 +105,59 @@ class TestJobCancelApi(unittest.IsolatedAsyncioTestCase):
             td_webserver.JOB_STATUS_CANCELLING,
         )
         self.assertTrue(task._cancel_called)
+
+    async def test_real_task_cancel_before_start_or_while_queued_finishes_cleanup(self) -> None:
+        for queued in (False, True):
+            with self.subTest(queued=queued), tempfile.TemporaryDirectory() as directory:
+                _reset_state()
+                filename = "td-otbr-cli-networkdiag-fetch-all.json"
+                action = ["otbr-cli", "networkdiag", "fetch-all"]
+                file_action = td_webserver.FileAction(60, action, 480)
+                lock = td_webserver._get_source_lock("otbr-cli")
+                if queued:
+                    await lock.acquire()
+                entered = asyncio.Event()
+                completed = asyncio.Event()
+                original_get_lock = td_webserver._get_source_lock
+
+                def get_lock(source):
+                    entered.set()
+                    return original_get_lock(source)
+
+                with patch.object(td_webserver, "_get_source_lock", side_effect=get_lock), patch.object(
+                    td_webserver, "run_td_cli", new_callable=AsyncMock
+                ) as runner:
+                    response = await td_webserver._dispatch_long_cost(
+                        filename, action, Path(directory), file_action,
+                    )
+                    job_id = json.loads(response.text)["job_id"]
+                    task = td_webserver._job_runtime_registry[job_id].task
+                    task.add_done_callback(lambda _: completed.set())
+                    try:
+                        if queued:
+                            await asyncio.wait_for(entered.wait(), timeout=1)
+                        cancelled = await td_webserver.handle_job_cancel_api(_make_job_request(job_id))
+                        self.assertEqual(cancelled.status, 202)
+                        await asyncio.gather(task, return_exceptions=True)
+                        await asyncio.wait_for(completed.wait(), timeout=1)
+                        poll = await td_webserver.handle_job_api(_make_job_request(job_id))
+                        self.assertEqual(json.loads(poll.text)["status"], "cancelled")
+                        self.assertNotIn(job_id, td_webserver._job_runtime_registry)
+                        self.assertNotIn(task, td_webserver._job_id_by_task)
+                        self.assertNotIn(task, td_webserver._background_tasks)
+                        self.assertEqual(td_webserver._project_pending_jobs(), [])
+                        again = await td_webserver.handle_job_cancel_api(_make_job_request(job_id))
+                        self.assertEqual(again.status, 409)
+                        runner.assert_not_awaited()
+                        td_webserver._job_registry[job_id].created_at = 0
+                        with patch.object(td_webserver.time, "time", return_value=1000):
+                            await run_job_cleanup_sweep()
+                        self.assertNotIn(job_id, td_webserver._job_registry)
+                    finally:
+                        if lock.locked():
+                            lock.release()
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
 
 
 class TestRunTdCliCancellation(unittest.IsolatedAsyncioTestCase):

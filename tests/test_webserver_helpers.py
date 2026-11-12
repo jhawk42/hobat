@@ -176,6 +176,29 @@ class TestShouldRegenerate(unittest.TestCase):
         self.assertFalse(_should_regenerate(p, self.fa, no_cache=False))
 
 
+class TestRequestMaxAge(unittest.TestCase):
+    def test_normalizes_optional_nonnegative_request_ages(self) -> None:
+        for value, expected in (
+            (None, None), (0, 0), (60, 60), (31536000, 31536000),
+            ('"60"', 60), ('  "0"  ', 0),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(td_webserver._parse_request_max_age(value), expected)
+
+    def test_rejects_invalid_request_ages(self) -> None:
+        for value in (True, False, -1, "", "invalid", "1.5", 1.5, '"60', '60"', '"６０"'):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    td_webserver._parse_request_max_age(value)
+
+    def test_integer_conversion_limit_remains_an_explicit_error(self) -> None:
+        limit = getattr(sys, "get_int_max_str_digits", lambda: 0)()
+        if not limit:
+            self.skipTest("Interpreter has no integer string conversion limit")
+        with self.assertRaises(ValueError):
+            td_webserver._parse_request_max_age('"' + "9" * (limit + 1) + '"')
+
+
 class TestFileCacheMaxAgeResolution(unittest.TestCase):
     """Validate CLI > ENV > default precedence for cache max-age."""
 
@@ -584,6 +607,57 @@ class TestDispatchShortCost(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(call_count, 0,
                          "run_td_cli must not be called when the file is already fresh")
+
+    async def test_request_can_accept_file_older_than_configured_age(self) -> None:
+        filename = "td-otbr-cli-router-table.json"
+        file_path = self.data_dir / filename
+        file_path.write_bytes(b"cached")
+        os.utime(file_path, (880, 880))
+        fa = _make_file_action(max_age_s=60)
+        with patch.object(td_webserver.time, "time", return_value=1000), patch.object(
+            td_webserver, "run_td_cli", new_callable=AsyncMock
+        ) as runner:
+            await _dispatch_short_cost(
+                filename, ["otbr-cli", "router-table"], self.data_dir, fa,
+                no_cache=False, request_max_age_s=31536000,
+            )
+        runner.assert_not_awaited()
+
+    async def test_waiting_request_reuses_snapshot_fresh_for_its_age_bound(self) -> None:
+        filename = "td-otbr-cli-router-table.json"
+        file_path = self.data_dir / filename
+        file_path.write_bytes(b"old")
+        os.utime(file_path, (990, 990))
+        fa = _make_file_action(max_age_s=86400)
+        lock = td_webserver._get_source_lock("otbr-cli")
+        await lock.acquire()
+        entered = asyncio.Event()
+
+        async def dispatch():
+            entered.set()
+            await _dispatch_short_cost(
+                filename, ["otbr-cli", "router-table"], self.data_dir, fa,
+                no_cache=False, request_max_age_s=1,
+            )
+
+        with patch.object(td_webserver.time, "time", return_value=1000), patch.object(
+            td_webserver, "run_td_cli", new_callable=AsyncMock
+        ) as runner:
+            task = asyncio.create_task(dispatch())
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                self.assertFalse(task.done())
+                file_path.write_bytes(b"replacement")
+                os.utime(file_path, (1000, 1000))
+                lock.release()
+                await asyncio.wait_for(task, timeout=1)
+            finally:
+                if lock.locked():
+                    lock.release()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        runner.assert_not_awaited()
+        self.assertEqual(file_path.read_bytes(), b"replacement")
 
 
 if __name__ == "__main__":

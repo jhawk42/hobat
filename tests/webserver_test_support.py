@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import td_webserver
 
@@ -24,6 +25,14 @@ WEBSERVER_STATE_REGISTRIES = (
 def reset_webserver_state() -> None:
     for registry_name in WEBSERVER_STATE_REGISTRIES:
         getattr(td_webserver, registry_name).clear()
+
+
+async def run_job_cleanup_sweep() -> None:
+    with patch.object(td_webserver.asyncio, "sleep", side_effect=[None, asyncio.CancelledError]):
+        task = asyncio.create_task(td_webserver._cleanup_job_registry_loop())
+        results = await asyncio.gather(task, return_exceptions=True)
+    if not task.cancelled():
+        raise AssertionError(f"Cleanup did not finish one sweep: {results!r}")
 
 
 def make_webserver_app(data_dir: Path) -> dict:

@@ -29,6 +29,15 @@ Short actions are awaited. Long or forced-background actions return HTTP 202
 and are polled through `/api/job/{job_id}`; running jobs can be cancelled with
 DELETE on the same route.
 
+For dynamic snapshots, request `Cache-Control: max-age=N` overrides the
+configured age; nonnegative integers and quoted ASCII decimal values such as
+`max-age="60"` are supported. `max-age=0` or `no-cache` requests regeneration.
+`only-if-cached` prevents collection and returns 404 for missing/stale data.
+Invalid ages (including negative, bare, empty, or nonnumeric values) return
+HTTP 400 with `Invalid Cache-Control max-age: expected a non-negative integer`,
+without invoking a collector. Static snapshots and checkpoints do not validate
+a regeneration age.
+
 Logging uses `--debug`/`-d`, then `--verbose`/`-v`, then
 `TD_DEBUG_LEVEL`, then INFO. The environment accepts `DEBUG`, `INFO`,
 `WARNING`, or `ERROR` case-insensitively with surrounding whitespace ignored.
