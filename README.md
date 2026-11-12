@@ -418,6 +418,7 @@ Topology node hover popups show the device label and RLOC16 (or extended
 address when RLOC16 is unavailable), followed by **Role**, **Vendor**, and
 **Model** when present in the device record. Vendor and model accept
 `vendorName`/`vendorModel` or `vendor`/`model`; absent values are omitted.
+Link popups summarize LQI and, when available, Last RSSI above the link details.
 Popups include supplementary metadata merged into Device details, such as
 mDNS vendor and model information for OTBR topology nodes.
 Use the close button in a node or edge popup to dismiss it without changing

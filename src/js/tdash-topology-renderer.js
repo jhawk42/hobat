@@ -14,6 +14,7 @@ import {
 } from "./tdash-constants.js";
 import {
   toText,
+  toFiniteNumber,
   flattenObjectEntries,
   shouldExcludeDetailPath,
   sortDetailsWithPriority,
@@ -110,7 +111,19 @@ export function buildTopologyHoverContent(title, isNode, closePopup) {
     header.append(heading, close);
     content.append(header);
   } else {
-    content.append(close);
+    const typeIndex = lines.findIndex((line) => line.startsWith("type: "));
+    const toIndex = lines.findIndex((line) => line.startsWith("to: "));
+    if (typeIndex >= 0 && toIndex > typeIndex) {
+      lines.splice(toIndex, 0, lines.splice(typeIndex, 1)[0]);
+    }
+    const lqiLine = lines.find((line) => line.startsWith("LQI: "));
+    const rssiLine = lines.find((line) => line.startsWith("Last RSSI: "));
+    const lqi = toFiniteNumber(lqiLine?.slice(5).split(" ")[0]);
+    const rssi = toFiniteNumber(rssiLine?.slice(11).replace(/ dBm$/, ""));
+    const heading = document.createElement("div");
+    heading.className = "topology-hover-edge-heading";
+    heading.textContent = `Link: LQI: ${lqi ?? "n/a"}${rssi !== undefined ? `, Last RSSI: ${rssi} dBm` : ""}`;
+    content.append(heading, close);
   }
   const list = document.createElement("dl");
   list.className = "topology-hover-list";

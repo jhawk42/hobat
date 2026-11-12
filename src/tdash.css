@@ -1171,14 +1171,19 @@ button.active {
   background: var(--surface);
   color: var(--text);
 }
+#topology-view div.vis-tooltip:has(.topology-hover-edge) {
+  width: min(520px, calc(100% - 10px));
+}
 .topology-hover-details { pointer-events: auto; }
 .topology-hover-edge {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px;
   align-items: start;
 }
+.topology-hover-edge-heading { text-align: left; align-self: center; font-weight: 700; overflow-wrap: anywhere; }
 .topology-hover-edge .topology-hover-close { grid-column: 2; grid-row: 1; }
 .topology-hover-edge .topology-hover-list { grid-column: 1 / -1; grid-row: 2; }
+.topology-hover-edge .topology-hover-list { grid-template-columns: max-content minmax(0, 1fr); }
 .topology-hover-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .topology-hover-heading { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
 .topology-hover-close {

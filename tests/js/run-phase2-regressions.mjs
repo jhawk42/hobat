@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { runAdaptor } from "../../src/js/tdash-adaptors.js";
 import { resolveLayoutCollisions } from "../../src/js/tdash-layouts.js";
 import { assignParallelEdgeCurves, buildTopologyHoverContent, closeTopologyPopup } from "../../src/js/tdash-topology-renderer.js";
-import { buildNodeHoverLabel, buildVisNodeData } from "../../src/js/tdash-topology-utils.js";
+import { buildEdgeTitle, buildNodeHoverLabel, buildVisNodeData } from "../../src/js/tdash-topology-utils.js";
 
 function mergedEdges(row) {
   return runAdaptor({
@@ -140,17 +140,29 @@ assert.deepEqual(events, ["hidden", "hidePopup"]);
 assert.deepEqual(nodeHover.children[1].children.map(({ tagName, textContent }) => [tagName, textContent]), [
   ["dt", "Rloc16:"], ["dd", "0x1000"], ["dt", "Vendor:"], ["dd", "A: B"],
 ]);
-const edgeHover = buildTopologyHoverContent("from: <router>\nto: node\nLQI: 3 ▂▄▆", false, () => { closes += 1; });
-const edgeClose = edgeHover.children[0];
+const edgeTitle = buildEdgeTitle({
+  edgeFromTitle: "<router>", edgeToTitle: "node", linkCategories: ["route"],
+  lqi: 3, lastRssi: -65,
+});
+const edgeHover = buildTopologyHoverContent(edgeTitle, false, () => { closes += 1; });
+assert.equal(edgeHover.children[0].textContent, "Link: LQI: 3, Last RSSI: -65 dBm");
+const edgeClose = edgeHover.children[1];
 assert.equal(edgeClose.tagName, "button");
 assert.equal(edgeClose.attributes["aria-label"], "Close edge popover");
 edgeClose.handlers.click({ stopPropagation() { stopped += 1; } });
 assert.equal(closes, 2);
 assert.equal(stopped, 2);
-assert.deepEqual(edgeHover.children[1].children.map(({ tagName, textContent }) => [tagName, textContent]), [
-  ["dt", "from:"], ["dd", "<router>"], ["dt", "to:"], ["dd", "node"], ["dt", "LQI:"], ["dd", "3 ▂▄▆"],
+assert.deepEqual(edgeHover.children[2].children.map(({ tagName, textContent }) => [tagName, textContent]), [
+  ["dt", "from:"], ["dd", "<router>"], ["dt", "to:"], ["dd", "node"],
+  ["dt", "type:"], ["dd", "route"], ["dt", "LQI:"], ["dd", "3 ▂▄▆"],
+  ["dt", "Last RSSI:"], ["dd", "-65 dBm"],
 ]);
+const missingRssi = buildTopologyHoverContent(buildEdgeTitle({lqi: 0, lastRssi: ""}), false);
+assert.equal(missingRssi.children[0].textContent, "Link: LQI: 0");
+const invalidRssi = buildTopologyHoverContent("LQI: 2 ▂▄\nLast RSSI: invalid dBm", false);
+assert.equal(invalidRssi.children[0].textContent, "Link: LQI: 2");
 const plainHover = buildTopologyHoverContent("standalone", false);
-assert.equal(plainHover.children[1].children[0].textContent, "standalone");
+assert.equal(plainHover.children[0].textContent, "Link: LQI: n/a");
+assert.equal(plainHover.children[2].children[0].textContent, "standalone");
 
 process.stdout.write("phase2 regressions passed\n");
