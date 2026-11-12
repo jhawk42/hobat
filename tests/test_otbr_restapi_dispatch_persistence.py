@@ -28,6 +28,56 @@ from util_data import (
 )
 
 
+@pytest.mark.parametrize("kind", ["json", "text", "json_file", "text_file"])
+@pytest.mark.parametrize("relative", [False, True])
+def test_dataset_input_reaches_mutating_client_once(tmp_path, kind, relative):
+    value = '{"channel": 15}' if kind.startswith("json") else "  0E0800000000  \n"
+    args = SimpleNamespace(
+        node_command="dataset", dataset_kind="active", dataset_command="set",
+        json=None, json_file=None, text=None, text_file=None,
+        td_data_dir=tmp_path if relative else None,
+    )
+    if kind.endswith("_file"):
+        path = tmp_path / "dataset.txt"
+        path.write_text(value)
+        setattr(args, kind, path.name if relative else str(path))
+    else:
+        setattr(args, kind, value)
+    expected = {"channel": 15} if kind.startswith("json") else (
+        value.strip() if kind.endswith("_file") else value
+    )
+    client = Mock()
+    client.set_active_dataset.return_value = {"accepted": True}
+    assert node_module.dispatch_node(client, args, False, None) == {"accepted": True}
+    client.set_active_dataset.assert_called_once_with(expected)
+    assert len(client.mock_calls) == 1
+
+
+@pytest.mark.parametrize("case", ["inline-json", "file-json", "missing", "unreadable", "none"])
+def test_dataset_input_failure_does_not_mutate_client(tmp_path, case):
+    args = SimpleNamespace(
+        node_command="dataset", dataset_kind="active", dataset_command="set",
+        json=None, json_file=None, text=None, text_file=None, td_data_dir=tmp_path,
+    )
+    if case == "inline-json":
+        args.json = "{"
+    elif case == "file-json":
+        path = tmp_path / "invalid.json"
+        path.write_text("{")
+        args.json_file = path.name
+    elif case == "missing":
+        args.text_file = "missing.txt"
+    elif case == "unreadable":
+        args.text_file = str(tmp_path)
+    client = Mock()
+    with pytest.raises(OTBRUsageError, match=(
+        "Invalid dataset JSON" if case.endswith("json") else
+        "No dataset input" if case == "none" else "Failed to read dataset input"
+    )):
+        node_module.dispatch_node(client, args, False, None)
+    assert client.mock_calls == []
+
+
 def test_devices_clear_dispatch_rejects_missing_confirmation():
     client = Mock()
     args = SimpleNamespace(devices_command="clear", yes=False)

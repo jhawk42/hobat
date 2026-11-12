@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import sys
 from copy import deepcopy
 from pathlib import Path
+from node_test_support import run_node_json
 from typing import Any
 
 from merge_dataset import build_merged_records, normalize_identifiers
@@ -226,21 +226,13 @@ def run_python_case(case: dict[str, Any], work_dir: Path) -> Any:
 
 
 def run_node_cases(case_ids: list[str] | None = None) -> dict[str, Any]:
-    command = [
+    return run_node_json(
         "node",
         "--experimental-default-type=module",
         str(NODE_RUNNER_PATH),
         str(CONTRACT_PATH),
-    ]
-    command.extend(case_ids or [])
-    completed = subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
+        *(case_ids or []),
     )
-    return json.loads(completed.stdout)
 
 
 def expected_for_runtime(case: dict[str, Any], runtime: str) -> Any:

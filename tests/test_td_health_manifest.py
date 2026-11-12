@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -126,16 +125,11 @@ def test_manifest_rejects_unsafe_filename(tmp_path) -> None:
         load_health_manifest(manifest_path)
 
 
-def test_browser_registry_health_metadata_matches_shared_manifest() -> None:
+def test_browser_registry_health_metadata_matches_shared_manifest(node_run) -> None:
     root = Path(__file__).resolve().parents[1]
-    subprocess.run(
-        [
-            "node",
-            str(root / "tests/js/run-health-manifest-contract.mjs"),
-            str(root / "src/td-dataset-manifest.json"),
-        ],
-        check=True,
-        cwd=root,
+    node_run(
+        root / "tests/js/run-health-manifest-contract.mjs",
+        str(root / "src/td-dataset-manifest.json"),
     )
 
 

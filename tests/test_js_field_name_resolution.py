@@ -20,7 +20,7 @@ def test_browser_field_name_resolution() -> None:
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     rows = {row["input"]: row for row in json.loads(result.stdout)}
     for definition in FIELD_DEFINITIONS:
@@ -41,7 +41,7 @@ def test_duplicate_alias_columns_in_both_runtimes() -> None:
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     assert json.loads(result.stdout)["fixtureResults"] == [case["expected"] for case in cases]
     for case in cases:

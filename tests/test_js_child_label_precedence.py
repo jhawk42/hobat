@@ -66,7 +66,7 @@ if (child.label !== 'Front Porch Eve Aqua Water Valve 8B12\n0x2808') {
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        check=False,
+        check=False, timeout=30,
     )
 
     assert result.returncode == 0, result.stderr

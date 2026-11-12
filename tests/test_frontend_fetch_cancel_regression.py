@@ -14,16 +14,6 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_cancel_all_active_jobs_for_current_fetch_session() -> None:
-    """Regression guard: cancel flow must fan out DELETE to all tracked job IDs."""
-    text = _read_text(DATASET_JS)
-
-    assert "export async function cancelActiveFetchSession()" in text
-    assert "const jobIds = Array.from(_activeFetchSession.activeJobIds);" in text
-    assert "jobIds.map((jobId) => trackedFetch(`/api/job/${jobId}`, { method: \"DELETE\" }))" in text
-
-
-
 def test_load_dataset_has_stale_session_guards() -> None:
     """Regression guard: stale or cancelled sessions must not update dataset state."""
     text = _read_text(DATASET_JS)

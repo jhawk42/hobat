@@ -23,7 +23,7 @@ def _read_text(path: Path) -> str:
 def test_diagnostic_invocation_and_protocol_execution() -> None:
     result = subprocess.run(
         ["node", "tests/js/run-device-diagnostics.mjs", "--ui"],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=False,
+        cwd=REPO_ROOT, capture_output=True, text=True, check=False, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

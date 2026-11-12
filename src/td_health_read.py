@@ -7,6 +7,7 @@ import ipaddress
 import json
 import re
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from functools import cmp_to_key
 from pathlib import Path
@@ -660,7 +661,7 @@ class TDHealthReadService:
         return device
 
     def _require_roster_schema(self) -> None:
-        with self.store._connect() as connection:
+        with closing(self.store._connect()) as connection, connection:
             if connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='device_last_known'"
             ).fetchone() is None:

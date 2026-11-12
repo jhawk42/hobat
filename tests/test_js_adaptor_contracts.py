@@ -3,26 +3,48 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
-import subprocess
 
 import pytest
 
 from td_dataset_catalog import load_dataset_catalog
 
 
-pytestmark = pytest.mark.requires_data_dir
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNNER = REPO_ROOT / "tests" / "js" / "run-adaptor-contracts.mjs"
 
 
+def _guarded_runner(mode: str) -> str:
+    return f"""
+import fs from "node:fs";
+import path from "node:path";
+import {{fileURLToPath}} from "node:url";
+const read = fs.readFileSync;
+const cache = path.resolve("data") + path.sep;
+fs.readFileSync = function(filename, ...args) {{
+  const resolved = path.resolve(filename instanceof URL ? fileURLToPath(filename) : filename);
+  if (resolved.startsWith(cache)) throw new Error(`Unexpected operator cache read: ${{resolved}}`);
+  return read.call(this, filename, ...args);
+}};
+process.argv.push({json.dumps(mode)});
+await import("./tests/js/run-adaptor-contracts.mjs");
+"""
+
+
 def test_all_adaptors_preserve_the_public_result_contract(node_json) -> None:
+    assert node_json(_guarded_runner("--synthetic-only"), evaluate=True, timeout=60) == {
+        "adaptorCount": 12,
+    }
+
+
+@pytest.mark.requires_data_dir
+def test_representative_cached_adaptor_contracts(node_json) -> None:
     result = node_json(
         RUNNER, timeout=60,
     )
     assert result == {"adaptorCount": 12}
 
 
+@pytest.mark.requires_data_dir
 def test_cached_adaptor_outputs_preserve_contract(node_json) -> None:
     actual = node_json(
         RUNNER, "--snapshot", timeout=60,
@@ -50,17 +72,9 @@ def test_cached_adaptor_outputs_preserve_contract(node_json) -> None:
         assert all(edge[1] in node_ids and edge[2] in node_ids for edge in snapshot["edges"]), dataset
 
 
-def test_pinned_adaptor_outputs_match_exact_baseline(node_executable: str) -> None:
-    completed = subprocess.run(
-        [node_executable, str(RUNNER), "--pinned-snapshot"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        check=True,
-        text=True,
-        timeout=60,
-    )
+def test_pinned_adaptor_outputs_match_exact_baseline(node_json) -> None:
     baseline = REPO_ROOT / "tests" / "fixtures" / "adaptor_refactor_baseline.json"
-    actual = json.loads(completed.stdout)
+    actual = node_json(_guarded_runner("--pinned-snapshot"), evaluate=True, timeout=60)
     expected = json.loads(baseline.read_text(encoding="utf-8"))
     roles = {"router", "borderRouter", "child", "eve", "unknown"}
     colors = {"lqHigh", "lqMedium", "lqLow", "lqNone", "lqParentChild", "lqOtbr"}

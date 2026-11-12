@@ -26,7 +26,7 @@ def run_javascript_model() -> dict[str, Any]:
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     return json.loads(completed.stdout)
 

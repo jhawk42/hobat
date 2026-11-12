@@ -6,6 +6,7 @@ import {
   setMoreInfoEnabled,
   setTableColumnCategory,
   setTableHealthColumnsEnabled,
+  selectTableDeviceById,
 } from "../../src/js/tdash-table-renderer.js";
 import {
   activateViewStatus,
@@ -136,6 +137,7 @@ const elements = new Map([
   ["fetch-status-line-content", new FakeElement("div")],
 ]);
 const publishedTableStatuses = [];
+const selectionEvents = [];
 configureViewStatusPresenter((status) => publishedTableStatuses.push(status));
 globalThis.document = {
   activeElement: null,
@@ -154,7 +156,7 @@ globalThis.document = {
     }
     return [];
   },
-  dispatchEvent() {},
+  dispatchEvent(event) { selectionEvents.push(event); return true; },
 };
 globalThis.window = {tdashDebug: {}};
 globalThis.CustomEvent = class {
@@ -375,6 +377,36 @@ headerButton("generalDiagnostics.upTime").click();
 const ascendingUptime = rowOrder("generalDiagnostics.upTime");
 headerButton("generalDiagnostics.upTime").click();
 const descendingUptime = rowOrder("generalDiagnostics.upTime");
+
+selects["search-input"].value = "";
+setTableColumnCategory("all");
+setMoreInfoEnabled(true);
+elements.get("details-list").setAttribute("data-fields", "*");
+const scopedRows = [
+  {_unifiedRecordId: "scope-a", extAddress: "1111111111111111", deviceLabel: "Scope A", metric: 2},
+  {_unifiedRecordId: "scope-b", extAddress: "1111111111111111", deviceLabel: "Scope B", metric: 1},
+];
+renderTableForDataset({rows: scopedRows, loadedFiles: ["fixture.json"]});
+headerButton("metric").click();
+assert.equal(selectTableDeviceById("extaddr:1111111111111111"), false);
+assert.equal(selectTableDeviceById("missing"), false);
+assert.equal(selectTableDeviceById("scope-a"), true);
+assert.equal(document.activeElement.classList.contains("selected-row"), true);
+assert.equal(selectionEvents.at(-1).detail.record, scopedRows[0]);
+assert.equal(selectionEvents.at(-1).detail.direct, true);
+assert.equal(selectTableDeviceById("scope-b"), true);
+assert.equal(tbody.children.filter(row => row.classList.contains("selected-row")).length, 1);
+assert.equal(selectionEvents.at(-1).detail.record, scopedRows[1]);
+assert.ok(elements.get("details-list").children.length > 0
+  || elements.get("summary-list").children.length > 0);
+selects["search-input"].value = "Scope A";
+const beforeFilterEvents = selectionEvents.length;
+applyTableFilters({preserveSelection: true});
+assert.deepEqual(selectionEvents.slice(beforeFilterEvents).map(event => event.detail.record),
+  [null, scopedRows[0]]);
+assert.equal(selectTableDeviceById("scope-b"), false);
+assert.equal(selectTableDeviceById("scope-a"), true);
+selects["search-input"].value = "";
 
 console.log(JSON.stringify({
   healthColumnOrderingCases: orderingCases.length,

@@ -193,12 +193,7 @@ def _enrich_field_ff(raw_value, full_name: str) -> dict:
     """Enrich HAP Feature Flags (ff)."""
     result = _base_field_dict(raw_value, full_name)
     try:
-        ff_int = (
-            int.from_bytes(raw_value, "big")
-            if isinstance(raw_value, bytes)
-            else int(raw_value)
-        )
-        bits = decode_hap_feature_flags(ff_int)
+        bits = decode_hap_feature_flags(raw_value)
         if bits:
             result["supported_features"] = format_hap_feature_flags(bits)
             result["individual_bits"] = [

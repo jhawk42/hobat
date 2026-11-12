@@ -8,6 +8,58 @@ import eve_process
 import util_data
 
 
+@pytest.mark.parametrize("children,expected", [
+    (None, ["child"]), ([], ["child"]), (["other"], ["other", "child"]),
+    (["child"], ["child"]),
+])
+def test_eve_parent_child_repair_preserves_existing_relationships(children, expected):
+    parent = {"id": "parent", "name": "Router", "rloc16_hex": "0x0400", "extra": "keep"}
+    if children is not None:
+        parent["children"] = children
+    nodes = {
+        "parent": parent,
+        "child": {"id": "child", "name": "Sensor", "rloc16_hex": "0x0401"},
+    }
+    result = eve_process.enrich_eve_nodes(nodes)
+    assert set(result) == {"0x0400", "0x0401"}
+    assert result["0x0400"]["children"] == expected
+    assert result["0x0400"]["extra"] == "keep"
+    assert result["0x0401"]["id"] == "child"
+    assert eve_process.enrich_eve_nodes(nodes)["0x0400"]["children"] == expected
+
+
+def test_eve_unresolved_parent_and_route_targets_remain_explicit():
+    nodes = {
+        "orphan": {"id": "orphan", "name": "Sensor", "rloc16_hex": "0x0401",
+                   "routes": [{"to": "router", "cost": 2}, {"to": "missing", "cost": 9}]},
+        "router": {"id": "router", "name": "Other Router", "rloc16_hex": "0x0800"},
+    }
+    result = eve_process.enrich_eve_nodes(nodes)
+    assert set(result) == {"0x0401", "0x0800"}
+    assert "children" not in result["0x0800"]
+    assert result["0x0401"]["routes"] == [
+        {"to": "router", "cost": 2, "to_name": "Other Router", "to_rloc16": "0x0800"},
+        {"to": "missing", "cost": 9, "to_name": "Unknown(missing)", "to_rloc16": "Unknown(missing)"},
+    ]
+
+
+def test_eve_file_normalizes_base64_extended_address_in_both_locations(tmp_path, monkeypatch):
+    source = tmp_path / "eve.json"
+    source.write_text(json.dumps({"nodes": [{
+        "id": "node", "name": "Device", "rloc16": 1024,
+        "threadNetworks": [{"extAddress": "ABEiM0RVZnc=", "networkName": "Keep"}],
+    }]}))
+    monkeypatch.setattr(eve_process.util_network, "fetch_omr_prefix",
+                        lambda: pytest.fail("unexpected live prefix lookup"))
+    node = eve_process.load_and_parse_eve_file(source)["node"]
+    assert node["threadNetworks"] == [{
+        "extAddress": "0011223344556677", "extAddress_hex": "0011223344556677",
+        "networkName": "Keep",
+    }]
+    assert node["rloc16"] == "0x0400"
+    assert node["node_id_eve"] == "node"
+
+
 @pytest.mark.parametrize("legacy_only", [False, True])
 def test_eve_omr_enrichment_requires_full_observed_cidr(tmp_path, monkeypatch, legacy_only):
     address = "fda5:494c:9a12::1234"

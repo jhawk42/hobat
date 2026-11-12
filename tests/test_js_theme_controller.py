@@ -16,6 +16,6 @@ def test_theme_controller() -> None:
         cwd=Path(__file__).resolve().parents[1],
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     assert result.stdout.strip() == "theme controller: passed"

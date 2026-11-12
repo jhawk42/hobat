@@ -22,7 +22,7 @@ def test_otbr_restapi_childtable_and_children_share_one_child_node() -> None:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        check=False,
+        check=False, timeout=30,
     )
 
     assert result.returncode == 0, result.stderr

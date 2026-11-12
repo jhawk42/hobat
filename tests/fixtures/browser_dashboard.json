@@ -1,0 +1,11 @@
+{
+  "td-otbr-cli-meshdiag-topology.json": [
+    {"extAddress": "aa00000000000001", "rloc16": "0x1000", "role": "router", "isBorderRouter": true, "deviceLabel": "Fixture router", "macCounters": {"ifTotalErrorsTotalPktsRatio": 8}, "route": {"routeData": [{"rloc16": "0x2000", "linkQualityIn": 3, "linkQualityOut": 3}]}, "links3": [{"rloc16": "0x2000"}]},
+    {"extAddress": "aa00000000000002", "rloc16": "0x2000", "role": "router", "deviceLabel": "Fixture peer"}
+  ],
+  "td-otbr-cli-thread-network-info.json": {"networkName": "Browser fixture", "extPanId": "1234567890abcdef"},
+  "td-otbr-restapi-dataset-active.json": {},
+  "td-otbr-restapi-devices-list.json": [
+    {"extAddress": "bb00000000000001", "rloc16": "0x3000", "role": "router", "deviceLabel": "REST fixture"}
+  ]
+}

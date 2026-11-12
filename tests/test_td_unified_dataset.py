@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -740,27 +741,31 @@ def test_independent_process_builds_share_one_advisory_lock_and_generation(tmp_p
     program = (
         "import json,sys; from pathlib import Path; "
         "from td_unified_dataset import build_unified_dataset; "
-        "print('ready',flush=True); "
+        "Path(sys.argv[2]).write_text('ready'); "
         "print(json.dumps(build_unified_dataset(Path(sys.argv[1]),'otbr_cli_unified')),flush=True)"
     )
     processes = []
-    with (tmp_path / ".td-unified.lock").open("a+b") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        try:
-            for _ in range(2):
-                process = subprocess.Popen(
-                    [sys.executable, "-c", program, str(tmp_path)],
-                    cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                )
-                processes.append(process)
-                assert process.stdout.readline().strip() == "ready"
-                assert process.poll() is None
-            assert not (tmp_path / entry["files"][0]).exists()
-        finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
     results = []
     try:
+        with (tmp_path / ".td-unified.lock").open("a+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                for index in range(2):
+                    ready = tmp_path / f"worker-{index}.ready"
+                    process = subprocess.Popen(
+                        [sys.executable, "-c", program, str(tmp_path), str(ready)],
+                        cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    )
+                    processes.append(process)
+                    deadline = time.monotonic() + 10
+                    while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    assert ready.exists(), "Unified worker did not reach its lock readiness marker"
+                    assert process.poll() is None
+                assert not (tmp_path / entry["files"][0]).exists()
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
         for process in processes:
             stdout, stderr = process.communicate(timeout=30)
             assert process.returncode == 0, stderr
@@ -769,7 +774,11 @@ def test_independent_process_builds_share_one_advisory_lock_and_generation(tmp_p
         for process in processes:
             if process.poll() is None:
                 process.terminate()
-                process.wait(timeout=10)
+            try:
+                process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=10)
     assert len({result["generationId"] for result in results}) == 1
     assert sorted(result["noOp"] for result in results) == [False, True]
     unified.read_generation(tmp_path, entry, verify_inputs=True)

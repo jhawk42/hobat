@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable
 
 import pytest
+from node_test_support import run_node as execute_node
 from node_test_support import run_node_json as execute_node_json
 
 
@@ -51,6 +53,10 @@ WEBSERVER_TEST_MODULES = {
 	"test_td_webserver_checkpoint_serve.py",
 	"test_td_webserver_concurrency.py",
 	"test_td_webserver_device.py",
+	"test_td_webserver_device_actions.py",
+	"test_td_webserver_health.py",
+	"test_td_webserver_jobs.py",
+	"test_td_webserver_routes.py",
 	"test_td_webserver_job_poll_metadata.py",
 	"test_webserver_helpers.py",
 	"test_webserver_smoke.py",
@@ -104,6 +110,17 @@ def node_executable() -> str:
 	if node_executable is None:
 		pytest.skip("Node.js is required for frontend contract tests")
 	return node_executable
+
+
+@pytest.fixture(scope="session")
+def node_run(node_executable: str) -> Callable[..., subprocess.CompletedProcess[str]]:
+	def run(
+		script: str | Path, *args: str, evaluate: bool = False, timeout: float = 30,
+	) -> subprocess.CompletedProcess[str]:
+		return execute_node(
+			node_executable, script, *args, evaluate=evaluate, timeout=timeout,
+		)
+	return run
 
 
 @pytest.fixture(scope="session")

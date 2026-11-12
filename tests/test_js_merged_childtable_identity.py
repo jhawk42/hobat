@@ -22,7 +22,7 @@ def test_premerged_childtable_rows_use_direct_thread_identity() -> None:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        check=False,
+        check=False, timeout=30,
     )
 
     assert result.returncode == 0, result.stderr

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   renderHealthFindingDetails, renderHealthComparison, renderHealthInsights, renderHealthRoster,
+  renderHealthRosterDetail, renderDeviceHealth, exportHealthAssessment,
 } from "../../src/js/tdash-health.js";
 
 class Element {
@@ -375,4 +376,120 @@ delete assessment.coverage.restDiagnostics;
 delete assessment.coverage.restChildTableCoverage;
 renderInsights();
 assert.ok(!nodes(evidence).some((node) => node.className === "health-rest-coverage"));
+const rosterDetail = {
+  displayLabel: "Detail device", deviceId: "extaddr:0000000000000001", rosterState: "expected",
+  allowedActions: ["enroll", "mark-offline", "clear-offline", "retire", "unretire"],
+  fields: {
+    isRouter: {value: false, freshness: "fresh", confidence: "high", sourceFile: "fixture.json"},
+    partition: {value: 0, freshness: "fresh", confidence: "high"},
+    missing: {freshness: "absent"},
+  },
+};
+const detailActions = [], copied = [];
+const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+Object.defineProperty(globalThis, "navigator", {configurable: true,
+  value: {clipboard: {writeText: value => copied.push(value)}}});
+try {
+  renderHealthRosterDetail(container, null);
+  assert.equal(container.children.length, 0);
+  for (const [available, pending] of [[true, false], [true, true], [false, false]]) {
+    renderHealthRosterDetail(container, rosterDetail, "observed", {
+      mutationAvailable: available, pending,
+      action: (action, detail) => detailActions.push([action, detail]),
+    });
+    const buttons = nodes(container).filter(node => node.tagName === "button");
+    buttons[0].click();
+    assert.equal(buttons.length, available ? 6 : 1);
+    if (available) {
+      assert.ok(buttons.slice(1).every(button => button.disabled === pending));
+      if (!pending) buttons.slice(1).forEach(button => button.click());
+    }
+    assert.ok(texts(container).some(text => text.startsWith("false · fresh")));
+    assert.ok(texts(container).some(text => text.startsWith("0 · fresh")));
+    assert.ok(texts(container).includes("Absent"));
+  }
+  assert.deepEqual(detailActions, rosterDetail.allowedActions.map(action => [action, rosterDetail]));
+  assert.deepEqual(copied, Array(3).fill(rosterDetail.deviceId));
+  for (const [reason, message] of [
+    ["observation-context-required", /retained assessment context/],
+    ["device-not-present-in-context", /observed in this assessment/],
+    ["other", /unavailable in the current context/],
+  ]) {
+    renderHealthRosterDetail(container, {...rosterDetail, disabledActionReasons: {enroll: reason}});
+    assert.ok(texts(container).some(text => message.test(text)));
+  }
+} finally {
+  if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+  else delete globalThis.navigator;
+}
+
+for (const [deviceModel, expected] of [
+  [{loading: true}, "Loading device health…"],
+  [{error: "detail unavailable"}, "detail unavailable"],
+  [{}, "No processed health findings for this device."],
+  [{device: {displayName: "Device", findings: []}}, "No attributed findings in this assessment."],
+]) {
+  renderDeviceHealth(container, deviceModel);
+  assert.ok(texts(container).includes(expected));
+}
+const deviceFindings = ["poor", "moderate", "strong"].map((status, index) => ({
+  findingId: `finding-${index}`, ruleId: `fixture-${index}`, title: `Title ${index}`,
+  status, summary: `Summary ${index}`, scope: "device", confidence: "high",
+  evidenceKind: "snapshot", materiality: "device", evidence: {sampleCount: index},
+  sourceFiles: ["fixture.json"], whyItMatters: "Impact", action: "Investigate", verify: "Check",
+}));
+const deviceCallbacks = [];
+renderDeviceHealth(container, {
+  device: {deviceId: rosterDetail.deviceId, displayName: "Device", role: "router",
+    isBorderRouter: true, findings: deviceFindings},
+}, {availableTargets: () => 1, availableTopologyTargets: () => 1,
+  inspectDevice: group => deviceCallbacks.push(group.findingId)});
+assert.deepEqual(container.children.filter(node => node.tagName === "section")
+  .map(node => node.className), [
+  "device-health-section health-finding-section-needs-work",
+  "device-health-section health-finding-section-needs-attention",
+  "device-health-section health-finding-section-going-well",
+]);
+nodes(container).filter(node => node.dataset.healthAction === "inspectDevice").forEach(node => node.click());
+assert.deepEqual(deviceCallbacks, ["finding-0", "finding-1", "finding-2"]);
+assert.equal(texts(container).filter(text => text === "Sources: fixture.json").length, 3);
+renderDeviceHealth(container, {device: {displayName: "Device", findings: deviceFindings}},
+  {availableTargets: () => 0, availableTopologyTargets: () => 0});
+assert.ok(!nodes(container).some(node => node.dataset.healthAction === "inspectDevice"));
+
+const originalDocument = globalThis.document, originalTimeout = globalThis.setTimeout;
+const originalCreateURL = URL.createObjectURL, originalRevokeURL = URL.revokeObjectURL;
+const exported = [], revoked = [], cleanups = [], anchors = [];
+globalThis.document = {
+  body: {appendChild(anchor) { anchors.push(anchor); }},
+  createElement: tag => {
+    assert.equal(tag, "a");
+    return {click() { this.clicked = true; }, remove() { this.removed = true; }};
+  },
+};
+URL.createObjectURL = blob => { exported.push(blob); return "blob:fixture"; };
+URL.revokeObjectURL = url => revoked.push(url);
+globalThis.setTimeout = callback => { cleanups.push(callback); return 1; };
+try {
+  const assessmentExport = {datasetId: "fixture", assessmentId: "assessment:one", findings: []};
+  exportHealthAssessment(null);
+  assert.equal(exported.length, 0);
+  exportHealthAssessment(assessmentExport);
+  assert.equal(exported.length, 1);
+  assert.deepEqual(JSON.parse(await exported[0].text()), assessmentExport);
+  assert.equal(exported[0].type, "application/json");
+  assert.equal(anchors[0].download, "td-health-fixture-assessment-one.json");
+  assert.equal(anchors[0].href, "blob:fixture");
+  assert.equal(anchors[0].clicked, true);
+  assert.equal(anchors[0].removed, true);
+  assert.deepEqual(revoked, []);
+  assert.equal(cleanups.length, 1);
+  cleanups[0]();
+  assert.deepEqual(revoked, ["blob:fixture"]);
+} finally {
+  globalThis.document = originalDocument;
+  globalThis.setTimeout = originalTimeout;
+  URL.createObjectURL = originalCreateURL;
+  URL.revokeObjectURL = originalRevokeURL;
+}
 console.log("Health detail contracts passed");

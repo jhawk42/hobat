@@ -7,6 +7,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -27,7 +28,7 @@ from td_health_processor import process_health
 from td_health_roster import RosterFact
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
-from webserver_test_support import reset_webserver_state, run_job_cleanup_sweep
+from webserver_test_support import cleanup_webserver_state, reset_webserver_state, run_job_cleanup_sweep
 
 
 def _request(data_dir, *, query=None, match_info=None):
@@ -59,6 +60,32 @@ def _chunked_content(*chunks):
 
 
 class HealthApiTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.addAsyncCleanup(cleanup_webserver_state)
+        self.data_dir = Path(directory.name)
+
+    async def test_roster_schema_check_closes_connection_on_success_and_failure(self):
+        from td_health_read import HealthUnavailableError, TDHealthReadService
+
+        SQLiteHealthStore(self.data_dir / HOBAT_DATABASE_FILENAME)
+        reader = TDHealthReadService(self.data_dir)
+        for has_schema in (True, False):
+            with self.subTest(has_schema=has_schema):
+                connection = sqlite3.connect(":memory:")
+                self.addCleanup(connection.close)
+                if has_schema:
+                    connection.execute("CREATE TABLE device_last_known (device_id TEXT)")
+                with patch.object(reader.store, "_connect", return_value=connection):
+                    if has_schema:
+                        reader._require_roster_schema()
+                    else:
+                        with self.assertRaises(HealthUnavailableError):
+                            reader._require_roster_schema()
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    connection.execute("SELECT 1")
+
     async def test_roster_patch_batch_header_and_prefix_failure_roll_back_every_table(self):
         import td_health_sqlite
         from test_td_health_unified import NETWORK, roster_history_seed
@@ -80,7 +107,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                     )
 
                 def snapshot():
-                    with sqlite3.connect(store.path) as connection:
+                    with closing(sqlite3.connect(store.path)) as connection, connection:
                         return {
                             table: sorted(connection.execute(f'SELECT * FROM "{table}"').fetchall(), key=repr)
                             for (table,) in connection.execute(
@@ -127,7 +154,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             }
 
             def snapshot():
-                with sqlite3.connect(store.path) as connection:
+                with closing(sqlite3.connect(store.path)) as connection, connection:
                     tables = connection.execute(
                         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
                     ).fetchall()
@@ -228,7 +255,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             ))
             store.save_processing_result(before, before_assessment)
             store.save_processing_result(after, after_assessment)
-            with sqlite3.connect(store.path) as connection:
+            with closing(sqlite3.connect(store.path)) as connection, connection:
                 connection.execute("DELETE FROM comparison_items")
                 connection.execute("DELETE FROM comparisons")
                 connection.execute(
@@ -351,7 +378,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             )
             observation, assessment = processed.observation, processed.assessment
             device_id = observation.devices[0].device_id
-            with sqlite3.connect(store.path) as connection:
+            with closing(sqlite3.connect(store.path)) as connection, connection:
                 original_metric_rows = connection.execute(
                     """SELECT metric, value, unit, denominator, source_file
                        FROM metric_samples WHERE observation_id=?
@@ -407,7 +434,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["revision"], 1)
             self.assertEqual(result["networkRosterRevision"], 1)
             self.assertEqual(result["reassessment"]["state"], "complete")
-            with sqlite3.connect(store.path) as connection:
+            with closing(sqlite3.connect(store.path)) as connection, connection:
                 enrolled = connection.execute(
                     """SELECT roster_state, revision, reason
                        FROM expected_devices WHERE network_id=? AND device_id=?""",
@@ -499,7 +526,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             replay = await td_webserver.handle_health_roster_device_patch_api(request)
             self.assertEqual(json.loads(replay.text), result)
             self.assertEqual(replay.status, 201)
-            with sqlite3.connect(store.path) as connection:
+            with closing(sqlite3.connect(store.path)) as connection, connection:
                 self.assertEqual(
                     connection.execute(
                         "SELECT COUNT(*) FROM roster_lifecycle_events WHERE network_id=?",
@@ -604,7 +631,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             )
             observation, assessment = processed.observation, processed.assessment
             device_id = observation.devices[0].device_id
-            with sqlite3.connect(store.path) as connection:
+            with closing(sqlite3.connect(store.path)) as connection, connection:
                 connection.execute(
                     """UPDATE metric_samples SET value=101
                        WHERE observation_id=? AND metric='routerRolePercent'""",
@@ -635,7 +662,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                     payload=payload,
                 ))
 
-            with sqlite3.connect(store.path) as connection:
+            with closing(sqlite3.connect(store.path)) as connection, connection:
                 self.assertEqual(
                     connection.execute(
                         "SELECT COUNT(*) FROM expected_devices WHERE network_id=?",
@@ -728,7 +755,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(json.loads(response.text)["rosterState"], "intentionally-offline")
 
     async def test_process_dataset_starts_deduplicated_health_task(self) -> None:
-        data_dir = Path(tempfile.mkdtemp())
+        data_dir = self.data_dir
         request = _request(data_dir)
         request.json = unittest.mock.AsyncMock(
             return_value={"dataset": "otbr_cli_diagnostics_fetch"}
@@ -756,13 +783,13 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_process_dataset_rejects_invalid_request(self) -> None:
-        request = _request(Path(tempfile.mkdtemp()))
+        request = _request(self.data_dir)
         request.json = unittest.mock.AsyncMock(return_value={"dataset": "all"})
         with self.assertRaises(aiohttp.web.HTTPBadRequest):
             await td_webserver.handle_health_process_dataset_api(request)
 
     async def test_process_dataset_always_allows_partial_input(self) -> None:
-        request = _request(Path(tempfile.mkdtemp()))
+        request = _request(self.data_dir)
         request.json = unittest.mock.AsyncMock(
             return_value={"dataset": "otbr_cli_diagnostics_fetch"}
         )
@@ -804,7 +831,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
         )
         td_webserver._job_registry[job.job_id] = job
         response = await td_webserver.handle_job_cancel_api(
-            _request(Path(tempfile.mkdtemp()), match_info={"job_id": job.job_id})
+            _request(self.data_dir, match_info={"job_id": job.job_id})
         )
         payload = json.loads(response.text)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
@@ -872,15 +899,9 @@ class HealthJobLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         reset_webserver_state()
         self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.addAsyncCleanup(cleanup_webserver_state)
         self.data_dir = Path(self._tmpdir.name)
-
-    async def asyncTearDown(self) -> None:
-        tasks = list(td_webserver._background_tasks)
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        reset_webserver_state()
-        self._tmpdir.cleanup()
 
     def _process_request(self):
         request = _request(self.data_dir)
@@ -1003,6 +1024,8 @@ class HealthJobLifecycleTests(unittest.IsolatedAsyncioTestCase):
 class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.addAsyncCleanup(cleanup_webserver_state)
         self.data_dir = Path(self._tmpdir.name)
         SQLiteHealthStore(self.data_dir / HOBAT_DATABASE_FILENAME).save_processing_result(
             *_result()
@@ -1010,11 +1033,8 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(td_webserver.aiohttp.web, "run_app") as run_app:
             td_webserver.main(["--datadir", str(self.data_dir), "--port", "0"])
         self.client = TestClient(TestServer(run_app.call_args.args[0]))
+        self.addAsyncCleanup(self.client.close)
         await self.client.start_server()
-
-    async def asyncTearDown(self) -> None:
-        await self.client.close()
-        self._tmpdir.cleanup()
 
     async def test_same_origin_health_reads_reach_every_endpoint_without_cors(self) -> None:
         paths = (

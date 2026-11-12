@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,8 +24,32 @@ from td_health_sqlite import (
 )
 
 
+def test_migration_backup_closes_verification_connections(tmp_path, monkeypatch):
+    path = tmp_path / "source.db"
+    _create_schema_fixture(path, 3)
+    connect = sqlite3.connect
+    connections = []
+
+    def track(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", track)
+    try:
+        backup = td_health_sqlite._create_migration_backup(path, 3, SCHEMA_VERSION)
+        assert backup.is_file()
+        assert len(connections) == 4
+        for connection in connections:
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                connection.execute("SELECT 1")
+    finally:
+        for connection in connections:
+            connection.close()
+
+
 def _create_schema_fixture(path, version: int) -> None:
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("PRAGMA foreign_keys=OFF")
         connection.executescript(_SCHEMA_V2 if version <= 2 else _SCHEMA)
 
@@ -228,7 +253,7 @@ def test_historical_schema_fixture_has_version_specific_layout(tmp_path, version
     path = tmp_path / f"schema-v{version}.db"
     _create_schema_fixture(path, version)
 
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         columns = {
             row[1] for row in connection.execute("PRAGMA table_info(assessments)")
         }
@@ -322,7 +347,7 @@ def test_historical_schema_upgrades_to_current_with_rows_preserved(tmp_path, ver
 
     SQLiteHealthStore(path)
 
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         expected_ledger = (
             list(range(1, SCHEMA_VERSION + 1))
             if version == 1
@@ -349,14 +374,14 @@ def test_historical_schema_upgrades_to_current_with_rows_preserved(tmp_path, ver
         if version == 1:
             fresh_path = tmp_path / "fresh-v8.db"
             SQLiteHealthStore(fresh_path)
-            with sqlite3.connect(fresh_path) as fresh:
+            with closing(sqlite3.connect(fresh_path)) as fresh, fresh:
                 assert _schema_layout(connection) == _schema_layout(fresh)
 
 
 def test_schema_validation_quotes_database_index_names(tmp_path) -> None:
     path = tmp_path / "quoted-index.db"
     SQLiteHealthStore(path)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(
             'CREATE UNIQUE INDEX "odd; DROP TABLE assessments; --" '
             "ON assessments(status)"
@@ -374,7 +399,7 @@ def test_migration_failure_rolls_back_schema_data_and_ledger_then_retry_succeeds
 ) -> None:
     path = tmp_path / "retry.db"
     _create_schema_fixture(path, 3)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         before_objects = connection.execute(
             "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
         ).fetchall()
@@ -409,7 +434,7 @@ def test_migration_failure_rolls_back_schema_data_and_ledger_then_retry_succeeds
         SQLiteHealthStore(path)
     assert error.value.category == "migration-failed"
 
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute(
             "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
         ).fetchall() == before_objects
@@ -419,14 +444,14 @@ def test_migration_failure_rolls_back_schema_data_and_ledger_then_retry_succeeds
         assert connection.execute("SELECT * FROM assessments").fetchall() == before_assessments
     backups = list((tmp_path / ".migration-backups").glob("*.sqlite"))
     assert len(backups) == 1
-    with sqlite3.connect(backups[0]) as backup:
+    with closing(sqlite3.connect(backups[0])) as backup, backup:
         assert backup.execute("PRAGMA integrity_check").fetchone() == ("ok",)
 
     monkeypatch.setattr(
         td_health_sqlite, "SCHEMA_MIGRATIONS", original_registry
     )
     SQLiteHealthStore(path)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute(
             "SELECT MAX(version) FROM schema_migrations"
         ).fetchone() == (SCHEMA_VERSION,)
@@ -438,7 +463,7 @@ def test_schema_failure_rolls_back_ddl_and_ledger_then_retry_succeeds(
 ) -> None:
     path = tmp_path / f"retry-v{target}.db"
     _create_schema_fixture(path, target - 1)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         before_objects = connection.execute(
             "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
         ).fetchall()
@@ -469,7 +494,7 @@ def test_schema_failure_rolls_back_ddl_and_ledger_then_retry_succeeds(
     with pytest.raises(HealthStoreMigrationError) as error:
         SQLiteHealthStore(path)
     assert error.value.category == "migration-failed"
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute(
             "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
         ).fetchall() == before_objects
@@ -485,7 +510,7 @@ def test_schema_failure_rolls_back_ddl_and_ledger_then_retry_succeeds(
         td_health_sqlite, "SCHEMA_MIGRATIONS", original_registry
     )
     SQLiteHealthStore(path)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         relationship_type = next(
             row for row in connection.execute(
                 "PRAGMA table_info(comparison_items)"
@@ -503,7 +528,7 @@ def test_backup_publication_failure_leaves_database_unchanged(
 ) -> None:
     path = tmp_path / "backup-failure.db"
     _create_schema_fixture(path, 3)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         before_objects = connection.execute(
             "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
         ).fetchall()
@@ -519,7 +544,7 @@ def test_backup_publication_failure_leaves_database_unchanged(
         SQLiteHealthStore(path)
 
     assert error.value.category == "backup-failed"
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute(
             "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
         ).fetchall() == before_objects
@@ -534,7 +559,7 @@ def test_backup_publication_failure_leaves_database_unchanged(
 @pytest.mark.parametrize("versions", [(2, 4), (0,), (SCHEMA_VERSION + 1,)])
 def test_invalid_ledgers_fail_closed(versions, tmp_path) -> None:
     path = tmp_path / "invalid-ledger.db"
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(
             "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
         )
@@ -598,38 +623,43 @@ def _wait_for_marker(process, marker: Path) -> None:
         if marker.exists():
             return
         if process.poll() is not None:
-            stdout, stderr = process.communicate()
+            stdout, stderr = process.communicate(timeout=5)
             pytest.fail(f"migration subprocess exited early: {stdout}\n{stderr}")
         time.sleep(0.05)
-    process.terminate()
-    process.wait(timeout=5)
     pytest.fail("migration subprocess did not reach its DDL marker")
+
+
+def _stop_migration_process(process) -> None:
+    if process.poll() is None:
+        process.terminate()
+    try:
+        process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate(timeout=5)
 
 
 def test_wal_reader_stays_available_during_locked_migration(tmp_path) -> None:
     path = tmp_path / "wal-reader.db"
     _create_schema_fixture(path, 3)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("PRAGMA journal_mode=WAL")
-    reader = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
-    reader.execute("BEGIN")
-    assert reader.execute("SELECT MAX(version) FROM schema_migrations").fetchone() == (3,)
-    marker = tmp_path / "migration-ready"
-    process = _delayed_migration_process(path, marker)
-    try:
-        _wait_for_marker(process, marker)
-        assert reader.execute(
-            "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone() == (3,)
-        stdout, stderr = process.communicate(timeout=10)
-        assert process.returncode == 0, stderr
-        assert stdout.strip() == "migrated"
-    finally:
-        reader.close()
-        if process.poll() is None:
-            process.terminate()
-            process.wait(timeout=5)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as reader:
+        reader.execute("BEGIN")
+        assert reader.execute("SELECT MAX(version) FROM schema_migrations").fetchone() == (3,)
+        marker = tmp_path / "migration-ready"
+        process = _delayed_migration_process(path, marker)
+        try:
+            _wait_for_marker(process, marker)
+            assert reader.execute(
+                "SELECT MAX(version) FROM schema_migrations"
+            ).fetchone() == (3,)
+            stdout, stderr = process.communicate(timeout=10)
+            assert process.returncode == 0, stderr
+            assert stdout.strip() == "migrated"
+        finally:
+            _stop_migration_process(process)
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute(
             "SELECT MAX(version) FROM schema_migrations"
         ).fetchone() == (SCHEMA_VERSION,)
@@ -639,8 +669,8 @@ def test_competing_writer_gets_bounded_migration_busy_error(tmp_path) -> None:
     path = tmp_path / "busy.db"
     _create_schema_fixture(path, 3)
     writer = sqlite3.connect(path)
-    writer.execute("BEGIN IMMEDIATE")
     try:
+        writer.execute("BEGIN IMMEDIATE")
         script = (
             "from pathlib import Path; "
             "from td_health_sqlite import SQLiteHealthStore; "
@@ -674,12 +704,14 @@ def test_terminated_migration_rolls_back_and_retry_succeeds(tmp_path) -> None:
     _create_schema_fixture(path, 3)
     marker = tmp_path / "migration-ready"
     process = _delayed_migration_process(path, marker, sleep_seconds=30)
-    _wait_for_marker(process, marker)
-    process.terminate()
-    process.wait(timeout=10)
-    stdout, stderr = process.communicate()
+    try:
+        _wait_for_marker(process, marker)
+        process.terminate()
+        stdout, stderr = process.communicate(timeout=10)
+    finally:
+        _stop_migration_process(process)
     assert "Traceback" not in stderr
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall() == [(2,), (3,)]
@@ -691,7 +723,7 @@ def test_terminated_migration_rolls_back_and_retry_succeeds(tmp_path) -> None:
     assert len(list((tmp_path / ".migration-backups").glob("*.sqlite"))) == 1
 
     SQLiteHealthStore(path)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute(
             "SELECT MAX(version) FROM schema_migrations"
         ).fetchone() == (SCHEMA_VERSION,)

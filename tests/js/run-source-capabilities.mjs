@@ -4,6 +4,8 @@ import {
   datasetIsAvailable,
   isFileCached,
   sourceIsAvailable,
+  sourceHasAvailableDatasets,
+  loadSourceCapabilities,
 } from "../../src/js/tdash-capabilities.js";
 
 const capabilities = {
@@ -53,4 +55,33 @@ assert.equal(datasetIsAvailable({
   files: ["td-static-extaddr-device-label.json"],
 }, capabilities), true);
 
+assert.equal(sourceIsAvailable("missing", capabilities), false);
+assert.equal(sourceIsAvailable("offline", {sources: {offline: {state: "unavailable"}}}), false);
+assert.equal(datasetIsAvailable({source: "missing", files: ["absent"]}, capabilities), false);
+assert.equal(datasetIsAvailable({source: "otbr-cli", files: ["absent"]}, capabilities), false);
+const unified = {source: "offline", unified: {}, files: ["product.json"]};
+const buildable = {sources: {}, files: {"product.json": {buildableFromCache: true}}};
+assert.equal(datasetIsAvailable(unified, buildable), true);
+assert.equal(datasetIsAvailable(unified, {files: {}}), false);
+assert.equal(sourceHasAvailableDatasets("offline", buildable, [unified]), true);
+assert.equal(sourceHasAvailableDatasets("offline", buildable, [{...unified, selectable: false}]), false);
+const originalFetch = globalThis.fetch;
+try {
+  for (const outcome of ["success", "http", "payload", "network"]) {
+    let requests = 0;
+    globalThis.fetch = async (url) => {
+      requests++;
+      assert.equal(url, "/api/capabilities");
+      if (outcome === "network") throw new TypeError("disconnected");
+      return {ok: outcome !== "http", status: outcome === "http" ? 503 : 200,
+        json: async () => outcome === "payload" ? {sources: {}} : capabilities};
+    };
+    if (outcome === "success") assert.equal(await loadSourceCapabilities(), capabilities);
+    else await assert.rejects(loadSourceCapabilities(),
+      outcome === "http" ? /503/ : outcome === "payload" ? /invalid/ : /disconnected/);
+    assert.equal(requests, 1);
+  }
+} finally {
+  globalThis.fetch = originalFetch;
+}
 console.log("source capability contracts passed");

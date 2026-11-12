@@ -5255,7 +5255,7 @@ def _create_migration_backup(
         finally:
             destination.close()
             source.close()
-        with sqlite3.connect(temporary_path) as verify:
+        with closing(sqlite3.connect(temporary_path)) as verify, verify:
             integrity = verify.execute("PRAGMA integrity_check").fetchone()
             if not integrity or integrity[0] != "ok":
                 raise sqlite3.DatabaseError("Migration backup integrity check failed")
@@ -5289,10 +5289,10 @@ def _create_migration_backup(
             metadata_published = True
         finally:
             metadata_temporary.unlink(missing_ok=True)
-        with sqlite3.connect(
+        with closing(sqlite3.connect(
             f"{backup_path.resolve().as_uri()}?mode=ro&immutable=1",
             uri=True,
-        ) as published:
+        )) as published, published:
             integrity = published.execute("PRAGMA integrity_check").fetchone()
             if not integrity or integrity[0] != "ok":
                 raise sqlite3.DatabaseError(

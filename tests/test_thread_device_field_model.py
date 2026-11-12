@@ -17,8 +17,6 @@ from td_device_fields import (
 )
 
 
-pytestmark = pytest.mark.requires_data_dir
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = REPO_ROOT / "tests" / "fixtures" / "thread_device_field_model.json"
 MODEL = json.loads(MODEL_PATH.read_text(encoding="utf-8"))
@@ -177,6 +175,7 @@ def test_legacy_tlv_fields_normalize_as_request_only_metadata() -> None:
     assert "tlvValues" not in PREFERRED_FIELD_NAMES.values()
 
 
+@pytest.mark.requires_data_dir
 def test_snapshot_files_exist() -> None:
     missing = [name for name in MODEL["snapshotFiles"] if not (REPO_ROOT / "data" / name).is_file()]
     assert missing == []
@@ -214,6 +213,7 @@ def _iter_leaf_paths(value: Any, prefix: str = ""):
         yield prefix
 
 
+@pytest.mark.requires_data_dir
 def test_maintained_snapshot_paths_are_classified() -> None:
     catalog_paths = {field["path"] for field in MODEL["fields"]}
     source_owned_extensions = set(MODEL.get("sourceOwnedExtensionPaths", []))

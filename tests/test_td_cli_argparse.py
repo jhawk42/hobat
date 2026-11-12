@@ -353,6 +353,7 @@ source "$2"
                         capture_output=True,
                         text=True,
                         check=True,
+                        timeout=30,
                     )
 
                     output = completed.stdout.splitlines()

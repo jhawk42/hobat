@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import td_webserver
 from td_device_actions import parse_device_action_request
-from webserver_test_support import reset_webserver_state
+from webserver_test_support import cleanup_webserver_state, reset_webserver_state
 
 
 class _DummyTask:
@@ -43,9 +43,7 @@ def _action_request():
 class UnifiedJobsApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         reset_webserver_state()
-
-    def tearDown(self) -> None:
-        reset_webserver_state()
+        self.addAsyncCleanup(cleanup_webserver_state)
 
     async def test_listing_merges_active_jobs_without_sensitive_payloads(self) -> None:
         td_webserver._job_registry["data-job"] = td_webserver.JobStatus(

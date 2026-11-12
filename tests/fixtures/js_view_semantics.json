@@ -1,0 +1,26 @@
+{
+  "entry": {"source": "multi-source", "adaptor": "unified", "files": ["fixture.json"], "rowExtractor": "raw-array", "mergeStrategy": "none"},
+  "rows": [
+    {"_unifiedRecordId": "br", "extAddress": "0000000000000001", "role": "router", "isRouter": true, "isBorderRouter": true, "mode": {"device": "FTD"}, "macCounters": {"ifTotalErrorsTotalPktsRatio": 8}, "children": [{"targetId": "reed", "lqi": 3}, {"targetId": "mtd", "lqi": 1}], "routerNeighbors": [{"targetId": "router", "lqi": 2}]},
+    {"_unifiedRecordId": "router", "extAddress": "0000000000000002", "role": "router", "isRouter": true, "mode": {"device": "FTD"}, "macCounters": {"ifTotalErrorsTotalPktsRatio": 2}},
+    {"_unifiedRecordId": "reed", "extAddress": "0000000000000003", "role": "child", "isReed": true, "mode": {"device": "FTD"}},
+    {"_unifiedRecordId": "mtd", "extAddress": "0000000000000004", "role": "child", "mode": {"device": "MTD", "rxOnWhenIdle": false}},
+    {"_unifiedRecordId": "unknown", "extAddress": "0000000000000005"},
+    {"_unifiedRecordId": "isolated", "extAddress": "0000000000000006", "role": "router", "isRouter": true}
+  ],
+  "expected": {
+    "rowCount": 6,
+    "nodeIds": ["br", "isolated", "mtd", "reed", "router", "unknown"],
+    "edgeIds": ["default_children|directed|br|mtd", "default_children|directed|br|reed", "router_neighbor|directed|br|router"],
+    "flags": {"hasBorderRouters": true, "hasRouters": true, "hasReedNodes": true, "hasFtdNodes": true, "hasMtdNodes": true, "hasRoutersWithChildren": true, "hasFieldMacTotalErrorsRatio": true, "hasFieldMacTotalDiscardsRatio": false},
+    "visibility": [
+      {"node": "border-routers", "link": "all_links", "diagnostic": "all", "nodes": ["br"], "edges": []},
+      {"node": "reed-devices", "link": "all_links", "diagnostic": "all", "nodes": ["reed"], "edges": []},
+      {"node": "mtd-devices", "link": "all_links", "diagnostic": "all", "nodes": ["mtd"], "edges": []},
+      {"node": "routers-with-children", "link": "all_links", "diagnostic": "all", "nodes": ["br", "mtd", "reed"], "edges": ["default_children|directed|br|mtd", "default_children|directed|br|reed"]},
+      {"node": "all", "link": "lq_high", "diagnostic": "all", "nodes": ["br", "isolated", "mtd", "reed", "router", "unknown"], "edges": ["default_children|directed|br|reed"]},
+      {"node": "all", "link": "all_links", "diagnostic": "mac-total-errors-ratio-high", "nodes": ["br"], "edges": []},
+      {"node": "all", "link": "all_links", "diagnostic": "mac-total-discards-ratio-high", "nodes": [], "edges": []}
+    ]
+  }
+}

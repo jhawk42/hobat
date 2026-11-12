@@ -334,7 +334,7 @@ def test_fieldset_disclosures_follow_individual_and_grouped_visibility() -> None
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
 
@@ -953,7 +953,7 @@ def test_workspace_cached_views_reapply_current_filters() -> None:
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
 
@@ -999,7 +999,7 @@ def test_thread_network_partition_source_tooltips_and_missing_source() -> None:
     """
     subprocess.run(
         ["node", "--input-type=module", "--eval", script],
-        cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+        cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=30,
     )
 
 
@@ -1080,7 +1080,7 @@ def test_thread_network_summary_lifecycle_dispatch() -> None:
     """
     subprocess.run(
         ["node", "--input-type=module", "--eval", script],
-        cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+        cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=30,
     )
 
 
@@ -1149,7 +1149,7 @@ def test_thread_network_summary_rebuild_preserves_only_same_dataset_scroll() -> 
     """
     subprocess.run(
         ["node", "--input-type=module", "--eval", script],
-        cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+        cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=30,
     )
 
 

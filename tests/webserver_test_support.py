@@ -27,6 +27,30 @@ def reset_webserver_state() -> None:
         getattr(td_webserver, registry_name).clear()
 
 
+async def cleanup_webserver_state() -> None:
+    loop = asyncio.get_running_loop()
+    current = asyncio.current_task()
+    tasks = set()
+    for registry_name in WEBSERVER_STATE_REGISTRIES:
+        registry = getattr(td_webserver, registry_name)
+        entries = (
+            (*registry.keys(), *registry.values())
+            if isinstance(registry, dict)
+            else tuple(registry)
+        )
+        for entry in entries:
+            task = entry if issubclass(type(entry), asyncio.Task) else getattr(entry, "task", None)
+            if issubclass(type(task), asyncio.Task) and task is not current:
+                assert task.get_loop() is loop, "Webserver task belongs to another test loop"
+                tasks.add(task)
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    reset_webserver_state()
+
+
 async def run_job_cleanup_sweep() -> None:
     with patch.object(td_webserver.asyncio, "sleep", side_effect=[None, asyncio.CancelledError]):
         task = asyncio.create_task(td_webserver._cleanup_job_registry_loop())

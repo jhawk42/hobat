@@ -22,7 +22,7 @@ def test_thread_tools_childtable_placeholder_is_enriched_from_children() -> None
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        check=False,
+        check=False, timeout=30,
     )
 
     assert result.returncode == 0, result.stderr

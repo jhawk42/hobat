@@ -19,7 +19,7 @@ def test_adaptor_intermediate_model_contract() -> None:
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     summary = json.loads(completed.stdout)

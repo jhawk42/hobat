@@ -17,7 +17,7 @@ def run_node_json(script: str) -> dict[str, object]:
         pytest.skip("Node.js is required for layout tests.")
     result = subprocess.run(
         [node_executable, script], cwd=REPO_ROOT, check=True,
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=30,
     )
     return json.loads(result.stdout)
 

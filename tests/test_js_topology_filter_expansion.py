@@ -21,7 +21,7 @@ def test_topology_edge_indexes_and_relationship_expansion() -> None:
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     assert json.loads(result.stdout) == {

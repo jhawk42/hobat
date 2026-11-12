@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import unittest
+import pytest
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -131,6 +132,102 @@ class TestMDNSEnricherRegistry(unittest.TestCase):
                 "    - extra: kept",
             ],
         )
+
+
+@pytest.mark.parametrize("raw,number,status,flags", [
+    (b"\x00", 0, "No flags set", [False] * 6),
+    (b"\x3f", 63, "Connection Allowed, Native Commissioner, Active Commissioner, "
+     "Active Thread Partition, Leader Role, Backbone Router", [True] * 6),
+    ("21", 33, "Connection Allowed, Backbone Router", [True, False, False, False, False, True]),
+])
+def test_meshcop_state_bitmap_through_real_dispatch(raw, number, status, flags):
+    field = mdns_thread_scopes._enrich_properties({b"sb": raw})["sb"]
+    assert field["int_value"] == number
+    assert field["status"] == status
+    assert [(bit["bit"], bit["name"], bit["value"]) for bit in field["individual_bits"]] == list(zip(
+        range(6), ("connection_allowed", "native_commissioner", "active_commissioner",
+                   "active_thread_partition", "leader_role", "backbone_router"), flags,
+    ))
+
+
+@pytest.mark.parametrize("raw,number,hex_value,status,flags", [
+    (b"\x00", 0, "0000", "No flags set", [False] * 8),
+    (b"\xff", 255, "00FF", "Active Commissioning, Native Commissioner, Ethernet Interface, "
+     "WiFi Interface, Thread Interface, Thread Multicast Listener EID, "
+     "Thread Domain Unicast Address, Backbone Router", [True] * 8),
+    (b"\x81", 129, "0081", "Active Commissioning, Backbone Router",
+     [True, False, False, False, False, False, False, True]),
+])
+def test_meshcop_beacon_bitmap_through_real_dispatch(raw, number, hex_value, status, flags):
+    field = mdns_thread_scopes._enrich_properties({b"bb": raw})["bb"]
+    assert (field["int_value"], field["hex_value"], field["status"]) == (number, hex_value, status)
+    assert [bit["value"] for bit in field["individual_bits"]] == flags
+    assert [bit["name"] for bit in field["individual_bits"]] == [
+        "commissioning_active", "native_commissioner", "eth_interface", "wifi_interface",
+        "thread_interface", "thread_ml_eid", "thread_dua", "backbone_router",
+    ]
+
+
+@pytest.mark.parametrize("raw,number,hex_value", [
+    (b"\x00", 0, "00000000"), (b"\x01\x23\xab\xcd", 19114957, "0123ABCD"),
+])
+def test_meshcop_partition_fixed_width_hex(raw, number, hex_value):
+    field = mdns_thread_scopes._enrich_properties({b"pt": raw})["pt"]
+    assert field["int_value"] == number
+    assert field["hex_value"] == hex_value
+
+
+@pytest.mark.parametrize("raw,values,status", [
+    (b"0", ["Paired", "Enabled", "No"], "Pairing: Paired | IP Networking: Enabled | Problem Detected: No"),
+    ("7", ["Not Paired", "Disabled", "Yes"], "Pairing: Not Paired | IP Networking: Disabled | Problem Detected: Yes"),
+])
+def test_hap_status_wire_values(raw, values, status):
+    field = mdns_thread_scopes._enrich_properties({b"sf": raw})["sf"]
+    assert field["status"] == status
+    assert [bit["value"] for bit in field["individual_bits"]] == values
+    assert [bit["name"] for bit in field["individual_bits"]] == [
+        "pairing_status", "ip_networking_enabled", "problem_detected",
+    ]
+
+
+@pytest.mark.parametrize("raw,flags,features", [
+    (b"\x00", [False] * 4, "No special features"),
+    (b"\x0f", [True] * 4, "HAP over CoAP, Wi-Fi Throughput Management, Matter Bridge, HAP over BLE"),
+    ("5", [True, False, True, False], "HAP over CoAP, Matter Bridge"),
+])
+def test_hap_feature_wire_values_are_enriched(raw, flags, features):
+    field = mdns_thread_scopes._enrich_properties({b"ff": raw})["ff"]
+    assert field["supported_features"] == features
+    assert [bit["value"] for bit in field["individual_bits"]] == flags
+    assert [bit["name"] for bit in field["individual_bits"]] == [
+        "supports_hap_over_coap", "supports_wifi_throughput",
+        "supports_matter_bridge", "supports_hap_over_ble",
+    ]
+
+
+def test_hash_and_malformed_optional_fields_preserve_envelopes():
+    fields = mdns_thread_scopes._enrich_properties({
+        b"sh": b"ASOrzQ==", b"sb": "not-hex", b"bb": b"", b"pt": b"",
+        b"sf": b"bad", b"ff": "bad", b"unknown": b"kept",
+    })
+    assert fields["sh"]["hex_value"] == "0123ABCD"
+    assert fields["sh"]["decoded"] == "ASOrzQ=="
+    assert fields["sh"]["hex"] == "41534f727a513d3d"
+    assert fields["sh"]["base64"] == "QVNPcnpRPT0="
+    for key in ("sb", "bb", "pt", "sf", "ff"):
+        assert "individual_bits" not in fields[key]
+        assert "int_value" not in fields[key]
+        assert "full_name" in fields[key]
+        assert "decoded" in fields[key]
+    assert fields["sb"]["decoded"] == "not-hex"
+    assert "hex" not in fields["sb"]
+    assert fields["bb"]["hex"] == ""
+    assert fields["unknown"] == {
+        "full_name": "unknown", "decoded": "kept", "hex": "6b657074", "base64": "a2VwdA==",
+    }
+    bad_hash = mdns_thread_scopes._enrich_properties({b"sh": b"a"})["sh"]
+    assert "hex_value" not in bad_hash
+    assert bad_hash["decoded"] == "a"
 
 
 if __name__ == "__main__":

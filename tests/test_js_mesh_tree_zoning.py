@@ -20,7 +20,7 @@ def run_layout_characterization() -> dict[str, object]:
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     return json.loads(result.stdout)
 

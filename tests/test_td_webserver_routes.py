@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import td_webserver
 from aiohttp.test_utils import TestClient, TestServer
+from webserver_test_support import cleanup_webserver_state
 
 
 class WebServerStartupTests(unittest.TestCase):
@@ -94,6 +95,8 @@ class WebServerStartupTests(unittest.TestCase):
 class WebServerRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.addAsyncCleanup(cleanup_webserver_state)
         self.data_dir = Path(self._tmpdir.name)
         self.data_content = b'{"cached": true}'
         (self.data_dir / "Eve Thread Network Layout.evethreadlayout").write_bytes(
@@ -105,11 +108,8 @@ class WebServerRouteTests(unittest.IsolatedAsyncioTestCase):
 
         app = run_app.call_args.args[0]
         self.client = TestClient(TestServer(app))
+        self.addAsyncCleanup(self.client.close)
         await self.client.start_server()
-
-    async def asyncTearDown(self) -> None:
-        await self.client.close()
-        self._tmpdir.cleanup()
 
     async def test_root_redirects_to_dashboard(self) -> None:
         response = await self.client.get("/", allow_redirects=False)

@@ -23,6 +23,6 @@ def test_dataset_fetch_behavior() -> None:
         timeout=15,
     )
     summary = json.loads(completed.stdout)
-    assert summary["scenarioCount"] == 21
+    assert summary["scenarioCount"] == 36
     assert summary["requestCount"] > 0
     assert summary["controlledTimers"] is True

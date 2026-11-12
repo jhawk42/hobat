@@ -480,6 +480,159 @@ try {
     assert.equal(dataset.restoreLastKnownGoodDataset(), accepted);
     dataset.endFetchSession(sessionId);
   }
+  for (const replaceSession of [false, true]) {
+    const dataset = await freshModule();
+    cachedFetch();
+    const accepted = await finish(dataset.loadDataset(ENTRY.value));
+    const pendingDelete = deferred();
+    const warnings = [], originalWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    try {
+      const calls = mockFetch(({url, method, signal}) => {
+        if (method === "DELETE") {
+          if (url.endsWith("job-1")) throw new TypeError("cancel transport unavailable");
+          return pendingDelete.promise;
+        }
+        if (url.startsWith("/api/job/")) {
+          if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+          return response({status: "running"});
+        }
+        const index = REQUIRED.findIndex(file => url.endsWith(file));
+        return index < 0 ? response({}) : response({job_id: `job-${index}`, filename: REQUIRED[index]}, {}, 202);
+      });
+      const sessionId = dataset.startFetchSession();
+      let publications = 0;
+      const loading = assert.rejects(dataset.loadDataset(ENTRY.value, {
+        sessionId, onFileReady: () => { publications++; },
+      }), dataset.isFetchCancelledError);
+      await flush();
+      const cancellation = dataset.cancelActiveFetchSession();
+      const repeated = await dataset.cancelActiveFetchSession();
+      assert.deepEqual(repeated.cancelledJobIds, ["job-0", "job-1"]);
+      const replacement = replaceSession ? dataset.startFetchSession() : null;
+      pendingDelete.resolve(response({status: "cancelled"}));
+      assert.deepEqual(await cancellation, {cancelled: true, cancelledJobIds: ["job-0", "job-1"]});
+      await finish(loading);
+      assert.equal(calls.filter(call => call.method === "DELETE").length, 2);
+      assert.ok(calls.filter(call => call.method !== "DELETE" && call.signal)
+        .every(call => call.signal.aborted));
+      assert.equal(publications, 0);
+      assert.equal(dataset.restoreLastKnownGoodDataset(), accepted);
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0][0], /Failed to cancel job job-1/);
+      dataset.endFetchSession(sessionId);
+      if (replacement) {
+        assert.equal(dataset.isFetchSessionRunning(), true);
+        dataset.endFetchSession(replacement);
+      }
+    } finally {
+      console.warn = originalWarn;
+    }
+  }
+  for (const failure of ["http", "transport", "json", "cancelled", "error", "missing", "unknown", "deadline"]) {
+    const dataset = await freshModule();
+    cachedFetch();
+    const accepted = await finish(dataset.loadDataset(ENTRY.value));
+    let reads = 0, polls = 0;
+    const states = [];
+    dataset.setDatasetActivityObserver(event => states.push(event));
+    const started = now;
+    mockFetch(({url, signal}) => {
+      if (!url.startsWith("/api/job/")) {
+        if (!url.endsWith(REQUIRED[0])) return response(row("other"));
+        reads++;
+        return response({job_id: "failure-job", filename: REQUIRED[0]}, {}, 202);
+      }
+      polls++;
+      assert.equal(signal.aborted, false);
+      if (failure === "transport") throw new TypeError("poll disconnected");
+      if (failure === "json") return {...response({}), json: async () => { throw new SyntaxError("bad poll JSON"); }};
+      if (failure === "http") return response({}, {}, 503);
+      if (failure === "deadline") {
+        if (polls === 1) now = started + 900_000;
+        else now = started + 901_000;
+        assert.ok(polls <= 2, "deadline failed to stop polling");
+        return response({status: "running"});
+      }
+      return response({status: failure === "unknown" ? "surprise" : failure === "missing" ? undefined : failure,
+        detail: "failure context"});
+    });
+    const sessionId = dataset.startFetchSession();
+    const loading = dataset.loadDataset(ENTRY.value, {sessionId});
+    if (failure === "cancelled") await finish(assert.rejects(loading, dataset.isFetchCancelledError));
+    else {
+      assert.equal(await finish(loading), null, failure);
+      assert.match(document.getElementById("fetch-status-line-content").textContent, /Incomplete dataset/);
+    }
+    assert.equal(reads, 1, "failed polls never redispatch a dataset");
+    assert.equal(polls, failure === "deadline" ? 2 : 1);
+    if (["cancelled", "error", "missing", "unknown"].includes(failure)) {
+      assert.ok(states.some(event => event.type === "job-status"
+        && event.metadata.jobId === "failure-job" && event.metadata.filename === REQUIRED[0]));
+    }
+    assert.equal(dataset.restoreLastKnownGoodDataset(), accepted);
+    dataset.endFetchSession(sessionId);
+  }
+  for (const checkpointFailure of ["transport", "json", "http", "repeated", "cancel-body"]) {
+    const dataset = await freshModule();
+    cachedFetch();
+    const accepted = await finish(dataset.loadDataset(ENTRY.value));
+    const body = deferred();
+    let reads = 0, polls = 0, checkpoints = 0, publications = 0;
+    const warnings = [], originalWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    try {
+      mockFetch(({url, signal}) => {
+        if (url.endsWith("checkpoint.partial.json")) {
+          checkpoints++;
+          if (checkpointFailure === "transport") throw new TypeError("checkpoint disconnected");
+          if (checkpointFailure === "json") return {...response({}), json: async () => { throw new SyntaxError("bad checkpoint JSON"); }};
+          if (checkpointFailure === "http") return response({}, {}, 503);
+          if (checkpointFailure === "cancel-body") return {...response({}), json: () => body.promise};
+          return response(row("checkpoint"));
+        }
+        if (url.startsWith("/api/job/")) {
+          polls++;
+          return response(polls <= 2 ? {status: polls === 1 ? "cancelling" : "running",
+            checkpoint_is_newer_than_final: true, checkpoint_last_modified: 1,
+            checkpoint_filename: "checkpoint.partial.json"} : {status: "done"});
+        }
+        if (url.endsWith(REQUIRED[0])) {
+          reads++;
+          if (reads === 1) return response({job_id: "checkpoint-job", filename: REQUIRED[0]}, {}, 202);
+          if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+          return response(row("final"));
+        }
+        return response(row("other"));
+      });
+      const sessionId = dataset.startFetchSession();
+      const loading = dataset.loadDataset(ENTRY.value, {sessionId, onFileReady: () => { publications++; }});
+      if (checkpointFailure === "cancel-body") {
+        const rejected = assert.rejects(loading, dataset.isFetchCancelledError);
+        await flush();
+        const [id, timer] = timers.entries().next().value;
+        timers.delete(id); now += timer.delay; timer.callback();
+        await flush();
+        assert.equal(checkpoints, 1);
+        const beforeCancel = publications;
+        await dataset.cancelActiveFetchSession();
+        body.resolve(row("stale-checkpoint"));
+        await finish(rejected);
+        assert.equal(publications, beforeCancel);
+        assert.equal(dataset.restoreLastKnownGoodDataset(), accepted);
+      } else {
+        const loaded = await finish(loading);
+        assert.equal(loaded.isPartial, false);
+        assert.ok(loaded.rows.some(record => record.name === "final"));
+        assert.equal(checkpoints, checkpointFailure === "repeated" ? 1 : 2);
+        assert.equal(warnings.length, ["transport", "json"].includes(checkpointFailure) ? 2 : 0);
+        assert.equal(publications, checkpointFailure === "repeated" ? 3 : 2);
+      }
+      dataset.endFetchSession(sessionId);
+    } finally {
+      console.warn = originalWarn;
+    }
+  }
   console.log(JSON.stringify({ scenarioCount, requestCount, controlledTimers: true }));
 } finally {
   DATASET_REGISTRY.pop();

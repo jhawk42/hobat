@@ -24,7 +24,7 @@ def test_javascript_policy_metadata_matches_python() -> None:
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
     catalog = load_dataset_catalog()

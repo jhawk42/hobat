@@ -44,6 +44,96 @@ def process(directory, dataset_id, store=None, **kwargs):
 
 
 @pytest.mark.parametrize("dataset_id", IDS)
+def test_current_unified_roster_identity_uses_verified_original_network(tmp_path, dataset_id):
+    from td_health_history import network_id_for_dataset
+
+    seed(tmp_path, dataset_id)
+    before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert network_id_for_dataset(data_dir=tmp_path, dataset_id=dataset_id) == NETWORK
+    assert {str(p.relative_to(tmp_path)): p.read_bytes()
+            for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_current_unified_cli_roster_import_is_additive_and_idempotent(tmp_path, capsys, monkeypatch):
+    import td_cli
+    import td_unified_dataset
+    from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+
+    seed(tmp_path, "otbr_cli_unified")
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    store.upsert_expected_device(NETWORK, "extaddr:0011223344556677", "Operator label", "retired")
+    (tmp_path / EXTADDR_DEVICE_LABEL_MAP_FILENAME).write_text(json.dumps([
+        {"extAddress": "0011223344556677", "deviceLabel": "Do not overwrite"},
+        {"extAddress": "8899aabbccddeeff", "deviceLabel": "New device"},
+        {"extAddress": "bad"}, None,
+    ]))
+    monkeypatch.setattr(td_unified_dataset, "build_unified_dataset",
+                        lambda *a, **k: pytest.fail("roster import must not rebuild"))
+    args = ["--datadir", str(tmp_path), "health", "process-dataset", "--dataset",
+            "otbr_cli_unified", "--init-roster-from-label-map", "--json"]
+    for expected in ((1, 1, 2), (0, 2, 2)):
+        assert td_cli.main(args) == 0
+        document = json.loads(capsys.readouterr().out)
+        assert (document["imported"], document["alreadyPresent"], document["skipped"]) == expected
+        assert document["networkId"] == NETWORK
+    rows = {row["device_id"]: row for row in store.expected_device_records(NETWORK)}
+    assert set(rows) == {"extaddr:0011223344556677", "extaddr:8899aabbccddeeff"}
+    assert rows["extaddr:0011223344556677"]["label"] == "Operator label"
+    assert rows["extaddr:0011223344556677"]["roster_state"] == "retired"
+    assert rows["extaddr:8899aabbccddeeff"]["label"] == "New device"
+    assert rows["extaddr:8899aabbccddeeff"]["roster_state"] == "expected"
+
+
+@pytest.mark.parametrize("damage", ["missing-report", "tampered-artifact", "stale-original", "bad-label-json", "nonarray-label"])
+def test_current_unified_roster_rejections_do_not_write_or_repair(tmp_path, monkeypatch, damage):
+    import td_unified_dataset
+    from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+    from td_health_history import import_expected_roster_from_label_map, network_id_for_dataset
+
+    seed(tmp_path, "otbr_cli_unified")
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    store.upsert_expected_device(NETWORK, "extaddr:0011223344556677", "Keep", "retired")
+    entry = _entry("otbr_cli_unified")
+    label_map = tmp_path / EXTADDR_DEVICE_LABEL_MAP_FILENAME
+    label_map.write_text(json.dumps([{"extAddress": "8899aabbccddeeff", "deviceLabel": "New"}]))
+    if damage == "missing-report":
+        (tmp_path / entry["unified"]["reportFile"]).unlink()
+    elif damage == "tampered-artifact":
+        artifact = td_unified_dataset._artifact_names(entry)[0]
+        (tmp_path / artifact).write_text("[]")
+    elif damage == "stale-original":
+        raw = tmp_path / next(item["file"] for item in entry["unified"]["inputs"]
+                              if item["required"] and item["role"] not in {"identity", "outcome"})
+        raw.write_bytes(raw.read_bytes() + b"\n ")
+    elif damage == "bad-label-json":
+        label_map.write_text("{")
+    else:
+        label_map.write_text("{}")
+
+    def evidence_hashes():
+        return {str(p.relative_to(tmp_path)): hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in tmp_path.rglob("*") if p.is_file() and p.suffix != ".db"
+                and not p.name.startswith("hobat_v1.db-")}
+
+    def dump():
+        with closing(store._connect()) as connection:
+            return tuple(connection.iterdump())
+
+    before_store, before_evidence = dump(), evidence_hashes()
+    monkeypatch.setattr(td_unified_dataset, "build_unified_dataset",
+                        lambda *a, **k: pytest.fail("rejected import must not rebuild"))
+    if damage in {"missing-report", "tampered-artifact", "stale-original"}:
+        with pytest.raises(HealthProcessingError, match="Cannot verify Unified roster identity"):
+            network_id_for_dataset(data_dir=tmp_path, dataset_id="otbr_cli_unified")
+    with pytest.raises(HealthProcessingError):
+        import_expected_roster_from_label_map(
+            data_dir=tmp_path, dataset_id="otbr_cli_unified", store=store,
+        )
+    assert dump() == before_store
+    assert evidence_hashes() == before_evidence
+
+
+@pytest.mark.parametrize("dataset_id", IDS)
 @pytest.mark.parametrize("builder_contract", [
     "unified-assembly-v2", "unified-assembly-v3", "unified-assembly-v4",
     "unified-assembly-v5", "unified-assembly-v6", "unified-assembly-v7", "unified-assembly-v8",

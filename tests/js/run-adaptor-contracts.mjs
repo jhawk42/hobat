@@ -239,6 +239,7 @@ for (const observations of [
   }
 }
 
+if (!process.argv.includes("--synthetic-only")) {
 const cachedEveRows = JSON.parse(fs.readFileSync("data/td-eve-topology.json", "utf8"));
 const cachedEve = run(
   "eve-enhanced",
@@ -253,6 +254,7 @@ assert.deepEqual(
 );
 assert.equal(cachedEve.rawByIdForDetails.size, 79);
 assert.deepEqual(cachedEve.sourceNames, ["eve"]);
+}
 
 const eveNativeRows = Object.values(eveRows);
 const eveNative = run("eve-native", ["eve-native.json"], [{ nodes: eveNativeRows }]);
@@ -745,6 +747,7 @@ assert.equal(
   "aa00112233445566",
 );
 
+if (!process.argv.includes("--synthetic-only")) {
 const cachedHaMatterRows = JSON.parse(
   fs.readFileSync("data/td-ha-matter-ws-topology.json", "utf8"),
 );
@@ -781,6 +784,7 @@ assert.ok(cachedHaMatter.edgeData.every((edge) =>
   assert.ok(cachedHaMatterDashboardDiagnostics.edgeData.every((edge) =>
     edge.arrows === "to" && cachedHaMatterDashboardNodeIds.has(edge.from)
     && cachedHaMatterDashboardNodeIds.has(edge.to)));
+}
 
 const nativeBorderRouters = runAdaptor({
   entry: {

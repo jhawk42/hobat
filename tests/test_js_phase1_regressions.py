@@ -18,7 +18,7 @@ def test_phase1_javascript_regressions() -> None:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        check=False,
+        check=False, timeout=30,
     )
 
     assert result.returncode == 0, result.stderr

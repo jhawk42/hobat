@@ -21,7 +21,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp.web
 import td_webserver
-from webserver_test_support import reset_webserver_state as _reset_module_state
+from webserver_test_support import (
+    WEBSERVER_STATE_REGISTRIES,
+    cleanup_webserver_state,
+    reset_webserver_state as _reset_module_state,
+)
 from td_webserver import (
     FileAction,
     _build_file_response,
@@ -32,6 +36,29 @@ from td_webserver import (
 )
 
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT = td_webserver.TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT
+
+
+class TestServerStateCleanup(unittest.IsolatedAsyncioTestCase):
+    async def test_cleanup_awaits_real_tasks_and_ignores_synthetic_tasks(self):
+        self.addAsyncCleanup(cleanup_webserver_state)
+        entered = asyncio.Event()
+        finished = asyncio.Event()
+
+        async def work():
+            try:
+                entered.set()
+                await asyncio.Event().wait()
+            finally:
+                finished.set()
+
+        task = asyncio.create_task(work())
+        td_webserver._background_tasks.add(task)
+        td_webserver._device_action_background_tasks.add(MagicMock(spec=asyncio.Task))
+        await asyncio.wait_for(entered.wait(), 5)
+        await asyncio.wait_for(cleanup_webserver_state(), 5)
+        self.assertTrue(task.cancelled())
+        self.assertTrue(finished.is_set())
+        self.assertTrue(all(not getattr(td_webserver, name) for name in WEBSERVER_STATE_REGISTRIES))
 
 
 # ---------------------------------------------------------------------------

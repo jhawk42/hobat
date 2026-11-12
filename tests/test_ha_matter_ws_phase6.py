@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import shutil
-import subprocess
 
 import pytest
 
@@ -25,8 +23,6 @@ from td_const import (
     OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
 )
 from td_webserver import FILE_ACTION_MAP
-
-pytestmark = pytest.mark.requires_data_dir
 
 
 def _build(input_files, input_data):
@@ -292,21 +288,13 @@ def test_nested_matter_object_cannot_replace_conflicting_legacy_identity() -> No
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
-def test_python_and_browser_merge_matter_arrays_by_endpoint_identity() -> None:
+def test_python_and_browser_merge_matter_arrays_by_endpoint_identity(node_json) -> None:
     root = Path(__file__).parents[1]
     fixture_path = root / "tests" / "fixtures" / "ha_matter_ws_endpoint_merge.json"
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     python_result = deep_merge(fixture["base"], fixture["incoming"])
     runner = root / "tests" / "js" / "run-ha-matter-ws-endpoint-merge.mjs"
-    completed = subprocess.run(
-        [shutil.which("node") or "node", str(runner), str(fixture_path)],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    browser_result = json.loads(completed.stdout)
+    browser_result = node_json(runner, str(fixture_path))
 
     assert browser_result == python_result
     assert [item["endpointId"] for item in python_result["matter"]["endpoints"][:2]] == [1, 2]
@@ -375,18 +363,9 @@ def test_python_and_browser_merge_matter_arrays_by_endpoint_identity() -> None:
     ]
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
-def test_browser_ha_matter_identity_contract() -> None:
+def test_browser_ha_matter_identity_contract(node_json) -> None:
     runner = Path(__file__).parent / "js" / "run-ha-matter-ws-phase6.mjs"
-    completed = subprocess.run(
-        [shutil.which("node") or "node", str(runner)],
-        cwd=Path(__file__).parents[1],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert json.loads(completed.stdout) == {"scenarios": 7}
+    assert node_json(runner) == {"scenarios": 7}
 
 
 def test_websockets_dependency_is_packaged_by_both_images() -> None:
@@ -400,6 +379,7 @@ def test_websockets_dependency_is_packaged_by_both_images() -> None:
         assert "pip install --no-cache-dir -r /tmp/requirements.txt" in content
 
 
+@pytest.mark.requires_data_dir
 def test_checked_in_snapshots_are_safe_and_registered() -> None:
     root = Path(__file__).parents[1]
     filenames = {

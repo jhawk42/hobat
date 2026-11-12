@@ -4,7 +4,6 @@ import ast
 import asyncio
 import json
 import re
-import shutil
 import subprocess
 import sys
 import warnings
@@ -48,7 +47,7 @@ ALIAS_OWNERS = {
 }
 
 
-def test_canonical_catalog_aliases_and_preserved_recipes():
+def test_canonical_catalog_aliases_and_preserved_recipes(node_json):
     catalog = load_dataset_catalog()
     archive = json.loads((PYTHON / "td-dataset-manifest-history.json").read_text())
     baseline = next(revision["manifest"] for revision in archive["revisions"]
@@ -130,9 +129,9 @@ def test_canonical_catalog_aliases_and_preserved_recipes():
         }});
         console.log(JSON.stringify({{aliases, results}}));
     """
-    result = subprocess.run(["node", "--input-type=module", "-e", script],
-                            capture_output=True, text=True, check=True, cwd=ROOT)
-    assert json.loads(result.stdout) == {"aliases": expected_aliases, "results": ["multi_source_merged", None]}
+    assert node_json(script, evaluate=True) == {
+        "aliases": expected_aliases, "results": ["multi_source_merged", None],
+    }
 
 
 @pytest.mark.parametrize("mutation", [
@@ -147,7 +146,7 @@ def test_canonical_catalog_aliases_and_preserved_recipes():
     lambda c: c["datasources"][0].update(primary_dataset_value="mdns_thread"),
     lambda c: next(d for d in c["datasets"] if d["value"] == "otbr_cli_mesh_ftd").update(selectable=False),
 ])
-def test_catalog_additive_contracts_reject_invalid_values_in_both_runtimes(mutation):
+def test_catalog_additive_contracts_reject_invalid_values_in_both_runtimes(mutation, node_run):
     catalog = load_dataset_catalog()
     mutation(catalog)
     with pytest.raises(HealthManifestError):
@@ -158,8 +157,7 @@ def test_catalog_additive_contracts_reject_invalid_values_in_both_runtimes(mutat
         try {{ validateDatasetCatalog(JSON.parse(process.argv[1])); process.exit(1); }}
         catch (error) {{ console.log(error.message); }}
     """
-    subprocess.run(["node", "--input-type=module", "-e", script, json.dumps(catalog)],
-                   capture_output=True, text=True, check=True, cwd=ROOT)
+    node_run(script, json.dumps(catalog), evaluate=True)
 
 
 def test_catalog_duplicate_alias_json_keys_are_rejected(tmp_path):
@@ -434,17 +432,13 @@ def test_one_alias_authority_per_runtime() -> None:
         _check_alias_ownership({"tdash-device-fields.js": "export const FIELD_DEFINITIONS = [];"})
 
 
-def test_one_dataset_declaration() -> None:
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("node is required to load the browser catalog fallback")
+def test_one_dataset_declaration(node_json) -> None:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     served = asyncio.run(_served_catalog())
-    result = subprocess.run([node, "--input-type=module", "-e",
-                             "import { DATASET_CATALOG_FALLBACK } from " + json.dumps(FALLBACK.as_uri())
-                             + "; console.log(JSON.stringify(DATASET_CATALOG_FALLBACK))"],
-                            capture_output=True, text=True, check=True)
-    fallback = json.loads(result.stdout)
+    fallback = node_json(
+        "import { DATASET_CATALOG_FALLBACK } from " + json.dumps(FALLBACK.as_uri())
+        + "; console.log(JSON.stringify(DATASET_CATALOG_FALLBACK))", evaluate=True,
+    )
     _check_catalog_parity(manifest, served, fallback)
     changed = {**fallback, "datasets": [*fallback["datasets"],
                                         {"source": "eve", "value": "eve_extra", "files": ["td-eve-topology.json"]}]}

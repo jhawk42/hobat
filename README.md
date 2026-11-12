@@ -496,7 +496,7 @@ Benchmark and live checks are explicit opt-ins:
 ```bash
 python3 -m pytest -q -m benchmark
 TD_LIVE_TESTS=1 python3 -m pytest -q -m live
-python3 -m pytest -q --cov
+python3 -m pytest -q --cov=src --cov-branch --cov-report=term:skip-covered
 ```
 
 The live suite requires a configured OTBR environment. The default suite does
@@ -507,17 +507,38 @@ skip the small subset of tests that read checked-in snapshots from that
 directory with the `requires_data_dir` marker:
 
 ```bash
-python3 -m pytest -q -m "not requires_data_dir"
+python3 -m pytest -q -m "not requires_data_dir and not browser and not live and not benchmark" \
+  --cov=src --cov-branch --cov-report=term:skip-covered
 ```
 
 Everything else builds its own isolated data directory with `tmp_path` and
 `--datadir`/`TD_DATA_DIR`, so it does not depend on the contents of `data/`.
+This is also the ordinary CI selection. Coverage retains the existing 64%
+combined line/branch floor in [.coveragerc](.coveragerc); Python child processes
+are not instrumented, so CLI subprocess behavior is asserted directly.
+Synthetic field-model and Matter merge tests remain CI-eligible; only their
+three actual operator-cache readers require `requires_data_dir`. Do not run
+live collection to prepare fixtures or repair an offline test.
 
 The [cached adaptor contract test](tests/test_js_adaptor_contracts.py) checks
 output shape, node styling pairs, and graph integrity without pinning network
 identities or counts to an older capture. Exact role-to-style behavior is
 covered by deterministic cases in the
 [adaptor contract runner](tests/js/run-adaptor-contracts.mjs).
+
+The optional Chromium smoke suite exercises the actual dashboard at desktop
+and mobile sizes. It owns port 9178 and a temporary synthetic cache; it refuses
+an occupied port and blocks unmatched APIs and external requests. Ordinary
+pytest runs do not import Playwright or launch a browser.
+
+```bash
+python3 -m pip install -r requirements_browser_test.txt
+python3 -m playwright install --with-deps chromium
+python3 -m pytest -q tests/browser -m "browser and not live and not benchmark"
+```
+
+Failures retain screenshots, browser events, and traces under
+`.pytest-browser-artifacts/`. CI runs this suite in a separate browser job.
 
 ## Documentation
 

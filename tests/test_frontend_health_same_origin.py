@@ -32,7 +32,7 @@ def test_contextual_restrictions_count_only_active_filters() -> None:
     """
     result = subprocess.run(
         ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stderr
 
@@ -78,7 +78,7 @@ def test_collapsed_area_selector_uses_shared_activation_without_hidden_focus() -
     """
     result = subprocess.run(
         ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stderr
 
@@ -481,7 +481,7 @@ def test_health_refresh_owns_late_summary_support_and_continuations() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
 
@@ -563,7 +563,7 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
 
@@ -652,7 +652,7 @@ def test_assessment_summary_explains_context_gaps_and_history_replay() -> None:
         ["node", "--input-type=module", "--eval", script],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
@@ -785,7 +785,7 @@ def test_health_finding_sort_buttons_restore_focus_and_count_both_levels() -> No
         cwd=ROOT,
         check=False,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
@@ -870,7 +870,7 @@ def test_comparison_show_in_table_targets_only_the_current_row_device() -> None:
         cwd=ROOT,
         check=False,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
 
@@ -931,7 +931,7 @@ def test_comparison_delta_formats_floating_point_values_to_one_decimal_place() -
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     assert json.loads(completed.stdout) == [
         "-10.0 ratio",
@@ -1006,7 +1006,7 @@ def test_comparison_evidence_labels_relationship_types_and_preserves_other_rows(
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     assert json.loads(completed.stdout) == [
         {
@@ -1134,7 +1134,7 @@ def test_comparison_device_labels_keep_canonical_identity_and_scope() -> None:
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
 
@@ -1194,7 +1194,7 @@ def test_table_device_selection_uses_direct_identity_not_nested_references() -> 
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     assert json.loads(completed.stdout) == {
@@ -1300,7 +1300,7 @@ def test_health_comparison_availability_and_empty_history_states_are_distinct() 
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
 
@@ -1365,7 +1365,7 @@ def test_legacy_comparison_detail_retry_reloads_selected_pair() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
 
@@ -1419,7 +1419,7 @@ def test_comparison_detail_query_and_page_validation() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
     assert result == {
@@ -1601,7 +1601,7 @@ def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
     assert result["endpointValid"] is True
@@ -1722,7 +1722,7 @@ def test_health_comparison_row_ranges_and_direct_pagination() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
     assert result == {
@@ -1880,7 +1880,7 @@ def test_comparison_presets_stay_latest_anchored_and_disclosures_keep_focus() ->
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
     assert result == {
@@ -2065,7 +2065,7 @@ def test_comparison_two_hosts_transition_focus_and_retries() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
 
@@ -2073,7 +2073,7 @@ def test_comparison_two_hosts_transition_focus_and_retries() -> None:
 def test_health_detail_sections_preserve_dom_and_action_contracts() -> None:
     completed = subprocess.run(
         ["node", "tests/js/run-health-detail-contracts.mjs"],
-        cwd=ROOT, check=True, capture_output=True, text=True,
+        cwd=ROOT, check=True, capture_output=True, text=True, timeout=30,
     )
     assert completed.stdout.strip() == "Health detail contracts passed"
 
@@ -2107,7 +2107,7 @@ def test_off_page_shortcut_candidate_remains_available_while_before_page_loads()
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
 
     assert json.loads(completed.stdout) == {
@@ -2158,7 +2158,7 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
 
@@ -2192,7 +2192,7 @@ def test_roster_request_pins_assessment_and_bounded_query() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     assert json.loads(completed.stdout) == [{
         "network": "extpan:78b9775b001c1cbe", "assessment": "assessment-1",
@@ -2235,7 +2235,7 @@ def test_roster_detail_context_and_patch_use_same_origin_json_api() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
     assert result == [
@@ -2281,7 +2281,7 @@ def test_roster_patch_preserves_conflict_code_and_server_message() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     assert json.loads(completed.stdout) == [{
         "status": 409,
@@ -2306,7 +2306,7 @@ def test_stale_roster_conflict_code_survives_aiohttp_status_prefix() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     assert json.loads(completed.stdout) == {
         "code": "stale-revision",
@@ -2326,7 +2326,7 @@ def test_stored_finding_inspection_does_not_enable_current_network_navigation() 
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     assert json.loads(completed.stdout) == {
         "availableTargets": 0,
@@ -2449,7 +2449,7 @@ def test_multi_endpoint_finding_projects_and_inspects_each_canonical_device() ->
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     assert json.loads(completed.stdout) == {
@@ -2520,7 +2520,7 @@ def test_finding_roster_actions_follow_server_eligibility() -> None:
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=False, capture_output=True, text=True,
+        check=False, capture_output=True, text=True, timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
@@ -2539,7 +2539,7 @@ def test_health_mutation_request_id_works_without_secure_context_crypto() -> Non
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     request_id = completed.stdout.strip()
     assert len(request_id) == 36
@@ -2568,7 +2568,7 @@ def test_health_sections_use_stored_status_and_evidence_kind_without_reclassific
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     assert json.loads(completed.stdout) == [
@@ -2621,7 +2621,7 @@ def test_external_routing_is_excluded_from_health_presentation_projections() -> 
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     result = json.loads(completed.stdout)
@@ -2742,7 +2742,7 @@ def test_health_summary_projection_sort_counts_and_selection_reconciliation() ->
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     result = json.loads(completed.stdout)
@@ -2810,7 +2810,7 @@ def test_health_status_summary_is_informational_not_a_coloring_control() -> None
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     result = json.loads(completed.stdout)
@@ -2839,7 +2839,7 @@ def test_health_assessment_observation_uses_comparison_timestamp_and_age_format(
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     assert json.loads(completed.stdout) == {
@@ -2873,7 +2873,7 @@ def test_health_insights_compact_status_uses_accepted_observation() -> None:
       assert.match(build({dataset, error: "unavailable"}).summary, /failed: unavailable/);
       assert.equal(build({dataset, assessment: {...assessment, coverage: {}}, now}).details.find(x => x.label === "Observed devices").value, "Unknown");
     """
-    subprocess.run(["node", "--input-type=module", "--eval", script], cwd=ROOT, check=True)
+    subprocess.run(["node", "--input-type=module", "--eval", script], cwd=ROOT, check=True, timeout=30)
 
 
 def test_health_insights_tab_accessible_names_distinguish_counts_and_missing_data() -> None:
@@ -2892,7 +2892,7 @@ def test_health_insights_tab_accessible_names_distinguish_counts_and_missing_dat
         cwd=ROOT,
         check=True,
         capture_output=True,
-        text=True,
+        text=True, timeout=30,
     )
 
     assert json.loads(completed.stdout) == {
@@ -3135,7 +3135,7 @@ def test_health_assessment_context_and_navigation_metadata_are_validated() -> No
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     assert json.loads(completed.stdout) == {
         "requests": [
@@ -3328,7 +3328,7 @@ def test_health_assessment_history_renders_bounded_accessible_navigation() -> No
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
     assert result["options"][0][0] == "assessment-newest"
@@ -3425,7 +3425,7 @@ def test_oldest_assessment_jump_uses_bounded_preferred_history_and_guards_races(
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=30,
     )
     result = json.loads(completed.stdout)
     assert result["single"]["calls"] == [{"offset": 0, "selected": None}]

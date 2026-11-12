@@ -88,6 +88,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+.pytest-browser-artifacts/
 
 # VS Code
 .vscode/*
