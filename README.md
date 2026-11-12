@@ -275,6 +275,11 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi diagnostics fetch
   --children-expand-by-rloc
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi topology
 
+# Explicitly clear remote REST inventory; local caches and Thread membership are unchanged
+PYTHONPATH=src python3 -m td_cli otbr-restapi devices clear --yes
+# Then explicitly rediscover devices
+PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices fetch
+
 # Home Assistant Matter Server snapshots
 PYTHONPATH=src python3 -m td_cli --datadir ./data ha-matter-ws server-info
 PYTHONPATH=src python3 -m td_cli --datadir ./data ha-matter-ws topology

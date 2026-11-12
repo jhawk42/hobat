@@ -373,7 +373,7 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
     restapi_sub.add_parser("node",
         help="Read or mutate local OTBR node data", add_help=False)
     restapi_sub.add_parser("devices",
-        help="Read OTBR devices", add_help=False)
+        help="Read, refresh, or clear OTBR devices", add_help=False)
     restapi_sub.add_parser("diagnostics",
         help="Read OTBR network diagnostics", add_help=False)
     restapi_sub.add_parser("actions",

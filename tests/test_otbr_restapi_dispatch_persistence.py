@@ -28,6 +28,14 @@ from util_data import (
 )
 
 
+def test_devices_clear_dispatch_rejects_missing_confirmation():
+    client = Mock()
+    args = SimpleNamespace(devices_command="clear", yes=False)
+    with pytest.raises(OTBRUsageError, match="requires --yes"):
+        devices_module.dispatch_devices(client, args, False, None)
+    assert client.mock_calls == []
+
+
 def test_mesh_response_flag_rejects_children_before_requests():
     client = Mock()
     args = SimpleNamespace(mesh_diag_command="fetch-all", types=None, poll_timeout=20,

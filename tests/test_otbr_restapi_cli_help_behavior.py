@@ -23,7 +23,7 @@ class OTBRRestApiCLIIncompleteHelpTests(unittest.TestCase):
             (["node", "state"], "{get,set}"),
             (["node", "dataset"], "{active}"),
             (["node", "dataset", "active"], "{get,set}"),
-            (["devices"], "{list,get,fetch}"),
+            (["devices"], "{list,get,fetch,clear}"),
             (["diagnostics"], "{list,get,fetch,fetch-all}"),
             (["mesh-diagnostics"], "{children,child-ipv6,router-neighbors,fetch,fetch-all}"),
         ]

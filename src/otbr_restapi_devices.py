@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from otbr_restapi_util import (
-    OTBRRestApiClient, emit_rest_command_output, emit_rest_observed_output,
+    OTBRRestApiClient, OTBRUsageError, emit_rest_command_output, emit_rest_observed_output,
     rest_payload_record_count,
 )
 from td_logging import format_event, log_event
@@ -130,6 +130,11 @@ def dispatch_devices(
                 whole_action_attempts=getattr(args, "whole_action_attempts", 1),
                 raw=raw_arg,
             )
+        elif args.devices_command == "clear":
+            if not getattr(args, "yes", False):
+                raise OTBRUsageError("devices clear requires --yes")
+            client.delete_all_devices()
+            result = {"cleared": True}
         else:
             raise ValueError("Unsupported devices command")
         returned = True
@@ -170,6 +175,6 @@ def dispatch_devices(
         )
     return emit_rest_observed_output(
         result, output_path, command=command, stage="final",
-        single=args.devices_command == "get", logger=logging.getLogger(__name__),
+        single=args.devices_command in ("get", "clear"), logger=logging.getLogger(__name__),
         emitter=emit_rest_command_output,
     )

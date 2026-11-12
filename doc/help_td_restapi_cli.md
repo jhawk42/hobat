@@ -56,6 +56,7 @@ These options apply to every command and must be placed **before** the subcomman
 | `devices list` | List all known devices from `/api/devices` |
 | `devices get` | Get a single device by extAddress |
 | `devices fetch` | Trigger updateDeviceCollectionTask, wait, return device list |
+| `devices clear --yes` | Clear the remote device collection with `DELETE /api/devices` |
 | `diagnostics list` | List all cached diagnostic records |
 | `diagnostics get` | Get a single diagnostic record by ID |
 | `diagnostics fetch` | Fetch diagnostics for one device (enqueue + wait + return result) |
@@ -213,7 +214,7 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi --lab \
 
 ### `devices`
 
-Read Thread devices from `/api/devices`.
+Read, refresh, or clear Thread device records in `/api/devices`.
 
 #### `devices list`
 
@@ -297,6 +298,30 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --output data/devices.json \
     devices fetch --device-count 20 --task-timeout 60
 ```
+
+---
+
+#### `devices clear`
+
+Clear the OTBR REST device collection with `DELETE /api/devices`.
+The `--yes` confirmation is required; without it the command exits with a usage
+error before making any request. No `--lab` flag is required.
+
+```bash
+PYTHONPATH=src python3 -m td_cli otbr-restapi devices clear --yes
+```
+
+On success, prints `{"cleared": true}` (formatted as JSON). HTTP and connection
+failures use the normal nonzero REST CLI exit codes.
+
+This removes only the remote REST inventory, not Thread credentials, network
+membership, local cached snapshots, diagnostics, or historical health assessments.
+No snapshot file is written automatically. An explicit `--output` writes only
+the confirmation result.
+
+Device refresh adds or updates discovered records; it does not purge devices
+missing from discovery. To repopulate the collection after clearing, explicitly
+run `devices fetch`. Rediscovery can initially miss devices that do not respond.
 
 ---
 

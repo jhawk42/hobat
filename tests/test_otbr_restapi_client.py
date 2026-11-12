@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 
 import otbr_restapi_util as client_module
 import otbr_restapi_cli as cli_module
+import td_cli
 
 
 class FakeHeaders(dict):
@@ -187,6 +188,57 @@ class OTBRClientTests(unittest.TestCase):
 
 
 class OTBRCliTests(unittest.TestCase):
+    def test_devices_clear_requires_yes_before_building_client(self) -> None:
+        for entrypoint, argv in (
+            (cli_module.main, ["devices", "clear"]),
+            (td_cli.main, ["otbr-restapi", "devices", "clear"]),
+        ):
+            with self.subTest(argv=argv), patch.object(cli_module, "build_client") as build_client:
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    exit_code = entrypoint(argv)
+                self.assertEqual(exit_code, cli_module.EXIT_USAGE)
+                self.assertIn("--yes", stderr.getvalue())
+                build_client.assert_not_called()
+
+    def test_devices_clear_deletes_remote_collection_without_changing_caches(self) -> None:
+        for entrypoint, argv in (
+            (cli_module.main, ["--base-url", "http://example.test", "devices", "clear", "--yes"]),
+            (td_cli.main, ["otbr-restapi", "--base-url", "http://example.test",
+                           "devices", "clear", "--yes"]),
+        ):
+            response = FakeResponse(b"", "application/vnd.api+json")
+            response.status = 204
+            with self.subTest(argv=argv), patch.object(
+                client_module, "urlopen", return_value=response
+            ) as urlopen, patch.object(
+                client_module, "emit_rest_payload_output"
+            ) as write_payload, redirect_stdout(io.StringIO()) as stdout:
+                exit_code = entrypoint(argv)
+                self.assertEqual(exit_code, cli_module.EXIT_SUCCESS)
+                urlopen.assert_called_once()
+                request = urlopen.call_args.args[0]
+                self.assertEqual(request.get_method(), "DELETE")
+                self.assertEqual(request.full_url, "http://example.test/api/devices")
+                self.assertIn('"cleared": true', stdout.getvalue())
+                write_payload.assert_not_called()
+
+    def test_devices_clear_reports_http_failure_without_success(self) -> None:
+        error = HTTPError(
+            url="http://example.test/api/devices", code=403, msg="Forbidden",
+            hdrs={"Content-Type": "application/vnd.api+json"},
+            fp=io.BytesIO(b'{"errors":[{"title":"Forbidden","status":403}]}'),
+        )
+        with patch.object(client_module, "urlopen", side_effect=error) as urlopen:
+            with redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
+                exit_code = cli_module.main(
+                    ["--base-url", "http://example.test", "devices", "clear", "--yes"]
+                )
+        self.assertEqual(exit_code, cli_module.EXIT_HTTP)
+        self.assertIn('"status": 403', stderr.getvalue())
+        self.assertNotIn('"cleared": true', stdout.getvalue())
+        urlopen.assert_called_once()
+
     def test_emit_output_keeps_plain_text_unquoted(self) -> None:
         stdout = io.StringIO()
         with redirect_stdout(stdout):

@@ -205,7 +205,7 @@ def _add_node_commands(
 def _add_devices_commands(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    devices_parser = subparsers.add_parser("devices", help="Read OTBR devices")
+    devices_parser = subparsers.add_parser("devices", help="Read, refresh, or clear OTBR devices")
     devices_subparsers = devices_parser.add_subparsers(
         dest="devices_command", required=False
     )
@@ -256,6 +256,16 @@ def _add_devices_commands(
         "--structured-outcome",
         action="store_true",
         help="Return workflow metadata instead of only the device array",
+    )
+
+    devices_clear = devices_subparsers.add_parser(
+        "clear", help="Clear the OTBR REST device collection (requires --yes)"
+    )
+    devices_clear.add_argument(
+        "--yes",
+        action="store_true",
+        required=True,
+        help="Confirm clearing the remote device collection; local caches are unchanged",
     )
 
 
@@ -1219,16 +1229,16 @@ def run_cli(
     parser = build_parser_fn()
     argv_list = list(sys.argv[1:] if argv is None else argv)
     parse_err = io.StringIO()
-    with redirect_stderr(parse_err):
-        try:
+    try:
+        with redirect_stderr(parse_err):
             args = parser.parse_args(argv_list)
-        except SystemExit as exc:
-            if exc.code != 0 and _print_help_for_typo_or_invalid_command(parser, argv_list):
-                return EXIT_SUCCESS
-            err_text = parse_err.getvalue()
-            if err_text:
-                print(err_text, file=sys.stderr, end="")
-            return exc.code if isinstance(exc.code, int) else EXIT_USAGE
+    except SystemExit as exc:
+        if exc.code != 0 and _print_help_for_typo_or_invalid_command(parser, argv_list):
+            return EXIT_SUCCESS
+        err_text = parse_err.getvalue()
+        if err_text:
+            print(err_text, file=sys.stderr, end="")
+        return exc.code if isinstance(exc.code, int) else EXIT_USAGE
 
     if _print_incomplete_command_help(parser, args):
         return EXIT_SUCCESS

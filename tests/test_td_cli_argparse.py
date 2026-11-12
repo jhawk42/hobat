@@ -1073,7 +1073,7 @@ class TestDispatchOtherCommands(unittest.TestCase):
             rc = td_cli.dispatch(args, extras, parser)
         self.assertEqual(rc, 0)
         self.assertIn("usage:", buf.getvalue())
-        self.assertIn("{list,get,fetch}", buf.getvalue())
+        self.assertIn("{list,get,fetch,clear}", buf.getvalue())
 
     def test_restapi_devices_list_dispatches_to_restapi_cli(self):
         with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as m:

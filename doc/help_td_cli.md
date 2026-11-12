@@ -708,7 +708,7 @@ These options must be placed after `otbr-restapi` and before its subcommand.
 |---|---|---|
 | `download` | *(none)* | Download OTBR REST API endpoint snapshots to JSON files |
 | `node` | `get`, `state get`, `state set`, `dataset active get`, `dataset active set` | Read/mutate local OTBR node and active dataset |
-| `devices` | `list`, `get`, `fetch` | List, read, or refresh device collection |
+| `devices` | `list`, `get`, `fetch`, `clear --yes` | List, read, refresh, or explicitly clear the remote device collection |
 | `diagnostics` | `list`, `get`, `fetch`, `fetch-all` | Read or fetch network diagnostics |
 | `actions` | `list`, `get`, `enqueue add-thread-device`, `enqueue get-network-diagnostic`, `enqueue reset-network-diag-counter`, `enqueue get-energy-scan`, `enqueue update-device-collection` | Inspect and enqueue OTBR action tasks |
 | `mesh-diagnostics` | `children`, `child-ipv6`, `router-neighbors`, `fetch`, `fetch-all` | Fetch mesh-diagnostic TLV datasets |
