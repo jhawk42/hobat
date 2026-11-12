@@ -2190,6 +2190,8 @@ async function loadSelectedDeviceLabel() {
 
   const extAddress = projection.extAddress;
   const requestVersion = ++deviceSettingsState.requestVersion;
+  const isCurrent = () => requestVersion === deviceSettingsState.requestVersion
+    && extAddress === deviceSettingsState.projection?.extAddress;
   deviceSettingsState.loading = true;
   setDeviceSettingsStatus("Loading device label...");
   updateDeviceSettingsControls();
@@ -2199,13 +2201,13 @@ async function loadSelectedDeviceLabel() {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
-    if (requestVersion !== deviceSettingsState.requestVersion ||
-        extAddress !== deviceSettingsState.projection?.extAddress) return;
+    if (!isCurrent()) return;
 
     if (response.status === 404) {
       deviceSettingsState.loadedLabel = projection.deviceLabel;
     } else if (response.ok) {
       const payload = await response.json();
+      if (!isCurrent()) return;
       deviceSettingsState.loadedLabel = toText(payload.deviceLabel).trim();
     } else {
       throw new Error(`Unable to load device label (HTTP ${response.status}).`);
@@ -2213,10 +2215,10 @@ async function loadSelectedDeviceLabel() {
     document.getElementById("device-label").value = deviceSettingsState.loadedLabel;
     setDeviceSettingsStatus();
   } catch (error) {
-    if (requestVersion !== deviceSettingsState.requestVersion) return;
+    if (!isCurrent()) return;
     setDeviceSettingsStatus(error.message || "Unable to load device label.", true);
   } finally {
-    if (requestVersion === deviceSettingsState.requestVersion) {
+    if (isCurrent()) {
       deviceSettingsState.loading = false;
       updateDeviceSettingsControls();
     }
@@ -6672,7 +6674,7 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     console.warn("Unable to refresh source capabilities", error);
   }
   if (attemptVersion !== fetchAttemptVersion) return;
-  if (!currentDataset.isPartial) {
+  if (currentDataset.entry.files.every((filename) => currentDataset.loadedFiles.includes(filename))) {
     fetchFailureState = null;
     if (window.tdashDebug) window.tdashDebug.fetchStatusPinnedUntil = 0;
   }

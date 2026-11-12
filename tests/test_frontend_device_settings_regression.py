@@ -28,6 +28,118 @@ def test_diagnostic_invocation_and_protocol_execution() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_device_label_body_completion_owns_selection_and_loading() -> None:
+    result = subprocess.run(
+        ["node", "--unhandled-rejections=strict", "--input-type=module", "-e", r"""
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import { getColumnValue, toText } from "./src/js/tdash-utils.js";
+import { canonicalizeExtAddress } from "./src/js/tdash-device-fields.js";
+
+const source = readFileSync("./src/js/tdash-ui.js", "utf8");
+const settings = source.slice(source.indexOf("const DEVICE_EXTADDRESS_PATTERN"),
+  source.indexOf("async function saveSelectedDeviceLabel()"));
+const deferred = () => {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+const A = { extAddress: "aaaaaaaaaaaaaaaa", deviceLabel: "Raw A" };
+const B = { extAddress: "bbbbbbbbbbbbbbbb", deviceLabel: "Raw B" };
+function harness() {
+  const elements = new Map(), reads = [];
+  const element = (id) => {
+    if (!elements.has(id)) elements.set(id, {
+      value: "", textContent: "", disabled: false, hidden: false,
+      classList: { toggle() {} },
+    });
+    return elements.get(id);
+  };
+  const context = vm.createContext({
+    getColumnValue, toText, canonicalizeExtAddress,
+    document: { getElementById: element },
+    trackedFetch: async () => {
+      const body = deferred();
+      const read = { body, status: 200, parsed: false };
+      reads.push(read);
+      return {
+        get status() { return read.status; },
+        get ok() { return read.status === 200; },
+        json() { read.parsed = true; return body.promise; },
+      };
+    },
+  });
+  vm.runInContext(`${settings}
+    globalThis.api = { state: deviceSettingsState, select: displaySelectedDevice,
+      load: loadSelectedDeviceLabel };
+  `, context);
+  const snapshot = () => JSON.stringify({
+    label: element("device-label").value,
+    loaded: context.api.state.loadedLabel,
+    loading: context.api.state.loading,
+    status: element("device-settings-status").textContent,
+    controls: ["device-label", "btn-device-settings-save", "btn-device-settings-cancel"]
+      .map((id) => element(id).disabled),
+  });
+  return { ...context.api, reads, element, snapshot };
+}
+for (const disposition of ["other-device", "cleared", "same-address", "stale-error"]) {
+  const h = harness();
+  h.select(A);
+  const old = h.load();
+  await flush();
+  assert.equal(h.reads[0].parsed, true, "must hold the body, not the headers");
+  h.select(disposition === "cleared" ? null : disposition === "same-address" ? A : B);
+  let newer;
+  if (disposition !== "cleared") {
+    newer = h.load();
+    await flush();
+    if (disposition === "same-address") {
+      h.reads[1].body.resolve({ deviceLabel: "Newest A" });
+      await newer;
+    }
+  }
+  const before = h.snapshot();
+  if (disposition === "stale-error") h.reads[0].body.reject(new Error("Old body failed"));
+  else h.reads[0].body.resolve({ deviceLabel: "Obsolete A" });
+  await old;
+  assert.equal(h.snapshot(), before, disposition);
+  if (newer && disposition !== "same-address") {
+    assert.equal(h.state.loading, true);
+    h.reads[1].body.resolve({ deviceLabel: "Saved B" });
+    await newer;
+    assert.equal(h.element("device-label").value, "Saved B");
+    assert.equal(h.state.loading, false);
+    assert.equal(h.element("device-label").disabled, false);
+  }
+  if (disposition === "cleared") {
+    assert.equal(h.element("device-label").value, "");
+    assert.equal(h.element("device-label").disabled, true);
+  }
+}
+for (const outcome of ["success", "missing", "parse-error"]) {
+  const h = harness();
+  h.select(A);
+  const loading = h.load();
+  if (outcome === "missing") h.reads[0].status = 404;
+  await flush();
+  if (outcome === "parse-error") h.reads[0].body.reject(new Error("Invalid JSON"));
+  else if (outcome === "success") h.reads[0].body.resolve({ deviceLabel: "Saved A" });
+  await loading;
+  assert.equal(h.state.loading, false);
+  assert.equal(h.element("device-label").disabled, false);
+  assert.equal(h.element("device-label").value, outcome === "success" ? "Saved A" : "Raw A");
+  assert.equal(h.element("device-settings-status").textContent,
+    outcome === "parse-error" ? "Invalid JSON" : "");
+}
+"""],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_device_selection_event_is_shared_by_both_renderers() -> None:
     utils_text = _read_text(UTILS_JS)
     topology_text = _read_text(TOPOLOGY_JS)

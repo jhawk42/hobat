@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import subprocess
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -58,7 +59,7 @@ def test_failed_repeat_sync_cannot_complete_against_prior_dataset() -> None:
     assert "acceptedDataset;" in dataset_text
     assert "acceptedDataset = currentDataset;" in dataset_text
     assert 'isPartial: failedFiles.length > 0 || materializationStates.includes("partial")' in dataset_text
-    assert "if (!currentDataset.isPartial) acceptedDataset = currentDataset;" in dataset_text
+    assert "if (failedFiles.length === 0) acceptedDataset = currentDataset;" in dataset_text
     assert 'result.status === "fulfilled" && result.value != null' in dataset_text
     assert "loadedDataset = await loadDataset(selectedValue" in ui_text
     assert "if (!loadedDataset || currentDataset !== loadedDataset)" in ui_text
@@ -76,13 +77,126 @@ def test_completed_job_fetches_the_new_snapshot_without_redispatching() -> None:
 
     completed_fetch = text.find('finalResponse = await trackedFetch(`/api/data/${filename}`')
     cache_header = text.find(
-        '"Cache-Control": `max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`',
+        '"Cache-Control": `only-if-cached, max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`',
         completed_fetch,
     )
     redispatch_guard = text.find("if (finalResponse.status === 202)", completed_fetch)
 
     assert completed_fetch != -1
     assert completed_fetch < cache_header < redispatch_guard
+
+
+def test_partial_baseline_failure_and_success_presentation() -> None:
+    result = subprocess.run(
+        ["node", "--unhandled-rejections=strict", "--input-type=module", "-e", r"""
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import { resolveNetworkInstance, networkInstanceStatus } from "./src/js/tdash-view-status.js";
+const source = readFileSync("./src/js/tdash-ui.js", "utf8");
+const entry = { value: "partial-test", source: "test", label: "Partial test", files: ["a.json"] };
+const baseline = { entry, rows: [{ name: "Retained" }], loadedFiles: entry.files,
+  isPartial: true, materializationState: "partial", fetchDurationMs: 42 };
+const elements = new Map(), renders = [], activity = [];
+const element = (id) => {
+  if (!elements.has(id)) elements.set(id, {
+    value: id === "dataset-select" ? entry.value : "", checked: false,
+    textContent: "", toggleAttribute() {},
+  });
+  return elements.get(id);
+};
+let presenter, outcome, cleared = 0, ended = 0;
+const context = vm.createContext({
+  currentDataset: baseline, currentView: "table", sourceCapabilities: {},
+  window: { tdashDebug: {} }, Date, setTimeout, clearTimeout,
+  document: { getElementById: element },
+  DATASET_REGISTRY: [entry], DATASOURCE_REGISTRY: [{ value: "test", label: "Test" }],
+  statusDisclosure: { close() {}, update() {} }, healthInsightsState: {},
+  resolveNetworkInstance, networkInstanceStatus,
+  configureViewStatusPresenter: (callback) => { presenter = callback; },
+  _setStatusSpans() {}, setFetchButtonsState() {},
+  startFetchSession: () => 1, endFetchSession: () => { ended++; },
+  recordWorkspaceActivity: (...args) => activity.push(args), recordActivity() {},
+  switchView() {}, supersedeViewStatus() {}, isFetchCancelledError: () => false,
+  loadSourceCapabilities: async () => ({}), setTableColumnCategory() {},
+  resetDeviceDetailsPanelTabsToDefault() {}, invalidateHealthRefresh() {},
+  refreshHealthAssessment: async () => {}, updateFetchStatusBar() {},
+  clearRenderedDatasetViews: () => { cleared++; },
+  restoreLastKnownGoodDataset: () => { context.currentDataset = baseline; return baseline; },
+  console: { error() {}, warn() {} },
+  _pinFetchStatusLineMessage: (message) => {
+    element("fetch-status-line-content").textContent = message;
+    context.window.tdashDebug.fetchStatusPinnedUntil = Infinity;
+  },
+  renderCurrentView: () => {
+    renders.push(context.currentDataset);
+    presenter({ summary: "Ready", details: [], state: "ready" });
+  },
+  loadDataset: async () => {
+    if (outcome === "throw") {
+      context.currentDataset = { ...baseline, rows: [] };
+      throw new Error("Assembly failed");
+    }
+    if (outcome === "missing") {
+      context.currentDataset = baseline;
+      element("fetch-status-line-content").textContent = "Required file unavailable";
+      return null;
+    }
+    context.currentDataset = { ...baseline, isPartial: outcome === "partial",
+      materializationState: outcome === "partial" ? "partial" : "complete" };
+    return context.currentDataset;
+  },
+});
+const identity = source.slice(source.indexOf("function datasetIdentityLabel("),
+  source.indexOf("function createStatusDisclosure("));
+const presentation = source.slice(source.indexOf("configureViewStatusPresenter((status) => {"),
+  source.indexOf("// ── Build datasource"));
+const errorHandler = source.slice(source.indexOf("function handleDatasetFetchError("),
+  source.indexOf("// Fetch dataset function"));
+const fetchOwner = source.slice(source.indexOf("async function doFetchDataset("),
+  source.indexOf("// Fetch button drives data acquisition."));
+vm.runInContext(`
+  let fetchFailureState = null, statusContext = null, _fetchInProgress = false;
+  let fetchAttemptVersion = 0, _lastFetchStartedAt = 0, _currentSearchQuery = "";
+  const _FETCH_STATUS_IDS = [], _DEVICE_STATUS_IDS = [];
+  ${identity}
+  ${presentation}
+  ${errorHandler}
+  ${fetchOwner}
+  globalThis.api = { sync: doFetchDataset, failure: () => fetchFailureState };
+`, context);
+for (outcome of ["missing", "throw"]) {
+  await context.api.sync();
+  assert.equal(context.currentDataset, baseline);
+  assert.equal(renders.at(-1), baseline);
+  assert.match(context.api.failure(), /failed|Could not load/i);
+  for (const view of ["topology", "table"]) {
+    context.currentView = view;
+    context.renderCurrentView();
+    assert.match(element("view-status-line-content").textContent, /Incomplete preview/);
+    assert.match(element("view-status-line-content").textContent, /Sync failed; retained data/);
+  }
+}
+outcome = "partial";
+await context.api.sync();
+assert.equal(context.api.failure(), null);
+assert.match(element("fetch-status-line-content").textContent, /Incomplete Unified dataset/);
+assert.match(element("view-status-line-content").textContent, /Incomplete preview/);
+assert.doesNotMatch(element("view-status-line-content").textContent, /Sync failed/);
+outcome = "complete";
+await context.api.sync();
+assert.equal(context.api.failure(), null);
+assert.doesNotMatch(element("view-status-line-content").textContent, /Incomplete|Sync failed/);
+assert.equal(cleared, 0);
+assert.equal(ended, 4);
+assert.ok(activity.some((event) => event[1] === "Dataset sync produced no usable data"));
+assert.ok(activity.some((event) => event[1] === "Dataset sync failed"));
+assert.ok(activity.some((event) => event[1] === "Dataset sync incomplete"));
+assert.ok(activity.some((event) => event[1] === "Dataset sync completed"));
+"""],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_shift_sync_uses_the_direct_refresh_request_intent() -> None:

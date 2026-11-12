@@ -492,6 +492,11 @@ Invalid ages, including negative, empty, bare, or nonnumeric values, return
 HTTP 400 before dispatch rather than falling back to another age policy.
 Static files and checkpoints bypass regeneration-age validation.
 
+After a dataset job reports `done`, the browser reads its final snapshot with
+`only-if-cached, max-age=31536000`, independently of the initial refresh intent.
+A missing final reports a failed read without dispatching another collector.
+The browser retains its accepted snapshot when one is available.
+
 A catalog recipe can reuse an already registered filename by changing only the
 [manifest](../src/td-dataset-manifest.json). A new snapshot filename also needs
 an entry in `td_webserver.py` `FILE_ACTION_MAP` (static or with a collector
@@ -581,10 +586,18 @@ checkpoint is reported it:
 4. rebuilds rows through the same pure dataset assembly path used for finals;
 5. marks the dataset partial and publishes a throttled redraw.
 
-After all files settle, the browser rebuilds from final payloads and clears the
-partial state. Cancellation applies to all active jobs in the current fetch
-session. If usable partial data exists, the browser keeps it and reports that
-the result is partial.
+After all files settle, the browser rebuilds from final payloads. Loading every
+required final accepts that snapshot for later rollback, including a Unified
+response with a validated `partial` materialization state. That state retains
+its incomplete-coverage warning; a failed retry restores the accepted snapshot
+without changing its freshness. A later successful partial load clears the
+retry failure, not the incomplete warning. Progressive checkpoints and
+bootstrap results missing required files never become the rollback baseline.
+Auxiliary files remain optional.
+
+Cancellation applies to all active jobs in the current fetch session. If usable
+partial data exists, the browser keeps it and reports that the result is
+partial, without promoting that preview to the rollback baseline.
 
 ## Device Labels
 
@@ -604,6 +617,10 @@ record back before responding. Updating returns 200; inserting returns 201.
 Invalid input returns 400, CLI failure or timeout returns 502, and invalid or
 unreadable persisted state returns 500. Device API responses use
 `Cache-Control: no-store`.
+
+The browser checks request generation and selected address after both response
+headers and the JSON body arrive. A stale label read cannot overwrite a newer
+selection's label, status, loading state, or controls.
 
 Atomic replacement prevents partial JSON. The in-process lock does not
 coordinate a separate writer process, so cross-process writes are

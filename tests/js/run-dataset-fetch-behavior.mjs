@@ -315,7 +315,7 @@ try {
     const primaryCalls = calls.filter((call) => call.url.endsWith(REQUIRED[0]));
     assert.deepEqual(primaryCalls.map((call) => call.headers), [
       { "Cache-Control": "no-cache" },
-      { "Cache-Control": `max-age=${CACHE_ONLY_SECONDS}` },
+      { "Cache-Control": `only-if-cached, max-age=${CACHE_ONLY_SECONDS}` },
     ]);
     assert.equal(loaded.isPartial, redispatch);
     assert.deepEqual(loaded.loadedFiles, redispatch ? [REQUIRED[1]] : REQUIRED);
@@ -350,6 +350,135 @@ try {
       assert.equal(await finish(dataset.loadDataset(unifiedEntry.value)), null);
       assert.equal(dataset.currentDataset, complete);
     }
+  }
+  for (const seed of ["none", "same-dataset", "other-dataset"]) {
+    const dataset = await freshModule();
+    const unified = DATASET_REGISTRY.find((entry) => entry.value === "ha_matter_ws_unified");
+    if (seed !== "none") {
+      cachedFetch(() => ({ "X-TD-Materialization-State": "complete" }));
+      await finish(dataset.loadDataset(seed === "same-dataset" ? unified.value : ENTRY.value));
+    }
+    mockFetch(() => response(row("accepted-partial"), {
+      "X-TD-Materialization-State": "partial",
+      "Last-Modified": "Mon, 28 Sep 2026 00:00:00 GMT",
+    }));
+    const accepted = await finish(dataset.loadDataset(unified.value));
+    const snapshot = JSON.stringify(accepted);
+    for (const failure of ["missing-state", "invalid-state", "http", "network"]) {
+      mockFetch(() => {
+        if (failure === "network") throw new TypeError("Connection lost");
+        return response(row("rejected"), failure === "invalid-state"
+          ? { "X-TD-Materialization-State": "invalid" } : {},
+          failure === "http" ? 503 : 200);
+      });
+      assert.equal(await finish(dataset.loadDataset(unified.value)), null);
+      assert.equal(dataset.currentDataset, accepted, `${seed}: ${failure}`);
+      assert.equal(dataset.restoreLastKnownGoodDataset(), accepted);
+      assert.equal(JSON.stringify(accepted), snapshot);
+    }
+    mockFetch(() => response(row("complete"), { "X-TD-Materialization-State": "complete" }));
+    const complete = await finish(dataset.loadDataset(unified.value));
+    assert.equal(complete.isPartial, false);
+    assert.equal(dataset.restoreLastKnownGoodDataset(), complete);
+  }
+  for (const outcome of ["failed-file", "cancelled", "superseded"]) {
+    const dataset = await freshModule();
+    const unified = DATASET_REGISTRY.find((entry) => entry.value === "ha_matter_ws_unified");
+    mockFetch(() => response(row("accepted-partial"), { "X-TD-Materialization-State": "partial" }));
+    const accepted = await finish(dataset.loadDataset(unified.value));
+    const pending = deferred();
+    mockFetch(({ url }) => url.endsWith(REQUIRED[0]) ? response(row("preview")) : pending.promise);
+    const sessionId = dataset.startFetchSession();
+    const loading = dataset.loadDataset(ENTRY.value, { sessionId, onFileReady: () => {} });
+    const completion = outcome === "failed-file" ? loading
+      : assert.rejects(loading, dataset.isFetchCancelledError);
+    await flush();
+    assert.notEqual(dataset.currentDataset, accepted);
+    assert.equal(dataset.currentDataset.isPartial, true);
+    let replacement;
+    if (outcome === "cancelled") await dataset.cancelActiveFetchSession();
+    if (outcome === "superseded") replacement = dataset.startFetchSession();
+    pending.resolve(response({}, {}, 503));
+    if (outcome === "failed-file") assert.equal(await finish(completion), null);
+    else await finish(completion);
+    assert.equal(dataset.restoreLastKnownGoodDataset(), accepted, outcome);
+    dataset.endFetchSession(sessionId);
+    if (replacement) dataset.endFetchSession(replacement);
+  }
+  {
+    const dataset = await freshModule();
+    mockFetch(({ url }) => url.endsWith(REQUIRED[0])
+      ? response(row("bootstrap")) : response({}, {}, 503));
+    const bootstrap = await finish(dataset.loadDataset(ENTRY.value));
+    assert.equal(bootstrap.isPartial, true);
+    assert.deepEqual(bootstrap.loadedFiles, [REQUIRED[0]]);
+    assert.equal(dataset.restoreLastKnownGoodDataset(), null);
+  }
+  for (const baseline of ["none", "complete", "partial"]) {
+    const dataset = await freshModule();
+    let accepted = null;
+    if (baseline === "complete") {
+      cachedFetch();
+      accepted = await finish(dataset.loadDataset(ENTRY.value));
+    } else if (baseline === "partial") {
+      mockFetch(() => response(row("accepted"), { "X-TD-Materialization-State": "partial" }));
+      accepted = await finish(dataset.loadDataset("ha_matter_ws_unified"));
+    }
+    let reads = 0;
+    const calls = mockFetch(({ url, headers }) => {
+      if (url === "/api/job/missing-final") return response({ status: "done" });
+      if (url.endsWith(REQUIRED[0])) {
+        reads++;
+        if (reads === 1) return response({ job_id: "missing-final", filename: REQUIRED[0] }, {}, 202);
+        assert.deepEqual(headers, { "Cache-Control": `only-if-cached, max-age=${CACHE_ONLY_SECONDS}` });
+        return response({}, {}, 404);
+      }
+      return response(row("other"));
+    });
+    const sessionId = dataset.startFetchSession();
+    const loaded = await finish(dataset.loadDataset(ENTRY.value, { sessionId, forceFresh: true }));
+    assert.equal(reads, 2);
+    assert.equal(calls.filter(({ url }) => url.startsWith("/api/job/")).length, 1);
+    assert.equal(calls[0].headers["Cache-Control"], "no-cache");
+    if (accepted) {
+      assert.equal(loaded, null);
+      assert.equal(dataset.currentDataset, accepted);
+    } else {
+      assert.equal(loaded.isPartial, true);
+      assert.deepEqual(loaded.loadedFiles, [REQUIRED[1]]);
+    }
+    assert.deepEqual(await dataset.cancelActiveFetchSession(),
+      { cancelled: true, cancelledJobIds: [] });
+    assert.equal(dataset.restoreLastKnownGoodDataset(), accepted);
+    dataset.endFetchSession(sessionId);
+  }
+  {
+    const dataset = await freshModule();
+    cachedFetch();
+    const accepted = await finish(dataset.loadDataset(ENTRY.value));
+    let reads = 0, finalSignal;
+    const calls = mockFetch(({ url, method, signal }) => {
+      if (url === "/api/job/cancel-final") {
+        return response({ status: method === "DELETE" ? "cancelled" : "done" });
+      }
+      if (url.endsWith(REQUIRED[0])) {
+        if (++reads === 1) return response({ job_id: "cancel-final", filename: REQUIRED[0] }, {}, 202);
+        finalSignal = signal;
+        return new Promise((_, reject) => {
+          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+          queueMicrotask(() => void dataset.cancelActiveFetchSession());
+        });
+      }
+      return response(row("other"));
+    });
+    const sessionId = dataset.startFetchSession();
+    await finish(assert.rejects(dataset.loadDataset(ENTRY.value, { sessionId }),
+      dataset.isFetchCancelledError));
+    assert.equal(finalSignal.aborted, true);
+    assert.equal(reads, 2);
+    assert.equal(calls.filter(({ method }) => method === "DELETE").length, 1);
+    assert.equal(dataset.restoreLastKnownGoodDataset(), accepted);
+    dataset.endFetchSession(sessionId);
   }
   console.log(JSON.stringify({ scenarioCount, requestCount, controlledTimers: true }));
 } finally {

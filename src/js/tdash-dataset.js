@@ -679,7 +679,7 @@ async function pollJobUntilDone(
       try {
         finalResponse = await trackedFetch(`/api/data/${filename}`, {
           headers: {
-            "Cache-Control": `max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`,
+            "Cache-Control": `only-if-cached, max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`,
           },
           signal,
         });
@@ -1008,7 +1008,7 @@ export async function loadDataset(entryValue, options = {}) {
     },
   };
 
-  if (!currentDataset.isPartial) acceptedDataset = currentDataset;
+  if (failedFiles.length === 0) acceptedDataset = currentDataset;
 
   // Set progress bar to 100% when fetch completes
   if (progressEl) {
