@@ -1,7 +1,7 @@
 import {
   EDGE_CATEGORY_DEFAULT_CHILDREN, EDGE_CATEGORY_ROUTER_NEIGHBOR,
   EDGE_CATEGORY_DEFAULT_1, EDGE_CATEGORY_DEFAULT_2, EDGE_CATEGORY_DEFAULT_3,
-  EDGE_CATEGORY_OTBR_ROUTE, NODE_COLORS, NODE_SHAPES,
+  EDGE_CATEGORY_OTBR_ROUTE, NODE_COLORS, NODE_SHAPES, DIAGNOSTIC_FILTER_OPTIONS,
 } from "./tdash-constants.js";
 import {
   createAdaptorModel, emitAdaptorResult, registerDevice, registerDetails,
@@ -17,7 +17,7 @@ import {
   buildLabel, buildNodeHoverLabel, buildNodeLabelFont, buildRoleNodeEmphasis,
   buildMainRouterRloc16, buildChildRloc16,
 } from "./tdash-topology-utils.js";
-import { toText, toFiniteNumber, isPlainObject } from "./tdash-utils.js";
+import { getColumnValue, toText, toFiniteNumber, isPlainObject } from "./tdash-utils.js";
 
 function scopeKey(row, key) {
   return JSON.stringify([row._networkInstance ?? null, key]);
@@ -37,6 +37,9 @@ export function adaptUnified(fileMap, rows, entry) {
       throw new Error("Unified rows require unique committed record IDs.");
     }
     const projection = buildDeviceProjection(row);
+    const scalarDiagnostics = Object.fromEntries(DIAGNOSTIC_FILTER_OPTIONS
+      .filter((option) => option.tableRowField && option.topoNodeField)
+      .map((option) => [option.topoNodeField, toFiniteNumber(getColumnValue(row, option.tableRowField))]));
     const role = toText(row.role).toLowerCase();
     const child = ["child", "reed", "enddevice", "sleepyenddevice", "sleepychild"].includes(role);
     const themeRole = projection.isBorderRouter ? "borderRouter"
@@ -56,6 +59,9 @@ export function adaptUnified(fileMap, rows, entry) {
         font: buildNodeLabelFont({ fontSize: projection.isRouter ? 19.5 : 13, isRouter: projection.isRouter }),
         ...buildRoleNodeEmphasis(projection),
         ...projection,
+        ...scalarDiagnostics,
+        mode_device: projection.deviceType,
+        isFtdRouter: projection.deviceType === "FTD" && projection.rloc16.endsWith("00"),
         type: row.type,
         relationshipOnly: row.relationshipOnly === true,
       },
@@ -175,6 +181,11 @@ export function adaptUnified(fileMap, rows, entry) {
       });
     });
   });
-  relationships.forEach((relationship) => registerCanonicalRelationship(relationship, model));
+  relationships.forEach((relationship) => {
+    if (relationship.categories.includes(EDGE_CATEGORY_DEFAULT_CHILDREN)) {
+      model.devicesById.get(relationship.sourceId).presentation.hasChildren = true;
+    }
+    registerCanonicalRelationship(relationship, model);
+  });
   return emitAdaptorResult(model);
 }

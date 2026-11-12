@@ -41,6 +41,23 @@ assert.deepEqual(sorted(baseline().visibleEdgeIds), fixture.expected.edgeIds);
 assert.equal(baseline().visibleNodeCount, fixture.expected.rowCount);
 assert.equal(baseline().visibleEdgeCount, fixture.expected.edgeIds.length);
 
+const metricRows = [
+  {_unifiedRecordId: "zero", role: "router", rloc16: "0x1000", mode: {device: "FTD"},
+    macCounters: {ifTotalDiscardsTotalPktsRatio: 0}, timeStatistics: {routerPct: 40},
+    children: [{targetId: "missing"}]},
+  {_unifiedRecordId: "missing", role: "child", mode: {device: "MTD"}},
+  {_unifiedRecordId: "unresolved", role: "router", children: [{targetId: "absent"}]},
+];
+const metricAdapted = runAdaptor({entry: fixture.entry, rows: metricRows, rawFiles: [metricRows]});
+const metricNodes = new Map(metricAdapted.nodeData.map(node => [node.id, node]));
+assert.equal(metricNodes.get("zero").ifTotalDiscardsTotalPktsRatio, 0);
+assert.equal(metricNodes.get("zero").isFtdRouter, true);
+assert.notEqual(metricNodes.get("unresolved").hasChildren, true);
+assert.equal(metricNodes.get("missing").ifTotalDiscardsTotalPktsRatio, undefined);
+const metricModel = createTopologyViewModel(metricAdapted, buildDeviceProjections(metricRows));
+assert.deepEqual(sorted(computeTopologyVisibility(metricModel,
+  createTopologyFilterState("all", "all_links", "ftd-router-pct-very-low")).visibleNodeIds), ["zero"]);
+
 const collisionRows = ["scope-a", "scope-b"].map(_unifiedRecordId => ({
   _unifiedRecordId, _networkInstance: _unifiedRecordId,
   extAddress: "1111111111111111", role: "router", isRouter: true,
