@@ -307,7 +307,7 @@ def test_atomic_save_is_idempotent_and_sets_sqlite_guards(tmp_path) -> None:
     assert not repeated.observation_created
     assert not repeated.assessment_created
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
         assert connection.execute(
@@ -349,7 +349,7 @@ def test_locked_database_closes_failed_connection_and_allows_retry(tmp_path, mon
 def test_initialized_schema_matches_frozen_contract(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         schema_objects = connection.execute(
             "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"
         ).fetchall()
@@ -392,7 +392,7 @@ def test_roster_source_time_and_partial_observation_do_not_refresh_projection(tm
     first = save("1", "router", first_time)
     second = save("2", "child", first_time)
     save("3", "leader", second_time, Completeness.PARTIAL)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         current = connection.execute(
             "SELECT value_json, observation_id, source_observed_at FROM device_last_known WHERE field_key='role'"
         ).fetchone()
@@ -417,7 +417,7 @@ def test_atomic_save_rolls_back_when_assessment_insert_fails(tmp_path, monkeypat
     with pytest.raises(RuntimeError, match="injected"):
         store.save_processing_result(observation, assessment)
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 0
 
@@ -434,7 +434,7 @@ def test_reconcile_current_assessments_removes_only_stale_pointers(tmp_path) -> 
         (active_observation.dataset_id,)
     ) == 1
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute(
             "SELECT dataset_id FROM current_assessments"
         ).fetchall() == [(active_observation.dataset_id,)]
@@ -443,7 +443,7 @@ def test_reconcile_current_assessments_removes_only_stale_pointers(tmp_path) -> 
 
 def test_future_schema_is_rejected(tmp_path) -> None:
     path = tmp_path / "health.db"
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(
             "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
         )
@@ -462,7 +462,7 @@ def test_ledger_only_schema_downgrade_is_rejected(tmp_path) -> None:
     observation, assessment = _result()
     store.save_processing_result(observation, assessment)
 
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("DELETE FROM schema_migrations WHERE version > 1")
         connection.execute("UPDATE schema_migrations SET version=1")
         connection.execute("UPDATE assessments SET status='healthy'")
@@ -492,7 +492,7 @@ def test_ledger_only_schema_downgrade_is_rejected(tmp_path) -> None:
         SQLiteHealthStore(path)
     assert error.value.category == "schema-invalid"
 
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute("SELECT status FROM assessments").fetchone() == ("healthy",)
         assert connection.execute("SELECT status FROM findings").fetchone() == ("unhealthy",)
 
@@ -502,7 +502,7 @@ def test_schema_three_records_explicit_assessment_provenance(tmp_path) -> None:
     store = SQLiteHealthStore(path)
     store.save_processing_result(*_result())
 
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         columns = {
             row[1] for row in connection.execute("PRAGMA table_info(assessments)")
         }
@@ -516,7 +516,7 @@ def test_schema_three_records_explicit_assessment_provenance(tmp_path) -> None:
 
 def test_incomplete_schema_two_store_is_rejected_without_bootstrapping(tmp_path) -> None:
     path = tmp_path / "health.db"
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(
             "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
         )
@@ -559,7 +559,7 @@ def test_incomplete_schema_two_store_is_rejected_without_bootstrapping(tmp_path)
         SQLiteHealthStore(path)
     assert error.value.category == "schema-invalid"
 
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute("SELECT assessment_id FROM assessments").fetchone() == ("a",)
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
@@ -630,7 +630,7 @@ def test_observation_retention_is_bounded(tmp_path) -> None:
     for suffix in ("1", "2", "3"):
         store.save_processing_result(*_result(suffix))
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         rows = connection.execute(
             "SELECT observation_id FROM observations ORDER BY observed_at"
         ).fetchall()
@@ -690,7 +690,7 @@ def test_observation_retention_prunes_orphaned_identities(tmp_path) -> None:
     store.save_processing_result(expired_observation, expired_assessment)
     store.save_processing_result(retained_observation, retained_assessment)
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         device_ids = {
             row[0] for row in connection.execute("SELECT device_id FROM devices")
         }
@@ -956,7 +956,7 @@ def test_purge_all_removes_health_records_but_preserves_other_tables(tmp_path) -
         "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", "Router"
     )
     store.save_processing_result(*_result())
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("CREATE TABLE other_hobat_data(value TEXT)")
         connection.execute("INSERT INTO other_hobat_data VALUES ('keep')")
 
@@ -969,7 +969,7 @@ def test_purge_all_removes_health_records_but_preserves_other_tables(tmp_path) -
     assert result.deleted["expected_devices"] == 1
     assert result.deleted["roster_lifecycle_events"] == 1
     assert result.deleted["network_roster_revisions"] == 1
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT value FROM other_hobat_data").fetchone() == ("keep",)
         assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] > 0
     repeated = store.purge_all()
@@ -993,7 +993,7 @@ def test_purge_device_removes_identity_and_invalidates_affected_assessment(tmp_p
     assert result.deleted["expected_devices"] == 1
     assert store.store_capabilities()["observationCount"] == 1
     assert store.store_capabilities()["assessmentCount"] == 0
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM current_assessments").fetchone()[0] == 0
 
@@ -1013,7 +1013,7 @@ def test_purging_expected_device_invalidates_pending_processing_context(tmp_path
 
     with pytest.raises(StaleRosterContextError, match="Roster changed"):
         store.save_processing_result(observation, assessment)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute(
             "SELECT revision FROM network_roster_revisions WHERE network_id=?",
             (network_id,),
@@ -1045,7 +1045,7 @@ def test_device_purge_removes_noop_receipts_for_the_scoped_device(tmp_path) -> N
 
     store.purge_device(device_id, network_id=network_id)
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM roster_mutation_receipts WHERE device_id=?",
             (device_id,),
@@ -1074,14 +1074,14 @@ def test_schema_seven_adds_and_backfills_receipt_device_scope(tmp_path) -> None:
         request_id="73b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
         expected_revision=2, context_assessment_id=None, device_label=None, reason=None,
     )
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("DROP INDEX idx_roster_receipts_network_device")
         connection.execute("ALTER TABLE roster_mutation_receipts DROP COLUMN device_id")
         connection.execute("DELETE FROM schema_migrations WHERE version>=7")
 
     migrated = SQLiteHealthStore(path)
 
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute(
             "SELECT DISTINCT device_id FROM roster_mutation_receipts"
         ).fetchall() == [(device_id,)]
@@ -1096,7 +1096,7 @@ def test_legacy_assessment_endpoint_uses_zero_roster_revision(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
     observation, assessment = _result()
     store.save_processing_result(observation, assessment)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("ALTER TABLE assessments DROP COLUMN network_roster_revision")
 
     page = store.assessment_endpoint_page(
@@ -1251,7 +1251,7 @@ def test_purge_device_preserves_other_network_fact_samples(tmp_path) -> None:
     second = replace(second, network_id="extpan:0011223344556677")
     store.save_processing_result(first, first_assessment)
     store.save_processing_result(second, second_assessment)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.executemany(
             """INSERT INTO device_fact_samples
                (observation_id, device_id, field_key, source_file, value_json, value_class)
@@ -1260,7 +1260,7 @@ def test_purge_device_preserves_other_network_fact_samples(tmp_path) -> None:
             ((first.observation_id,), (second.observation_id,)),
         )
     store.purge_device("extaddr:8672766ae0578187", network_id=first.network_id)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute(
             "SELECT observation_id FROM device_fact_samples"
         ).fetchall() == [(second.observation_id,)]
@@ -1269,7 +1269,7 @@ def test_purge_device_preserves_other_network_fact_samples(tmp_path) -> None:
 def test_purge_device_removes_relationship_but_preserves_other_endpoint(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
     store.save_processing_result(*_result())
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute(
             "INSERT INTO devices VALUES (?, ?)",
@@ -1298,7 +1298,7 @@ def test_purge_device_removes_relationship_but_preserves_other_endpoint(tmp_path
     result = store.purge_device("extaddr:8672766ae0578187")
     assert result.deleted["relationship_samples"] == 1
     assert result.deleted["relationships"] == 1
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute(
             "SELECT device_id FROM devices"
         ).fetchall() == [("extaddr:0011223344556677",)]
@@ -1390,14 +1390,14 @@ def test_comparison_pair_is_atomic_idempotent_and_late_arrival_does_not_repoint(
     store.save_processing_result(replace(after[0], completeness=Completeness.DEGRADED), after[1])
     interval, items, created = store.compare_assessments("assessment-1", "assessment-3", dry_run=True)
     assert not created and len(items) == 2
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 0
     assert store.compare_assessments("assessment-1", "assessment-3")[2] is True
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 1
     assert store.compare_assessments("assessment-1", "assessment-3")[2] is False
     store.save_processing_result(*_result("2"))
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT assessment_id FROM current_assessments").fetchone()[0] == "assessment-3"
         assert connection.execute(
             "SELECT before_assessment_id, after_assessment_id FROM comparisons ORDER BY after_observed_at"
@@ -1470,7 +1470,7 @@ def test_auto_comparison_suppresses_equivalent_observation_instants(tmp_path) ->
     second_assessment = replace(second_assessment, assessed_at="2026-09-01T02:00:01+02:00")
     store.save_processing_result(first, first_assessment)
     store.save_processing_result(second, second_assessment)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 0
 
 
@@ -1488,7 +1488,7 @@ def test_auto_comparison_persists_immutable_partition_and_rloc_changes(tmp_path)
                  RosterFact(observation.devices[0].device_id, "rloc16",
                             json.dumps(rloc), "transient", filename, 3, "high"))
         store.save_processing_result(observation, assessment, roster_facts=facts)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         rows = connection.execute(
             "SELECT metric, before_json, after_json, change FROM comparison_items "
             "WHERE metric IN ('partition', 'rloc16') ORDER BY metric"
@@ -1524,7 +1524,7 @@ def test_auto_comparison_persists_unique_complete_interval_candidates_and_retrie
     after = endpoint("6", "2026-01-31T00:00:00Z")
     store.save_processing_result(*after)
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         rows = connection.execute(
             "SELECT before_assessment_id, comparison_id FROM comparisons "
             "WHERE after_assessment_id=?",
@@ -1561,7 +1561,7 @@ def test_auto_comparison_retry_adds_candidates_from_late_arriving_history(tmp_pa
 
     after = endpoint("6", "2026-01-31T00:00:00Z")
     store.save_processing_result(*after)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM comparisons WHERE after_assessment_id=?",
             (after[1].assessment_id,),
@@ -1578,12 +1578,12 @@ def test_auto_comparison_retry_adds_candidates_from_late_arriving_history(tmp_pa
     store.save_processing_result(
         replace(partial, completeness=Completeness.PARTIAL), partial_assessment,
     )
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         earlier_pairs = connection.execute(
             "SELECT comparison_id FROM comparisons ORDER BY comparison_id"
         ).fetchall()
     store.save_processing_result(*after)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         final_pairs = connection.execute(
             "SELECT before_assessment_id, comparison_id FROM comparisons "
             "WHERE after_assessment_id=?",
@@ -1612,7 +1612,7 @@ def test_pruned_comparison_is_read_only_and_device_purge_removes_it(tmp_path) ->
     assert detail["baselineState"] == "pruned"
     assert detail["reasons"][0] == "baseline-pruned" or "baseline-pruned" in detail["reasons"]
     assert not detail["comparable"] and detail["itemCount"] == len(detail["items"])
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 2
     dry = store.purge_device("extaddr:8672766ae0578187", dry_run=True)
     applied = store.purge_device("extaddr:8672766ae0578187")
@@ -1623,7 +1623,7 @@ def test_pruned_comparison_is_read_only_and_device_purge_removes_it(tmp_path) ->
 
 def test_real_v3_migration_backfills_only_lossless_device_facts(tmp_path) -> None:
     path = tmp_path / HOBAT_DATABASE_FILENAME
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.executescript(_SCHEMA)
         connection.executemany(
             "INSERT INTO schema_migrations VALUES (?, CURRENT_TIMESTAMP)", ((2,), (3,))
@@ -1638,7 +1638,7 @@ def test_real_v3_migration_backfills_only_lossless_device_facts(tmp_path) -> Non
         connection.execute("INSERT INTO device_samples VALUES (?, ?, ?, ?, ?, ?)",
                            ("observation-old", "extaddr:8672766ae0578187", "router", "attached", 0, "[]"))
     SQLiteHealthStore(path)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         rows = connection.execute(
             "SELECT field_key, value_json, source_file, source_observed_at, roster_policy_digest FROM device_fact_samples ORDER BY field_key"
         ).fetchall()
@@ -1678,7 +1678,7 @@ def test_comparison_writer_persists_type_and_retry_keeps_legacy_null(tmp_path) -
     store.save_processing_result(first, first_assessment)
     store.save_processing_result(second, second_assessment)
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         rows = connection.execute(
             "SELECT item_kind, relationship_type FROM comparison_items "
             "ORDER BY item_kind, item_id"
@@ -1700,7 +1700,7 @@ def test_comparison_writer_persists_type_and_retry_keeps_legacy_null(tmp_path) -
         second_assessment.assessment_id,
     )
     assert not inserted
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute(
             "SELECT relationship_type FROM comparison_items "
             "WHERE item_kind='relationship-change'"
@@ -1709,7 +1709,7 @@ def test_comparison_writer_persists_type_and_retry_keeps_legacy_null(tmp_path) -
 
 def test_v3_upgrade_reopen_keeps_comparison_and_roster_provenance(tmp_path) -> None:
     path = tmp_path / HOBAT_DATABASE_FILENAME
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.executescript(_SCHEMA)
         connection.executemany(
             "INSERT INTO schema_migrations VALUES (?, CURRENT_TIMESTAMP)", ((2,), (3,))
@@ -1726,7 +1726,7 @@ def test_v3_upgrade_reopen_keeps_comparison_and_roster_provenance(tmp_path) -> N
         store.save_processing_result(observation, assessment, roster_facts=(fact,))
 
     SQLiteHealthStore(path)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall() == [
             (version,) for version in range(2, SCHEMA_VERSION + 1)
         ]
@@ -1753,7 +1753,7 @@ def test_comparison_failure_rolls_back_observation_and_current_pointer(tmp_path,
     monkeypatch.setattr(store, "_store_comparison", fail)
     with pytest.raises(RuntimeError, match="comparison failure"):
         store.save_processing_result(*_result("2"))
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM observations").fetchone() == (1,)
         assert connection.execute("SELECT assessment_id FROM current_assessments").fetchone() == ("assessment-1",)
         assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone() == (0,)
@@ -1763,7 +1763,7 @@ def test_incomplete_schema_four_store_is_rejected_before_migration(tmp_path) -> 
     path = tmp_path / "health.db"
     network_id = "extpan:78b9775b001c1cbe"
     device_id = "extaddr:8672766ae0578187"
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.executescript("""
             CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
             INSERT INTO schema_migrations VALUES (4, CURRENT_TIMESTAMP);
@@ -1780,7 +1780,7 @@ def test_incomplete_schema_four_store_is_rejected_before_migration(tmp_path) -> 
     with pytest.raises(HealthStoreMigrationError) as error:
         SQLiteHealthStore(path)
     assert error.value.category == "schema-invalid"
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute(
             "SELECT label, roster_state FROM expected_devices WHERE network_id=? AND device_id=?",
             (network_id, device_id),
@@ -1811,7 +1811,7 @@ def test_roster_cli_writes_are_audited_revisioned_and_label_only_is_nonreactivat
     assert reactivated["expected_since"] is not None
     assert reactivated["revision"] == 3
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute(
             "SELECT revision FROM network_roster_revisions WHERE network_id=?",
             (network_id,),
@@ -1860,7 +1860,7 @@ def test_roster_import_is_additive_idempotent_and_purge_removes_its_audit(tmp_pa
     result = store.purge_device(existing_id, network_id=network_id)
     assert result.deleted["expected_devices"] == 1
     assert result.deleted["roster_lifecycle_events"] == 1
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM roster_lifecycle_events").fetchone()[0] == 1
 
 
@@ -1869,13 +1869,13 @@ def test_idempotent_retry_recreates_missing_comparison(tmp_path) -> None:
     store.save_processing_result(*_result("1"))
     later = _result("2")
     store.save_processing_result(*later)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("PRAGMA foreign_keys=ON")
         comparison_id = connection.execute("SELECT comparison_id FROM comparisons").fetchone()[0]
         connection.execute("DELETE FROM comparisons")
     repeated = store.save_processing_result(*later)
     assert not repeated.observation_created and not repeated.assessment_created
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT comparison_id FROM comparisons").fetchone() == (comparison_id,)
 
 
@@ -1934,7 +1934,7 @@ def test_route64_contract_cannot_upgrade_immutable_observation_samples(tmp_path)
                       sample_contract_version="comparison-v1-route64")
     with pytest.raises(ValueError, match="sample contract"):
         store.save_processing_result(observation, updated)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         assert connection.execute("SELECT assessment_id FROM assessments").fetchall() == [(assessment.assessment_id,)]
     with closing(store._connect()) as connection, connection:
         connection.execute(
@@ -2095,7 +2095,7 @@ def test_pruned_numeric_delta_is_suppressed_without_mutating_persisted_item(tmp_
     )["filteredItemCount"] == effective["itemCount"]
     assert numeric["delta"] is None and numeric["direction"] is None
     assert "baseline-pruned" in numeric["reasons"]
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         stored = connection.execute(
             "SELECT delta_json FROM comparison_items WHERE comparison_id=? AND metric='routerRolePercent'",
             (comparison_id,),
@@ -2127,7 +2127,7 @@ def test_comparison_filters_count_and_page_the_effective_population(tmp_path) ->
     )
     comparison_id = listing["items"][0]["comparisonId"]
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.row_factory = sqlite3.Row
         original = dict(connection.execute(
             "SELECT * FROM comparison_items WHERE comparison_id=?", (comparison_id,)

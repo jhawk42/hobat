@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import tempfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -59,7 +60,7 @@ def test_backup_and_restore_round_trip_complete_data_directory(tmp_path) -> None
     assert (data_dir / "snapshot.json").read_text(encoding="utf-8") == '{"value": 1}\n'
     assert not (data_dir / "new.json").exists()
     assert not (data_dir / BACKUP_MANIFEST_FILENAME).exists()
-    with sqlite3.connect(data_dir / HOBAT_DATABASE_FILENAME) as connection:
+    with closing(sqlite3.connect(data_dir / HOBAT_DATABASE_FILENAME)) as connection, connection:
         assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
 

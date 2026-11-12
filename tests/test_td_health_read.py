@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -283,7 +284,7 @@ def test_comparison_endpoint_pages_and_query_only_pair_projection(tmp_path) -> N
     }
     stored = service.comparison_pair(**query)
     assert stored is not None and stored["origin"] == "stored"
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("DELETE FROM comparison_items")
         connection.execute("DELETE FROM comparisons")
         connection.commit()
@@ -300,7 +301,7 @@ def test_comparison_endpoint_pages_and_query_only_pair_projection(tmp_path) -> N
     } == {
         key: value for key, value in derived.items() if key not in {"origin", "createdAt"}
     }
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         after_counts = connection.execute(
             "SELECT (SELECT COUNT(*) FROM comparisons), "
             "(SELECT COUNT(*) FROM comparison_items)"
@@ -320,7 +321,7 @@ def test_comparison_labels_batch_current_roster_and_disambiguate_candidates(tmp_
         "extaddr:8672766ae0578187",
         "extaddr:0000000000000001",
     )
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.executemany(
             """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
                VALUES (?, ?, ?, 'expected')""",
@@ -357,7 +358,7 @@ def test_comparison_labels_batch_current_roster_and_disambiguate_candidates(tmp_
         encoding="utf-8",
     )
     policy = load_health_manifest().roster_policy
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute(
             """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
                VALUES (?, ?, 'Expected over stale', 'expected')""",
@@ -453,7 +454,7 @@ def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_p
     ),))
     store.save_processing_result(before, before_assessment)
     store.save_processing_result(after, after_assessment)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.executemany(
             """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
                VALUES (?, ?, ?, 'expected')""",
@@ -526,7 +527,7 @@ def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_p
     assert legacy_parent["afterDeviceDisplayLabel"] == "New parent"
     assert len(resolver_calls) == 2
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("DELETE FROM comparison_items")
         connection.execute("DELETE FROM comparisons")
         connection.commit()
@@ -568,7 +569,7 @@ def test_comparison_relationship_endpoints_use_roster_or_static_device_labels(tm
     store.save_processing_result(observation, assessment)
     roster_device_id = observation.devices[0].device_id
     static_device_id = "extaddr:0000000000000011"
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute(
             """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
                VALUES (?, ?, ?, 'expected')""",
@@ -631,7 +632,7 @@ def test_comparison_search_and_order_are_global_for_stored_and_derived_rows(tmp_
     late_endpoint = "extaddr:0000000000000200"
     other_endpoint = "extaddr:0000000000000201"
     relationship_id = f"link:{late_endpoint}->{other_endpoint}"
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.row_factory = sqlite3.Row
         comparison_id = connection.execute(
             "SELECT comparison_id FROM comparisons LIMIT 1"
@@ -772,7 +773,7 @@ def test_comparison_search_and_order_are_global_for_stored_and_derived_rows(tmp_
         assert len({item["subjectId"] for item in rows}) == 125
         assert len(pages[-1]["items"]) == (125 % limit or limit)
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute(
             "DELETE FROM comparisons WHERE comparison_id=?", (comparison_id,)
         )
@@ -890,7 +891,7 @@ def test_legacy_comparison_without_relationship_type_column_stays_read_only(tmp_
     )
     store.save_processing_result(replace(before, relationships=(link,)), before_assessment)
     store.save_processing_result(replace(after, relationships=(link,)), after_assessment)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("ALTER TABLE comparison_items DROP COLUMN relationship_type")
         connection.execute("DELETE FROM schema_migrations WHERE version>=9")
         connection.commit()
@@ -932,7 +933,7 @@ def test_comparison_relationship_type_rejects_corrupt_metadata_and_schema(tmp_pa
         "after_assessment_id": after_assessment.assessment_id,
         "limit": 25, "offset": 0,
     }
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute(
             "UPDATE comparison_items SET relationship_type='' "
             "WHERE item_kind='relationship-change'"
@@ -940,7 +941,7 @@ def test_comparison_relationship_type_rejects_corrupt_metadata_and_schema(tmp_pa
     with pytest.raises(HealthCorruptStoreError, match="relationship type"):
         service.comparison_pair(**query)
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute(
             "ALTER TABLE comparison_items DROP COLUMN relationship_type"
         )
@@ -1052,7 +1053,7 @@ def test_derived_reset_witness_matches_stored_header(tmp_path) -> None:
     assert stored is not None
     assert stored["resetState"] == "reset-detected"
     assert stored["resetWitness"]
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("DELETE FROM comparison_items")
         connection.execute("DELETE FROM comparisons")
         connection.commit()
@@ -1084,7 +1085,7 @@ def test_derived_comparison_rejects_corrupt_source_timestamps(tmp_path) -> None:
     )
     store.save_processing_result(before, before_assessment)
     store.save_processing_result(after, after_assessment)
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("DELETE FROM comparison_items")
         connection.execute("DELETE FROM comparisons")
         connection.execute(
@@ -1266,7 +1267,7 @@ def test_pinned_roster_projects_and_sorts_stored_table_facts(tmp_path) -> None:
     store.save_processing_result(observation, assessment, roster_facts=facts)
     policy = load_health_manifest().roster_policy
     eui = json.dumps("0011223344556677")
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         for device_id in (
             "extaddr:0000000000000001", "extaddr:0000000000000002",
         ):
@@ -1385,7 +1386,7 @@ def test_pinned_roster_projects_and_sorts_stored_table_facts(tmp_path) -> None:
                 *(ids[name] for name in expected), ids["absent"],
             ], f"Unexpected {direction} ordering for {field}"
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute(
             """UPDATE device_last_known SET roster_policy_digest=NULL
                WHERE device_id=? AND field_key='vendorName'""",
@@ -1420,7 +1421,7 @@ def test_pinned_roster_projects_and_sorts_stored_table_facts(tmp_path) -> None:
     assert stale["fields"][expiring_field]["value"] == records[ids["one"]][expiring_field]
     assert stale["fields"][expiring_field]["freshness"] == "stale"
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute(
             """UPDATE device_last_known SET value_json='"not-an-ipv6-address"'
                WHERE device_id=? AND field_key='omrIpv6Address'""",
@@ -1546,7 +1547,7 @@ def test_legacy_assessment_projects_catalog_metadata_and_unknown_fallback(tmp_pa
     database_path = tmp_path / HOBAT_DATABASE_FILENAME
     store = SQLiteHealthStore(database_path)
     store.save_processing_result(*_result())
-    with sqlite3.connect(database_path) as connection:
+    with closing(sqlite3.connect(database_path)) as connection, connection:
         connection.execute(
             "UPDATE assessments SET evaluator_version='legacy-unknown', profile_id='legacy-unknown'"
         )

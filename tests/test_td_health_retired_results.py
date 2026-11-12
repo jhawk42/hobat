@@ -157,5 +157,5 @@ def test_cli_requires_backup_and_reports_exact_counts(retired_store, tmp_path, c
     report = json.loads(capsys.readouterr().out)
     assert report["backupOutput"] == str(backup)
     assert (backup / "hobat-backup-manifest.json").is_file()
-    with sqlite3.connect(backup / HOBAT_DATABASE_FILENAME) as connection:
+    with closing(sqlite3.connect(backup / HOBAT_DATABASE_FILENAME)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM findings").fetchone()[0] == 11

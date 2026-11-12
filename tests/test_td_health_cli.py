@@ -410,7 +410,7 @@ def test_history_subprocess_preserves_unsupported_contracts(
 def test_history_real_schema3_upgrade_does_not_invent_sample_contract(tmp_path) -> None:
     database = tmp_path / HOBAT_DATABASE_FILENAME
     _create_schema_fixture(database, 3)
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         connection.execute(
             "UPDATE observations SET dataset_id='otbr_cli_diagnostics_fetch', "
             "datasource_id='otbr-cli'",
@@ -429,7 +429,7 @@ def test_history_real_schema3_upgrade_does_not_invent_sample_contract(tmp_path) 
     assert result.returncode == 1, result.stderr
     item = json.loads(result.stdout)["items"][0]
     assert item["reasons"] == ["unsupported-sample-contract"]
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         assert connection.execute(
             "SELECT sample_contract_version FROM assessments",
         ).fetchone()[0] == "legacy-unknown"
@@ -661,7 +661,7 @@ def test_schema_migration_check_does_not_create_missing_data_directory(tmp_path)
 
 def test_migrate_history_reports_invalid_schema_without_traceback(tmp_path) -> None:
     database_path = tmp_path / HOBAT_DATABASE_FILENAME
-    with sqlite3.connect(database_path) as connection:
+    with closing(sqlite3.connect(database_path)) as connection, connection:
         connection.execute(
             "CREATE TABLE schema_migrations "
             "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"

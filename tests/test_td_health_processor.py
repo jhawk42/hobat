@@ -291,7 +291,7 @@ def test_partition_distribution_deduplicates_devices_and_persists_reproduction_e
             "sourceFiles": ("td-otbr-cli-networkdiag-fetch-all.json",),
         },
     )
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         stored = connection.execute(
             "SELECT reproduction_context_json FROM assessments WHERE assessment_id=?",
             (result.assessment.assessment_id,),
@@ -785,7 +785,7 @@ def test_readonly_history_inventory_classifies_context_free_v10_with_gaps(tmp_pa
         policy=policy,
         store=store,
     )
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(
             """UPDATE assessments
                SET evaluator_version='snapshot-v10', reproduction_context_json='{}'
@@ -836,7 +836,7 @@ def test_readonly_history_inventory_validates_saved_v1_source_profile(tmp_path, 
     }
     if corrupt_digest:
         context["healthPolicy"] = dict(context["healthPolicy"], digest="corrupt")
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(
             "UPDATE assessments SET evaluator_version='snapshot-v10', reproduction_context_json=?",
             (json.dumps(context),),
@@ -872,7 +872,7 @@ def test_readonly_history_inventory_rejects_contradictory_v2_context(tmp_path) -
         policy=policy,
         store=store,
     )
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         row = connection.execute(
             "SELECT reproduction_context_json FROM assessments WHERE assessment_id=?",
             (result.assessment.assessment_id,),
@@ -909,7 +909,7 @@ def test_readonly_history_inventory_rejects_undeclared_legacy_source(tmp_path) -
         policy=policy,
         store=store,
     )
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(
             """INSERT INTO observation_sources
                (observation_id, filename, digest, kind, state)
@@ -964,7 +964,7 @@ def test_readonly_history_inventory_resolves_roster_from_retained_devices(tmp_pa
         policy=policy,
         store=store,
     )
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(
             "DELETE FROM expected_devices WHERE network_id=? AND device_id=?",
             (network_id, device_id),
