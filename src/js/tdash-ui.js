@@ -1151,14 +1151,7 @@ function appendThreadPartitionsSection(target, partitions) {
       count.textContent = String(partition.count);
       const source = document.createElement("td");
       if (partition.sourceFiles.length) {
-        const sourceList = document.createElement("ul");
-        sourceList.className = "thread-network-partition-sources";
-        partition.sourceFiles.forEach((filename) => {
-          const item = document.createElement("li");
-          item.textContent = filename;
-          sourceList.appendChild(item);
-        });
-        source.appendChild(sourceList);
+        appendThreadNetworkSourceTooltips(source, partition.sourceFiles);
       } else {
         source.textContent = "Source filename unavailable in loaded row evidence.";
       }

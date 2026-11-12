@@ -221,7 +221,8 @@ filters do not apply to this summary and are hidden while it is active.
 The **Thread Network** view includes source-backed partition identifiers
 and counts of uniquely identified devices in the currently loaded observation.
 Partial or conflicting membership is called out, and the counts are not a
-complete mesh census; viewing the panel does not collect additional data.
+complete mesh census. Focus or hover over a source information icon to see its
+filename; viewing the panel does not collect additional data.
 
 For a health-eligible dataset, the **Refresh Health** control in Network
 Insights processes the currently loaded cached snapshot with partial input

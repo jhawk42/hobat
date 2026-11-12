@@ -2709,12 +2709,6 @@ button[aria-expanded="true"] > .disclosure-icon {
   table-layout: fixed;
 }
 
-.thread-network-partition-sources {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .thread-network-table th,
 .thread-network-table td {
   padding: 6px 8px;
@@ -3808,6 +3802,29 @@ td:last-child {
 }
 
 @media (max-width: 720px) {
+  .thread-network-facts,
+  .thread-network-counts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .thread-network-fact,
+  .thread-network-count {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    column-gap: 12px;
+    align-items: baseline;
+  }
+
+  .thread-network-fact dd,
+  .thread-network-count dd {
+    margin: 0;
+    text-align: right;
+  }
+
+  .thread-network-fact .thread-network-source {
+    grid-column: 1 / -1;
+  }
+
   .page {
     padding: 10px;
   }

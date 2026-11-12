@@ -957,6 +957,52 @@ def test_workspace_cached_views_reapply_current_filters() -> None:
     )
 
 
+def test_thread_network_partition_source_tooltips_and_missing_source() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import vm from "node:vm";
+
+      class Element {
+        constructor(tag) {
+          this.tag = tag;
+          this.children = [];
+          this.attributes = {};
+          this.classList = {add: (...names) => { this.className += ` ${names.join(" ")}`; }};
+        }
+        appendChild(child) { this.children.push(child); }
+        append(...children) { this.children.push(...children); }
+        setAttribute(name, value) { this.attributes[name] = value; }
+      }
+      const context = {
+        document: {createElement: tag => new Element(tag)},
+        toText: value => String(value ?? ""),
+      };
+      vm.createContext(context);
+      const ui = fs.readFileSync("src/js/tdash-ui.js", "utf8");
+      vm.runInContext(ui.slice(ui.indexOf("function appendThreadNetworkSourceTooltips("),
+        ui.indexOf("let renderedThreadNetworkDataset")), context);
+      const target = new Element("div");
+      context.appendThreadPartitionsSection(target, {
+        state: "supported",
+        partitions: [
+          {partitionId: "123", count: 2, sourceFiles: ["a.json", "b.json", "a.json"]},
+          {partitionId: "456", count: 1, sourceFiles: []},
+        ],
+      });
+      const rows = target.children[0].children[2].children[0].children[1].children;
+      const icons = rows[0].children[2].children[0].children;
+      assert.deepEqual(icons.map(icon => icon.title), ["a.json", "b.json"]);
+      assert.ok(icons.every(icon => icon.textContent === "i" && icon.tabIndex === 0
+        && icon.attributes.role === "img" && icon.attributes["aria-label"] === `Source file: ${icon.title}`));
+      assert.equal(rows[1].children[2].textContent, "Source filename unavailable in loaded row evidence.");
+    """
+    subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+    )
+
+
 def test_thread_network_summary_lifecycle_dispatch() -> None:
     script = r"""
       import assert from "node:assert/strict";
