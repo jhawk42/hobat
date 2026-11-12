@@ -20,8 +20,14 @@ tdash-dataset.js -> /api/data/{filename}
                     cached snapshot      td_cli subprocess
                          |                     |
                          +------ data/ <-------+
-                                |
-                                v
+                                  |
+                      raw finals / Unified generations
+                      hobat_v1.db health assessments
+                                  |
+                                  v
+                            JSON response
+                                  |
+                                  v
 buildDatasetRows -> buildDeviceProjections -> runAdaptor
                               |                    |
                               v                    v
@@ -30,7 +36,10 @@ buildDatasetRows -> buildDeviceProjections -> runAdaptor
 
 The browser never calls OTBR directly. Live work is owned by Python collectors
 started through `td_cli`; the browser consumes files from the configured data
-directory through the server allowlist. Source-availability discovery is a
+directory through the server allowlist. Not every CLI action collects live
+data: Unified materialization and health processing consume cached evidence.
+Eve and Thread Tools also support operator-managed exports, with Thread Tools
+conversion owned by its browser adaptor. Source-availability discovery is a
 separate bounded probe path in the Python web server, not a collector refresh.
 See the [data-flow ownership table](merge_thread_device_info.md#ownership) for
 the field, identity, authority, and projection owners in both runtimes.
@@ -47,11 +56,18 @@ flag, and source defaults must reference visible recipes in the same source.
 
 The catalog declares selectable CLI/REST/HA Matter/mDNS and
 Multi-source Unified primaries. Multi-source defaults to Unified; other source
-defaults are unchanged.
+defaults are unchanged. All five products are available in normal selectors;
+menu visibility does not imply live-source availability or health eligibility.
 [td_unified_dataset.py](../src/td_unified_dataset.py) reads only those declared
 cached finals and their scope companions. Source records reuse the merge
 engine's in-memory path; BBR envelope conversion stays in its CLI owner.
 No collector, checkpoint, action-list, or network refresh is implicit.
+`unify-dataset --dataset all` builds the four source primaries before
+Multi-source. JSON output is an array of the five per-dataset summaries; a
+single-dataset command returns one object. Failure stops the command with a
+nonzero exit status without rolling back earlier committed products.
+Missing required evidence needs explicit `--allow-partial`; invalid present
+inputs or stale scope bindings fail rather than repairing raw caches.
 HA cached inventory/native converters are implemented in the source-owned
 [ha_matter_ws_unified.py](../src/ha_matter_ws_unified.py). HA primary assembly
 includes its four required inputs, optional projections, original outcome
@@ -83,12 +99,14 @@ remain separate; Multi-source continues to replay original advertisements
 independently. The shared device-details mDNS section renders the array.
 The in-memory device merge derives `relationshipOnly` from accepted original
 contributors: a genuine device observation clears the flag, while placeholders
-and mDNS-only enrichment cannot. Assembly-v8 forces an explicit-build upgrade
-for unchanged inputs, retaining coherent v2/v3/v4/v5/v6/v7 read compatibility.
+and mDNS-only enrichment cannot. The current builder contract is
+`unified-assembly-v14`; an explicit build upgrades older generations even when
+their raw inputs are unchanged. Coherent assembly-v2 through assembly-v13
+generations remain readable under their retained contracts without rebuilding.
 CLI/REST/HA Matter/Multi-source health profiles now consume verified original
 evidence with dedicated retained contracts; mDNS is enrichment-only and remains
-health-ineligible. Qualification never processes health on selection. Selector
-retirement remains separately gated. CLI and REST topology, the HA seven-file composite, and the Multi-source dynamic
+health-ineligible. Qualification never processes health on selection.
+CLI and REST topology, the HA seven-file composite, and the Multi-source dynamic
 merge are menu-hidden but explicitly resolvable; legacy precomputed Multi-source
 remains visible. The CLI and REST OTBR + mDNS alternatives stay in their
 original source groups.
@@ -136,7 +154,7 @@ backfilled, and empty leaf arrays without a matching binding remain explicit.
 Controller receipt is not a measurement interval or mesh absence authority;
 health keeps these semantics in retained reproduction context.
 Live native collection keeps strict endpoint validation. These are processing
-contracts, not a claim that the Unified products are normally selectable.
+contracts; selecting a Unified product does not initiate native collection.
 
 The `unified` browser adaptor registers the committed canonical rows directly
 through the shared adaptor model and relationship emitter. Committed record IDs
@@ -159,7 +177,9 @@ last as the commit marker. Reads validate the report, generation fingerprint,
 and artifact bindings; mixed generations produce explicit HTTP 409 errors.
 Only an explicit build performs recovery or rebuilds invalid output. Display
 reads may inspect a coherent generation after raw caches change; evidence
-consumers additionally verify current original digests/times.
+consumers additionally verify current original digests/times. A build with
+unchanged evidence and the current builder contract is a byte/mtime-preserving
+no-op rather than a new observation.
 For Multi-source, `read_generation(..., verify_inputs=True)` verifies dependency
 report/artifact bindings and the catalog-allowlisted transitive `rawInputs`
 closure. The report's generation-bound `rawInputsDigest` includes original
@@ -192,7 +212,46 @@ never fetch the legacy raw identity auxiliaries. The response materialization
 header is mandatory for a Unified row response, including the final response
 after a processing job: `partial` stays a persistent incomplete-data notice
 across view changes; missing/invalid state cannot replace the last good view.
-Normal-selector rollout remains gated; the preview entries stay hidden.
+
+### REST Collection Evidence and Cached Qualification
+
+The REST collectors own live requests, provisional checkpoints, final snapshots,
+and outcome companions; Unified and health processing only read that evidence.
+Standalone `diagnostics fetch-all` enables one-level child RLOC expansion by
+default. `--no-children-expand-by-rloc` disables it and is required for alternate
+destination types. Expansion uses this run's parent identity and child tables,
+validates returned identities, and retains separate `childrenExpansion` counters.
+Shared client calls, topology, mesh diagnostics, and single-device commands do
+not acquire that default. An unresolved-IID or incomplete-expansion run with no
+diagnostic items retains the previous final snapshot.
+
+Both standalone REST diagnostic and mesh-diagnostic batches retain full outcome
+companions even with `--items-only`; the flag changes the returned payload, not
+the recorded attempt evidence. The server's existing diagnostic action uses
+`--items-only --no-basic-fallback` and inherits the standalone child-expansion
+default. Its router-only mesh action uses
+`--items-only --preserve-diagnostics`; it does not enable
+`--diagnostic-response-fallback`.
+
+That optional mesh flag allows one bounded extended-address Network Diagnostics
+check per eligible failed router. It does not ping or manufacture mesh-table
+entries. Fresh matching action/result identities, stable observed network scope,
+and qualified child-table witnesses are required before failed tables can be
+classified as `not-provided` coverage.
+[td_restapi_mesh_evidence.py](../src/td_restapi_mesh_evidence.py) owns those pure
+checks; [td_restapi_diagnostic_recovery.py](../src/td_restapi_diagnostic_recovery.py)
+reconciles same-run router/child recovery and field availability from original
+snapshot/scope bindings. Unified and health reuse these source-owned rules,
+not cached claims of recovery or aggregate row timestamps.
+
+[otbr_restapi_outcomes.py](../src/otbr_restapi_outcomes.py) projects reconciled
+facts into the immutable vocabulary in
+[td_collection_outcomes.py](../src/td_collection_outcomes.py). Initial/effective
+status, explicit ordered attempts, responsiveness, recovery, and table coverage
+remain independent. Structured logs report these facts without inferring
+attempts or turning a response into successful table collection. See the
+[REST command reference](help_td_restapi_cli.md#diagnostics-fetch-all) and
+[REST mesh coverage rules](thread_network_health.md#rest-mesh-diagnostic-responsiveness).
 
 ### Browser-only Appearance
 
@@ -264,8 +323,8 @@ it does not trigger a separate live collection.
 |---|---|---|
 | `GET /` | `handle_root` | Redirect to `/tdash.html` |
 | `GET /api/catalog` | `handle_catalog_api` | Return the validated dataset catalog without caching |
-| `GET /api/capabilities` | `handle_capabilities_api` | Report cached files and source availability |
-| `GET /api/data/{filename}` | `handle_data_api` | Serve, refresh, or start a job for an allowed data file |
+| `GET /api/capabilities` | `handle_capabilities_api` | Report source availability, cached files, and validated Unified cached/buildable state |
+| `GET /api/data/{filename}` | `handle_data_api` | Serve an allowed file, refresh a raw snapshot, or start a cache-only Unified build |
 | `GET /api/job/{job_id}` | `handle_job_api` | Return job state and final/checkpoint metadata |
 | `DELETE /api/job/{job_id}` | `handle_job_cancel_api` | Request cancellation of a running job |
 | `GET /api/jobs` | `handle_jobs_api` | Return a no-store projection of all active generic, health, and device-action jobs |
@@ -321,8 +380,9 @@ cache-first behavior.
 ```text
 Dashboard -> POST /api/health/process-dataset -> web server
                  -> td_cli health process-dataset -> hobat_v1.db
-Operator maintenance -> td_cli health migrate-history -> verified backup + schema-9 revisions
+Operator maintenance -> td_cli health migrate-history -> verified backup + retained assessment revisions
 Operator maintenance -> td_cli health migrate --check/--apply -> schema registry + .migration-backups/
+Operator maintenance -> td_cli health prepare-history -> derived SQLite evidence
 Dashboard -> GET /api/health/* -> web server -> query-only hobat_v1.db read
 Dashboard -> PATCH /api/health/roster/{device_id} -> validate revision/receipt
                  -> atomic roster + lifecycle audit + receipt + reassessment transaction
@@ -332,7 +392,8 @@ Dashboard -> POST /api/device-actions -> validate -> source action
 
 Health processing is cache-only: the server starts a background `td_cli` job
 with `--allow-partial`, which writes health history to `hobat_v1.db` without
-starting a collector, changing a snapshot, or probing a device. Health GET
+starting a collector, changing a snapshot, rebuilding a Unified generation, or
+probing a device. Health GET
 routes never load the historical manifest archive. Explicit `health migrate-history`
 preflight alone loads the bundled current/archive resolver, discovers retained
 dataset IDs, and validates historical source contracts separately from current
@@ -371,13 +432,21 @@ aggregation rebuild pillar states, status/confidence and assessment identities;
 the previous coverage object is not used as a shortcut. Ordinary dataset
 processing still evaluates all rules, and automatic interval comparisons and
 their writes remain inside the existing transaction. Schema 10 adds separate
-derived observation bodies and observation-only metric/relationship fragments,
-published by shared normal processing or bounded explicit `prepare-history`.
+derived observation bodies and sample-derived comparison fragments, published
+by shared normal processing or bounded explicit `prepare-history`.
 Later transactions verify current native SQL signatures and full contracts
 before reuse, then still admit each assessment individually. Roster/absence
 context, compatibility, headers and final writes remain fresh. PATCH misses
 reconstruct without publishing; GET and dry-run remain query-only. See
 [preparation maintenance and limits](thread_network_health.md#preparing-retained-evidence).
+[td_health_preparation.py](../src/td_health_preparation.py) owns versioned,
+compressed payloads and checksum/input validation; native samples remain
+authoritative. Preparation has per-network record/byte budgets and does not
+cache roster/absence decisions. Explicit maintenance uses bounded observation
+and pair limits plus an inventory-bound continuation cursor; changed history
+requires restarting rather than resuming a stale cursor. Invalid prepared
+payloads or changed native bindings are corruption errors, not successful
+fallbacks. No browser route starts preparation maintenance.
 The dialog announces the pending save until commit, then reconciles the views.
 Post-save reconciliation owns its roster-page reads: one for the current
 filters and, only when needed to keep the selected device visible, one after
@@ -462,6 +531,7 @@ GET /api/data/{filename}
 validate safe filename and FILE_ACTION_MAP/checkpoint membership
         |
         +-- checkpoint or STATIC --> serve existing file or 404
+        |                           (Unified: validate generation or 409)
         |
         v
 normalize request max-age (invalid --> 400), then evaluate freshness
@@ -479,9 +549,10 @@ deduplicate by filename -> create background job -> 202 + Location
 
 `FILE_ACTION_MAP` is the authoritative filename-to-action registry. Each
 `FileAction` specifies `max_age_s`, an action argument list or `STATIC`, an
-estimated cost, and `force_async`. Checkpoint filenames are derived from dynamic
-entries with the `.partial.json` suffix and are served as non-regenerating,
-zero-max-age files.
+estimated cost, and `force_async`. Checkpoint filenames are derived from eligible dynamic entries with the
+`.partial.json` suffix and are served as non-regenerating, zero-max-age files.
+Unified actions are explicitly excluded: their publication boundary is the
+committed report, not a progressive checkpoint.
 
 For dynamic files, request `Cache-Control: max-age=N` overrides the configured
 age, including when the request permits an older snapshot. Nonnegative integers
@@ -502,12 +573,24 @@ A catalog recipe can reuse an already registered filename by changing only the
 an entry in `td_webserver.py` `FILE_ACTION_MAP` (static or with a collector
 action) and a producer or operator-supplied file. Listing it in the catalog
 alone does not make `/api/data/{filename}` serve it: unknown filenames return
-404.
+404. Unified is the catalog-derived exception: `_build_file_action_map()`
+registers each validated Unified row action and its declared report, outcome,
+identity, and network companions. This does not expose arbitrary raw filenames.
 
-Data responses include `Cache-Control`, `Last-Modified`, and an ETag based on
-mtime and size. `If-None-Match` takes precedence over `If-Modified-Since` and
-can produce HTTP 304. Static HTML/CSS/JS uses `Cache-Control: no-cache` so the
-browser revalidates it.
+Data responses include `Cache-Control`, `Last-Modified`, and an ETag. Ordinary
+files use mtime and size; Unified rows and companions use the verified artifact
+content digest and serve the same bytes that generation validation admitted.
+Validation precedes conditional response handling, so an invalid generation
+cannot bypass its HTTP 409 failure through revalidation. Both HTTP 200 and 304
+Unified responses retain `X-TD-Materialization-State`. `If-None-Match` takes
+precedence over `If-Modified-Since`. Static HTML/CSS/JS uses
+`Cache-Control: no-cache` so the browser revalidates it.
+
+Browser Cache Only sends `only-if-cached, max-age=31536000`; Direct-Refresh
+sends `no-cache`; Auto uses the remembered response max-age when available,
+otherwise the server policy. These controls affect raw-file regeneration or
+Unified processing, not the independent query-only health and transient
+device-action APIs.
 
 ### Source Serialization and Deduplication
 
@@ -519,6 +602,11 @@ native topology, and native Thread inventory refreshes from `ha-matter-ws`
 share one source lock so concurrent dashboard requests do not load the Matter
 controller in parallel. Native dashboard actions never add diagnostics
 `--force` or topology `--refresh`.
+
+All Unified HTTP builds share the `unify-dataset` command-family lock. Their
+subprocesses additionally use the data-directory `flock`, which also coordinates
+explicit CLI materialization across processes. Health processing is separate
+from collector refreshes and never implicitly builds a Unified prerequisite.
 
 Short actions repeat the same request-aware freshness decision after acquiring
 their source lock. A snapshot refreshed while the request waited can be reused
@@ -630,15 +718,16 @@ last-write-wins.
 
 | Layer | Owners | Responsibility |
 |---|---|---|
-| Controls | `tdash.html`, `tdash-ui.js` | Source/dataset selection, Sync/Cancel, topology/table and Thread Network views, filters, settings, insights, device actions, activity logs, and pending jobs |
+| Controls | `tdash.html`, `tdash-ui.js` | Source/dataset selection, Sync/Cancel, topology/table and Thread Network views, filters, settings/appearance, insights, device actions, activity logs, and pending jobs |
+| Appearance bootstrap | [tdash-theme.js](../src/js/tdash-theme.js) | Classic pre-paint script for local preference, System resolution, root attributes, cross-tab updates, and theme events |
 | Browser activity | `tdash-activity.js` | Bounded in-memory activity, route/metadata sanitization, subscriptions, and tracked HTTP requests |
 | Source and catalog capabilities | `tdash-capabilities.js`, `tdash-catalog-fallback.js` | Source/file availability and bundled fallback for catalog loading |
-| Fetch and assembly | `tdash-dataset.js`, `tdash-dataset-registry.js` | Catalog lookup, cache policy, jobs, checkpoints, extractors, and final/partial datasets |
+| Fetch and assembly | `tdash-dataset.js`, `tdash-dataset-registry.js` | Catalog/menu lookup, cache policy, jobs, checkpoints, extractors, Unified materialization-state checks, and final/partial datasets |
 | Field and merge contract | `tdash-device-fields.js`, `tdash-source-authority.js`, `tdash-merge.js`, `tdash-utils.js` | Preferred fields, aliases, identities, the shared REED resolver, normalization, precedence, conflicts, and provenance |
 | Adaptation | `tdash-adaptors.js`, `tdash-adaptor-*.js`, `tdash-adaptor-model.js` | Source-specific records to canonical devices, relationships, and details |
 | View model | `tdash-device-projection.js`, `tdash-topology-view-model.js`, `tdash-filters.js`, `tdash-search.js` | Derived device state, indexed visibility, diagnostic matching, and search state |
-| Thread Network view model | `tdash-thread-network.js`, `tdash-ui.js` | Network facts with source attribution, network-instance context, and available device/link/role summaries for the Thread Network workspace |
-| Presentation | `tdash-layouts.js`, `tdash-topology-utils.js`, `tdash-topology-renderer.js`, `tdash-table-renderer.js` | Seed layouts, vis-network lifecycle, topology interaction, and sortable tables |
+| Thread Network view model | `tdash-thread-network.js`, `tdash-ui.js` | Network facts with source attribution, network-instance context, observation-scoped partitions, and available device/link/role summaries |
+| Presentation | `tdash-layouts.js`, `tdash-topology-utils.js`, `tdash-topology-renderer.js`, `tdash-table-renderer.js` | Seed layouts, vis-network lifecycle, theme projection, topology interaction, and sortable tables |
 | Device diagnostics | `tdash-device-diagnostics.js` | Device-action eligibility, target selection, and result presentation inputs |
 | Health | `tdash-health.js` | Assessment, findings, roster, comparison, and health-job API/rendering workflows |
 | Status | `tdash-view-status.js` | Active-view status ownership and suppression of stale publishers |
@@ -675,6 +764,11 @@ the catalog available but without source availability hints. The single
 strategy, row extractor, adaptor, defaults, and `mergeGroups`; update it to
 add a dataset. `DATASOURCE_REGISTRY` and `DATASET_REGISTRY` are runtime views
 of the selected catalog, not independent declarations.
+`selectableDatasets()` excludes menu-hidden entries without removing them from
+explicit canonical recipe lookup. Unified availability uses validated
+`cached`/`buildableFromCache` flags, so a source can still offer its Unified
+product while live collection is unavailable.
+Startup populates these controls but does not load a dataset until Sync.
 
 After editing the manifest, run `python3 script/build_dataset_catalog.py` to
 regenerate the bundled fallback and restart the server. The manifest is the
@@ -682,12 +776,15 @@ single recipe source of truth, but the generated fallback must be refreshed
 with it; recipes that introduce new snapshot filenames also need the server
 registration and producer described under [Data Request Flow](#data-request-flow).
 
-Browser assembly does not enforce network-instance separation: it can combine
-files from different instances. `tdash-view-status.js` compares known instance
+Legacy browser multi-file assembly does not enforce network-instance separation:
+it can combine files from different instances. `tdash-view-status.js` compares known instance
 IDs from `/api/capabilities` for loaded files and displays `Network instance:
 mixed` when they disagree; unknown scopes do not block rendering. The offline
 merge has a separate exclusion rule described in the
 [Network Instance section](merge_thread_device_info.md#network-instance).
+Unified is different: Python has already admitted scoped records into a
+committed generation, and its browser adaptor retains `_unifiedRecordId` and
+network-scoped relationship resolution rather than merging raw files again.
 
 Health datasets declare `healthEligible` and `healthProfile`. A cross-language
 contract test keeps active browser entries marked `healthEligible: true` aligned
@@ -711,7 +808,10 @@ remain independent. Historical reads and retries do not invoke the
 
 Collector-derived role booleans remain source facts. OTBR collectors add
 positive `isReed` evidence when a record identifies a child running in FTD
-mode; the shared Python field layer normalizes role evidence. Browser
+mode; the shared Python field layer normalizes role evidence. HA Matter uses
+[ha_matter_ws_roles.py](../src/ha_matter_ws_roles.py) to preserve explicit role
+booleans ahead of derived Thread/Border Router facts and retain contradictions
+as merge conflicts. Browser
 presentation uses explicit `isReed` booleans when present, otherwise a shared
 FTD/child-or-nonrouter fallback independent of source, dataset, adaptor, or
 filename. The browser resolver does not rewrite payloads or cache files; see
@@ -760,6 +860,15 @@ model when available, using cached status counts when provided. Leader and
 primary-BBR entries retain their source-file evidence and can link back to a
 selectable device when an identity is available. Missing or ambiguous evidence
 is shown as unavailable rather than initiating a live refresh.
+
+Partition membership uses canonical `leaderData.partitionId` claims only when
+the active network instance is known. Identity-deduplicated devices contribute
+to one validated 32-bit partition ID; missing, invalid, conflicting, or
+unidentified claims remain separate coverage counts. Mixed or unknown network
+scope is unresolved, not a zero-partition result. Partial datasets retain an
+observed-membership warning; multiple observed partitions are not independently
+classified as a network fault or a complete live mesh census.
+
 Activation and cached dataset updates reuse that same model; opening the view
 does not initiate collection, auxiliary reads, a Unified build, or health
 processing. Role-holder actions open Device details without leaving the
@@ -848,9 +957,20 @@ inside `.table-wrap`; document-level horizontal overflow is not expected.
 
 ## Validation
 
-Browser acceptance uses port 9178 and `--datadir ./data`. Enable Cache Only
-before the first Sync, enumerate offered options from the rendered DOM, and
-instrument console errors, page errors, failed requests, and HTTP failures.
-Validate topology status and nonblank canvas pixels, validate table rows and
-scroll containment, and hash `data/` before and after to prove fixtures were not
-modified.
+Browser acceptance uses port 9178 and `--datadir ./data`. Refresh the linked
+browser after frontend edits. Before the first Sync, enable the hidden Cache
+Only control by setting `#chk-only-cache.checked = true` and dispatching a
+bubbling `change` event. Enumerate offered source/dataset/filter options from
+the rendered DOM rather than assuming an inventory.
+
+Attach console, page-error, failed-request, and HTTP-status instrumentation
+before reload; track the active source, dataset, view, and filter. Validate the
+visible topology node/link status, positive canvas dimensions and nonblank
+pixels after stabilization; zero links are valid. Validate table rows/headers,
+`.table-wrap` scrolling, and no document-level mobile overflow. Accept HTTP
+200/304, require exact baseline restoration after resets, and classify explicit
+error states rather than diagnostic labels containing the word Error.
+
+Hash `data/` before and after to prove fixtures were not modified. Stop the test
+server and confirm port 9178 is free after acceptance. Documentation-only
+updates do not require starting the server or running browser acceptance.
