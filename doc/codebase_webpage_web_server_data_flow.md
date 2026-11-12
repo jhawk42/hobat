@@ -231,8 +231,11 @@ also follows the individual section headers; activating a disclosure with any
 controlled section hidden or collapsed opens all its sections.
 
 Device properties use an outline properties-sheet SVG; Operations uses a
-distinct two-stage workflow SVG for its Thread Network, Logs, and Jobs workspace.
-Both inherit the existing tab text and selected-state colors, without changing
+distinct two-stage workflow SVG for its Logs and Jobs workspace. Thread Network
+uses a network-dossier SVG: a small network branch beside fact lines inside
+an outline card. It is a decorative summary marker, not network health or a
+live device count.
+All inherit the existing tab text and selected-state colors, without changing
 navigation, accessible names, or keyboard behavior.
 
 Topology uses a six-node hexagonal mesh SVG with three opposite-node cross-links,
@@ -693,7 +696,14 @@ non-empty values are retained in `_merge_conflicts` and contributing files in
 
 ## Thread Network Workspace
 
-The Thread Network tab is a browser-only projection of the currently loaded
+Primary navigation offers Topology, Table, Thread Network, Insights, Operations,
+and Settings, in that order. The Thread Network tab targets the
+`thread-network-summary` peer panel under the shared workspace. Operations
+contains only Logs and Jobs. The summary keeps Dataset/Sync controls available
+but hides Topology/Table filters without resetting their values. The existing
+dataset-default Topology/Table switch after Sync is unchanged.
+
+The Thread Network view is a browser-only projection of the currently loaded
 dataset. `tdash-thread-network.js` gathers network facts from loaded and
 auxiliary payloads, associates each fact with its source files, and uses
 `/api/capabilities` metadata to report network-instance context. Conflicting
@@ -706,6 +716,11 @@ model when available, using cached status counts when provided. Leader and
 primary-BBR entries retain their source-file evidence and can link back to a
 selectable device when an identity is available. Missing or ambiguous evidence
 is shown as unavailable rather than initiating a live refresh.
+Activation and cached dataset updates reuse that same model; opening the view
+does not initiate collection, auxiliary reads, a Unified build, or health
+processing. Role-holder actions open Device details without leaving the
+summary. Returning to the same loaded dataset preserves workspace/table scroll;
+a replacement dataset starts at the top.
 
 ## Topology Pipeline
 

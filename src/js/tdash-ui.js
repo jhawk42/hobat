@@ -1172,10 +1172,24 @@ function appendThreadPartitionsSection(target, partitions) {
   target.appendChild(section);
 }
 
+let renderedThreadNetworkDataset = null;
+
 function renderThreadNetworkPanel() {
   const content = document.getElementById("thread-network-content");
   if (!content) return;
+  const panel = document.getElementById("thread-network-summary");
+  const preserveScroll = currentDataset && renderedThreadNetworkDataset === currentDataset;
+  const scrollTop = preserveScroll ? panel.scrollTop : 0;
+  const tableScroll = new Map();
+  if (preserveScroll) {
+    content.querySelectorAll(".thread-network-table-wrap").forEach((wrapper) => {
+      const heading = wrapper.closest("section").querySelector("h3").textContent;
+      tableScroll.set(heading, { left: wrapper.scrollLeft, top: wrapper.scrollTop });
+    });
+  }
   content.replaceChildren();
+  renderedThreadNetworkDataset = currentDataset;
+  panel.scrollTop = 0;
   if (!currentDataset) {
     const empty = document.createElement("p");
     empty.textContent = "Load a dataset to view Thread Network information.";
@@ -1228,10 +1242,18 @@ function renderThreadNetworkPanel() {
     notice.textContent = error;
     content.appendChild(notice);
   }
+  panel.scrollTop = scrollTop;
+  content.querySelectorAll(".thread-network-table-wrap").forEach((wrapper) => {
+    const heading = wrapper.closest("section").querySelector("h3").textContent;
+    const position = tableScroll.get(heading);
+    if (position) {
+      wrapper.scrollLeft = position.left;
+      wrapper.scrollTop = position.top;
+    }
+  });
 }
 
 const OPERATIONS_SUBVIEWS = Object.freeze([
-  ["thread-network", "btn-thread-network", "workspace-thread-network-panel"],
   ["logs", "btn-activity-log", "workspace-log-panel"],
   ["jobs", "btn-jobs", "workspace-jobs-panel"],
 ]);
@@ -1249,7 +1271,6 @@ function renderOperationsSubview() {
     }
   });
   if (currentView !== "operations") return;
-  if (operationsSubview === "thread-network") renderThreadNetworkPanel();
   if (operationsSubview === "logs") renderWorkspaceLogs();
   if (operationsSubview === "jobs") void refreshWorkspaceJobs();
 }
@@ -1355,6 +1376,7 @@ function renderCurrentView({ force = false } = {}) {
   activateViewStatus(currentView, currentDataset);
   if (!currentDataset) {
     if (currentView === "insights") publishHealthInsightsStatus();
+    if (currentView === "thread-network-summary") renderThreadNetworkPanel();
     return;
   }
   if (force) threadNetworkModelCache = null;
@@ -1364,6 +1386,7 @@ function renderCurrentView({ force = false } = {}) {
   if (view !== "topology" && view !== "table") {
     updateDeviceStatusBar(computeRowCounts(currentDataset.rows));
     if (view === "operations") renderOperationsSubview();
+    if (view === "thread-network-summary") renderThreadNetworkPanel();
     return;
   }
   const renderedState = lastRenderedDatasetByView.get(view);
@@ -1447,6 +1470,7 @@ function clearRenderedDatasetViews(emptyDataset) {
   renderTableForDataset(emptyDataset, emptyDataset);
   lastRenderedDatasetByView.clear();
   invalidateViewStatuses();
+  if (!currentDataset) renderThreadNetworkPanel();
 }
 
 function getPhysicsProfileSelect() {
@@ -1586,6 +1610,7 @@ function isVisibleHealthControl(element) {
 
 function updateHealthFunctionsContext() {
   const insights = currentView === "insights";
+  const summary = currentView === "thread-network-summary";
   const eligible = currentDataset?.entry?.healthEligible === true;
   const panel = document.getElementById("panel-functions");
   const dataset = document.getElementById("panel-dataset");
@@ -1617,10 +1642,11 @@ function updateHealthFunctionsContext() {
     healthFunctionsLayout.insights = insights;
   }
   document.querySelector(".dashboard-shell")?.classList.toggle("insights-context", insights);
-  panel.setAttribute("aria-label", insights ? "Insights navigation and controls" : "Dataset and filters");
+  panel.setAttribute("aria-label", insights ? "Insights navigation and controls"
+    : summary ? "Thread Network dataset controls" : "Dataset and filters");
   document.getElementById("health-functions-panel").hidden = !insights;
   document.getElementById("device-status").hidden = insights;
-  document.getElementById("panel-node-link-filters").hidden = insights;
+  document.getElementById("panel-node-link-filters").hidden = insights || summary;
   document.getElementById("panel-dataset-label").textContent = insights ? "Source and dataset" : "Dataset";
   const caption = document.getElementById("health-functions-dataset-caption");
   caption.hidden = !insights;
@@ -1858,6 +1884,15 @@ const WORKSPACE_VIEWS = Object.freeze([
     onActivate: resizeAndFitTopology,
   },
   { view: "table", buttonId: "btn-table", panelId: "view-table", rendersDataset: true },
+  {
+    view: "thread-network-summary",
+    buttonId: "btn-thread-network-summary",
+    panelId: "thread-network-summary",
+    rendersDataset: true,
+    onActivate: () => {
+      if (!currentDataset) renderCurrentView();
+    },
+  },
   {
     view: "insights",
     buttonId: "btn-insights",
@@ -6457,6 +6492,7 @@ function handleDatasetFetchCancellation(selectedValue, fetchStartedAt) {
       _setStatusSpans(_FETCH_STATUS_IDS, "—");
       _setStatusSpans(_DEVICE_STATUS_IDS, "—");
       activateViewStatus(currentView, currentDataset);
+      if (currentView === "thread-network-summary") renderCurrentView();
     }
   }
 }

@@ -32,6 +32,7 @@ BEHAVIOR_IDS = (
     "btn-more-info",
     "btn-topology",
     "btn-table",
+    "btn-thread-network-summary",
     "btn-insights",
     "btn-settings",
     "btn-operations",
@@ -42,6 +43,8 @@ BEHAVIOR_IDS = (
     "topology-controls",
     "lq-legend",
     "view-table",
+    "thread-network-summary",
+    "thread-network-content",
     "view-insights",
     "health-insights-workspace",
     "health-insights-summary",
@@ -184,6 +187,7 @@ def test_dashboard_control_icons_are_theme_aware_and_decorative() -> None:
     parser.feed(html)
     for button_id, icon_class in (
         ("btn-topology", "topology-icon"),
+        ("btn-thread-network-summary", "thread-network-summary-icon"),
         ("btn-insights", "insights-icon"),
         ("btn-device-details-insights", "insights-icon"),
         ("btn-device-details-properties", "properties-icon"),
@@ -211,6 +215,7 @@ def test_dashboard_control_icons_are_theme_aware_and_decorative() -> None:
             assert button[0].count("<rect ") == (1 if icon_class == "properties-icon" else 2)
     for button_id, label in (
         ("btn-topology", "Topology view"),
+        ("btn-thread-network-summary", "Thread Network"),
         ("btn-device-details-properties", "Show device properties"),
         ("btn-operations", "Operations view"),
     ):
@@ -705,15 +710,31 @@ def test_health_assessment_picker_fits_contents_with_mobile_width_cap() -> None:
         assert declaration in picker.group(1)
 
 
-def test_workspace_switch_registry_owns_all_five_views() -> None:
+def test_workspace_switch_registry_owns_all_six_views() -> None:
     ui_text = _read_text(UI_JS)
     html = _read_text(HTML)
     registry_start = ui_text.index("const WORKSPACE_VIEWS")
     switch_end = ui_text.index("// ── Physics toggle", registry_start)
     switch_source = ui_text[registry_start:switch_end]
 
-    for view in ("topology", "table", "insights", "settings", "operations"):
+    views = ("topology", "table", "thread-network-summary", "insights", "operations", "settings")
+    for view in views:
         assert f'view: "{view}"' in switch_source
+    registry_views = re.findall(r'view: "([^"]+)"', switch_source)
+    assert tuple(registry_views) == views
+    parser = _IdParentParser()
+    parser.feed(html)
+    buttons = tuple(
+        element_id for element_id, parent in parser.parent_by_id.items()
+        if parent == "workspace-navigation-tabs"
+    )
+    assert buttons == tuple(f"btn-{view}" for view in views)
+    assert parser.parent_by_id["thread-network-summary"] == "panel-view"
+    assert parser.parent_by_id["view-operations"] == "panel-view"
+    assert parser.parent_by_id["thread-network-content"] == "thread-network-summary"
+    assert parser.attributes_by_id["btn-thread-network-summary"]["aria-controls"] == "thread-network-summary"
+    assert parser.attributes_by_id["thread-network-summary"]["aria-labelledby"] == "btn-thread-network-summary"
+    assert '<span class="workspace-navigation-tab-label">T Network</span>' in html
     assert html.index('id="btn-operations"') < html.index('id="btn-settings"')
     assert switch_source.index('view: "operations"') < switch_source.index('view: "settings"')
     assert "panelEl.hidden = !isActive;" in switch_source
@@ -936,15 +957,163 @@ def test_workspace_cached_views_reapply_current_filters() -> None:
     )
 
 
+def test_thread_network_summary_lifecycle_dispatch() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import vm from "node:vm";
+
+      const ui = fs.readFileSync("src/js/tdash-ui.js", "utf8");
+      const renders = [];
+      const status = {textContent: ""};
+      const accepted = {entry: {value: "cached"}, rows: []};
+      const context = {
+        currentView: "thread-network-summary", currentDataset: null,
+        threadNetworkModelCache: {old: true}, lastRenderedDatasetByView: new Map(),
+        _physicsEnabled: false, _physicsProfileName: "auto",
+        activateViewStatus() {}, invalidateViewStatuses() {},
+        publishHealthInsightsStatus() {}, updateHealthPresentationControls() {},
+        renderNetworkInsights() {}, resizeAndFitTopology() {}, renderOperationsSubview() {},
+        updateDeviceStatusBar() { renders.push("counts"); },
+        computeRowCounts() { return {}; },
+        renderThreadNetworkPanel() { renders.push(context.currentDataset); },
+        renderTopologyForDataset() { renders.push("clear-topology"); },
+        renderTableForDataset() { renders.push("clear-table"); },
+        document: {getElementById() { return status; }},
+        recordWorkspaceActivity() {}, resetFetchTimeTakenProgressToDefault() {},
+        _pinFetchStatusLineMessage(message) { status.textContent = message; },
+        _setStatusSpans() {}, _FETCH_STATUS_IDS: [], _DEVICE_STATUS_IDS: [],
+        updateFetchStatusBar() {}, datasetIdentityLabel() { return "cached"; },
+        restoreLastKnownGoodDataset() { context.currentDataset = accepted; },
+        fetchFailureState: null, supersedeViewStatus() {}, console: {error() {}},
+      };
+      vm.createContext(context);
+      vm.runInContext(ui.slice(ui.indexOf("function renderCurrentView("),
+        ui.indexOf("function getPhysicsProfileSelect(")), context);
+      vm.runInContext(ui.slice(ui.indexOf("const WORKSPACE_VIEWS"),
+        ui.indexOf("function switchView(")), context);
+      vm.runInContext(`
+        const summaryView = WORKSPACE_VIEWS.find(v => v.view === "thread-network-summary");
+        function activateSummary() {
+          if (currentDataset && summaryView.rendersDataset) renderCurrentView();
+          summaryView.onActivate();
+        }
+      `, context);
+      const activate = () => vm.runInContext("activateSummary()", context);
+      activate();
+      assert.deepEqual(renders.splice(0), [null]);
+      context.currentDataset = accepted;
+      activate();
+      assert.deepEqual(renders.splice(0), ["counts", accepted]);
+      const replacement = {entry: {value: "cached"}, rows: [{id: "replacement"}]};
+      context.currentDataset = replacement;
+      context.renderCurrentView({force: true});
+      assert.deepEqual(renders.splice(0), ["counts", replacement]);
+      assert.equal(context.threadNetworkModelCache, null);
+      context.currentDataset = null;
+      context.clearRenderedDatasetViews({rows: []});
+      assert.deepEqual(renders.splice(0), ["clear-topology", "clear-table", null]);
+
+      vm.runInContext(ui.slice(ui.indexOf("function handleDatasetFetchCancellation("),
+        ui.indexOf("// Fetch dataset function")), context);
+      context.handleDatasetFetchCancellation("cached", 0);
+      assert.deepEqual(renders.splice(0), [null]);
+      context.currentDataset = {...replacement, isPartial: true, loadedFiles: ["one"]};
+      context.currentDataset.entry = {value: "cached", files: ["one", "two"]};
+      context.handleDatasetFetchCancellation("cached", 0);
+      assert.deepEqual(renders.splice(0), ["counts", context.currentDataset]);
+      assert.match(status.textContent, /Cancelled.*partial result/);
+      context.handleDatasetFetchError(new Error("offline"), "cached", accepted.entry, true, 0);
+      assert.equal(context.currentDataset, accepted);
+      assert.deepEqual(renders.splice(0), ["counts", accepted]);
+      assert.match(status.textContent, /prior snapshot remains displayed/);
+      context.restoreLastKnownGoodDataset = () => { context.currentDataset = null; };
+      context.handleDatasetFetchError(new Error("offline"), "cached", accepted.entry, false, 0);
+      assert.deepEqual(renders.splice(0), ["clear-topology", "clear-table", null]);
+      assert.match(status.textContent, /No dataset is available to display/);
+    """
+    subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+    )
+
+
+def test_thread_network_summary_rebuild_preserves_only_same_dataset_scroll() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import vm from "node:vm";
+
+      const ui = fs.readFileSync("src/js/tdash-ui.js", "utf8");
+      const panel = {scrollTop: 0};
+      let wrappers = [];
+      const children = [];
+      const content = {
+        replaceChildren() { children.length = 0; wrappers = []; },
+        appendChild(child) { children.push(child); },
+        querySelectorAll() { return wrappers; },
+      };
+      function addWrapper(heading) {
+        wrappers.push({scrollLeft: 0, scrollTop: 0,
+          closest() { return {querySelector() { return {textContent: heading}; }}; }});
+      }
+      const model = {
+        loaded: true, datasetLabel: "first", networkFacts: [],
+        roleHolders: {leaders: [], primaryBbrs: []}, deviceCounts: {},
+        links: {lqi: {1: {count: "n/a"}, 2: {count: "n/a"}, 3: {count: "n/a"}}},
+        partitions: {},
+      };
+      const context = {
+        currentDataset: {rows: []},
+        document: {
+          getElementById(id) { return id === "thread-network-content" ? content : panel; },
+          createElement() { return {textContent: "", appendChild() {}}; },
+        },
+        getCurrentThreadNetworkViewData() { return {model, error: ""}; },
+        appendThreadNetworkFacts() {}, appendThreadNetworkSummarySection() {},
+        appendThreadRoleTable(target, heading) { addWrapper(heading); },
+        appendThreadPartitionsSection() { addWrapper("Partitions"); },
+      };
+      vm.createContext(context);
+      vm.runInContext(ui.slice(ui.indexOf("let renderedThreadNetworkDataset"),
+        ui.indexOf("const OPERATIONS_SUBVIEWS")), context);
+      context.renderThreadNetworkPanel();
+      panel.scrollTop = 320;
+      wrappers[0].scrollLeft = 120;
+      wrappers[1].scrollLeft = 80;
+      context.renderThreadNetworkPanel();
+      assert.equal(panel.scrollTop, 320);
+      assert.deepEqual(wrappers.map(w => w.scrollLeft), [120, 80, 0]);
+      model.datasetLabel = "capabilities refreshed";
+      context.renderThreadNetworkPanel();
+      assert.equal(panel.scrollTop, 320);
+      assert.equal(children[0].textContent, "Dataset: capabilities refreshed");
+      context.currentDataset = {rows: []};
+      model.datasetLabel = "replacement";
+      context.renderThreadNetworkPanel();
+      assert.equal(panel.scrollTop, 0);
+      assert.deepEqual(wrappers.map(w => w.scrollLeft), [0, 0, 0]);
+      assert.equal(children[0].textContent, "Dataset: replacement");
+      panel.scrollTop = 50;
+      context.currentDataset = null;
+      context.renderThreadNetworkPanel();
+      assert.equal(panel.scrollTop, 0);
+      assert.equal(wrappers.length, 0);
+      assert.equal(children[0].textContent, "Load a dataset to view Thread Network information.");
+    """
+    subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+    )
+
+
 def test_operations_workspace_exposes_activity_and_jobs_tabs() -> None:
     html = _read_text(HTML)
     ui_text = _read_text(UI_JS)
 
     for element_id in (
-        "btn-thread-network",
         "btn-activity-log",
         "btn-jobs",
-        "workspace-thread-network-panel",
         "workspace-log-panel",
         "workspace-jobs-panel",
         "btn-clear-logs",
@@ -954,7 +1123,8 @@ def test_operations_workspace_exposes_activity_and_jobs_tabs() -> None:
     ):
         assert f'id="{element_id}"' in html
     assert 'role="tablist" aria-label="Operations"' in html
-    assert '["thread-network", "btn-thread-network", "workspace-thread-network-panel"]' in ui_text
+    assert 'id="btn-thread-network"' not in html
+    assert 'id="workspace-thread-network-panel"' not in html
     assert '["logs", "btn-activity-log", "workspace-log-panel"]' in ui_text
     assert '["jobs", "btn-jobs", "workspace-jobs-panel"]' in ui_text
     assert 'aria-controls="workspace-log-panel"' in html
@@ -1151,7 +1321,7 @@ def test_responsive_dashboard_grid_contract() -> None:
     assert "position: fixed;" in css
     assert "env(safe-area-inset-bottom)" in css
     assert "grid-template-columns: 44px minmax(0, 1fr);" in css
-    assert "grid-template-columns: repeat(5, 44px);" in css
+    assert "grid-template-columns: repeat(6, 44px);" in css
 
 
 def test_navigation_panel_supports_expanded_and_icon_only_states() -> None:
@@ -1163,15 +1333,15 @@ def test_navigation_panel_supports_expanded_and_icon_only_states() -> None:
     assert 'class="page dashboard-shell navigation-panel-collapsed"' in html
     assert 'title="Show icons and labels"' in html
     assert 'aria-expanded="false">▶</button>' in html
-    assert html.count('class="workspace-navigation-tab-icon"') == 5
-    assert html.count('class="workspace-navigation-tab-label"') == 5
+    assert html.count('class="workspace-navigation-tab-icon"') == 6
+    assert html.count('class="workspace-navigation-tab-label"') == 6
     assert "setNavigationPanelCollapsed" in ui_text
     assert '"navigation-panel-collapsed"' in ui_text
     assert "--navigation-panel-width: 132px;" in css
     assert "--navigation-panel-width: 50px;" in css
     assert ".workspace-navigation-tab-label" in css
     assert "grid-template-columns: 44px minmax(0, 1fr);" in css
-    assert "grid-template-columns: repeat(5, 44px);" in css
+    assert "grid-template-columns: repeat(6, 44px);" in css
     assert "overflow-x: auto;" in css
     assert "scrollbar-width: none;" in css
     assert "width: 240px;" not in css
@@ -1214,13 +1384,18 @@ def test_desktop_navigation_is_compact_without_shrinking_mobile_targets() -> Non
         assert "height: 32px;" in rules[1]
         assert "min-height: 32px;" in rules[1]
     assert "min-width: 32px;" in desktop
-    assert "grid-template-columns: repeat(5, 32px);" in desktop
+    assert "grid-template-columns: repeat(6, 32px);" in desktop
     assert "width: auto;" in desktop
-    assert "align-items: flex-start;" in desktop
+    wide_desktop = desktop[desktop.index("@media (min-width: 1124px)"):]
+    tabs = re.search(
+        r"#panel-navigation \.workspace-navigation-tabs\s*\{([^}]+)\}", wide_desktop
+    )
+    assert tabs is not None
+    assert "align-items: stretch;" in tabs[1]
     assert "--navigation-panel-width: 50px;" in desktop
     mobile = css[css.index("@media (max-width: 720px)"):]
     assert "min-height: 44px;" in mobile
-    assert "grid-template-columns: repeat(5, 44px);" in mobile
+    assert "grid-template-columns: repeat(6, 44px);" in mobile
 
 
 def test_detail_disclosures_use_heading_text_hierarchy() -> None:

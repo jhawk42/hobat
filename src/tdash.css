@@ -1284,6 +1284,7 @@ button.active {
 
 #view-insights,
 #view-settings,
+#thread-network-summary,
 #view-operations {
   grid-column: 1;
   grid-row: 2;
@@ -3604,6 +3605,7 @@ td:last-child {
   }
 
   #view-insights,
+  #thread-network-summary,
   #view-operations {
     height: 100%;
     min-height: 0;
@@ -3648,7 +3650,7 @@ td:last-child {
   }
 
   .dashboard-shell.navigation-panel-collapsed #panel-navigation .workspace-navigation-tabs {
-    grid-template-columns: repeat(5, 32px);
+    grid-template-columns: repeat(6, 32px);
     justify-content: start;
   }
 
@@ -3734,7 +3736,7 @@ td:last-child {
     display: flex;
     flex-direction: column;
     flex-wrap: nowrap;
-    align-items: flex-start;
+    align-items: stretch;
   }
 
   #panel-navigation .workspace-navigation-tabs button {
@@ -3848,7 +3850,7 @@ td:last-child {
 
   .dashboard-shell.navigation-panel-collapsed #panel-navigation .workspace-navigation-tabs {
     display: grid;
-    grid-template-columns: repeat(5, 44px);
+    grid-template-columns: repeat(6, 44px);
     justify-content: start;
     overflow-x: visible;
   }

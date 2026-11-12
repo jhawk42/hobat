@@ -493,6 +493,12 @@
           </div>
         </div>
 
+        <div id="thread-network-summary" class="workspace-view workspace-placeholder" role="tabpanel"
+          aria-labelledby="btn-thread-network-summary" hidden>
+          <h2>Thread Network</h2>
+          <div id="thread-network-content" class="thread-network-content"></div>
+        </div>
+
         <div id="view-insights" class="workspace-view workspace-placeholder" role="tabpanel"
           aria-labelledby="btn-insights" hidden>
           <div id="health-insights-results-header" hidden>
@@ -557,17 +563,11 @@
           aria-labelledby="btn-operations" hidden>
           <h2>Operations</h2>
           <div class="operations-tabs" role="tablist" aria-label="Operations">
-            <button id="btn-thread-network" type="button" role="tab" aria-selected="false"
-              aria-controls="workspace-thread-network-panel" tabindex="-1">Thread Network</button>
             <button id="btn-activity-log" class="active" type="button" role="tab"
               aria-selected="true" aria-controls="workspace-log-panel" tabindex="0">Logs</button>
             <button id="btn-jobs" type="button" role="tab" aria-selected="false"
               aria-controls="workspace-jobs-panel" tabindex="-1">Jobs</button>
           </div>
-          <section id="workspace-thread-network-panel" role="tabpanel"
-            aria-labelledby="btn-thread-network" hidden>
-            <div id="thread-network-content" class="thread-network-content"></div>
-          </section>
           <section id="workspace-log-panel" role="tabpanel" aria-labelledby="btn-activity-log">
             <div class="workspace-log-actions">
               <button id="btn-clear-logs" type="button" title="Clear browser activity">Clear Logs</button>
@@ -785,6 +785,21 @@
           tabindex="-1" aria-label="Table view" title="Table view"><span
             class="workspace-navigation-tab-icon" aria-hidden="true">田</span><span
             class="workspace-navigation-tab-label">Table</span></button>
+        <button id="btn-thread-network-summary" type="button" role="tab" aria-selected="false"
+          aria-controls="thread-network-summary" tabindex="-1" aria-label="Thread Network" title="Thread Network"><span
+            class="workspace-navigation-tab-icon" aria-hidden="true">
+            <svg class="control-icon thread-network-summary-icon" viewBox="0 0 24 24" width="20" height="20"
+              fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+              stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <rect x="2.5" y="4" width="19" height="16" rx="2"/>
+              <path d="M7 9v6m0-3h3m4-3h4m-4 4h4m-4 4h2"/>
+              <g fill="currentColor" stroke="none">
+                <circle cx="7" cy="8" r="1.5"/>
+                <circle cx="7" cy="16" r="1.5"/>
+                <circle cx="10" cy="12" r="1.5"/>
+              </g>
+            </svg>
+          </span><span class="workspace-navigation-tab-label">T Network</span></button>
         <button id="btn-insights" type="button" role="tab" aria-selected="false" aria-controls="view-insights"
           tabindex="-1" aria-label="Network insights view" title="Network insights view"><span
             class="workspace-navigation-tab-icon" aria-hidden="true">

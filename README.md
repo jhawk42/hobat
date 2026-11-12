@@ -212,7 +212,13 @@ rest of the mesh visible. Clearing selection restores the current base styles,
 without moving the camera or restarting physics. Active search and health-target
 navigation retain their own highlighting. See [topology styling and selection](doc/dashboard_vis_node_colors.md#search-and-selection).
 
-**Operations > Thread Network** includes source-backed partition identifiers
+**Thread Network** is a primary workspace view, beside Topology, Table,
+Insights, Operations, and Settings. Its network-dossier icon opens network
+facts, Leader/Primary BBR details, device/link summaries, and partition evidence
+for the loaded dataset; Operations retains Logs and Jobs. Topology/Table
+filters do not apply to this summary and are hidden while it is active.
+
+The **Thread Network** view includes source-backed partition identifiers
 and counts of uniquely identified devices in the currently loaded observation.
 Partial or conflicting membership is called out, and the counts are not a
 complete mesh census; viewing the panel does not collect additional data.
