@@ -20,10 +20,24 @@ BACKUP_FORMAT_VERSION = 1
 BACKUP_MANIFEST_FILENAME = "hobat-backup-manifest.json"
 _EXCLUDED_SUFFIXES = ("-wal", "-shm", "-journal", ".lock")
 _MIGRATION_BACKUP_DIRECTORY = ".migration-backups"
+_RESTORE_WORKSPACE_PREFIX = ".hobat-restore-"
 
 
 class BackupError(RuntimeError):
     """Raised when backup creation or restoration cannot complete safely."""
+
+
+class _RestoreRollbackError(BackupError):
+    """A failed restore still has original content in its recovery workspace."""
+
+
+def _assert_no_restore_workspace(data_dir: Path) -> None:
+    if data_dir.is_dir():
+        for child in data_dir.iterdir():
+            if child.name.startswith(_RESTORE_WORKSPACE_PREFIX):
+                raise BackupError(
+                    f"Unfinished restore workspace: {child}; recover it before maintenance"
+                )
 
 
 def _sha256(path: Path) -> str:
@@ -124,6 +138,7 @@ def create_backup(
     output_dir = output_dir.resolve()
     if not data_dir.is_dir():
         raise BackupError(f"Data directory does not exist: {data_dir}")
+    _assert_no_restore_workspace(data_dir)
     if _is_within(output_dir, data_dir):
         raise BackupError("Backup output must be outside the data directory")
     if output_dir.exists():
@@ -214,21 +229,38 @@ def _restore_mount_contents(data_dir: Path, staging: Path, previous: Path) -> No
     moved_previous: list[Path] = []
     activated: list[Path] = []
     try:
-        for child in data_dir.iterdir():
+        for child in sorted(data_dir.iterdir()):
+            if child == staging.parent:
+                continue
             os.replace(child, previous / child.name)
             moved_previous.append(child)
         for child in staging.iterdir():
             target = data_dir / child.name
             os.replace(child, target)
             activated.append(target)
-    except Exception:
-        for child in activated:
-            if child.exists():
-                _remove_path(child)
+    except Exception as original_error:
+        rollback_errors: list[OSError] = []
+        for child in reversed(activated):
+            try:
+                if child.exists() or child.is_symlink():
+                    _remove_path(child)
+            except OSError as exc:
+                rollback_errors.append(exc)
         for child in moved_previous:
             previous_child = previous / child.name
-            if previous_child.exists():
-                os.replace(previous_child, child)
+            try:
+                if previous_child.exists() or previous_child.is_symlink():
+                    if child.exists() or child.is_symlink():
+                        raise OSError(f"Cannot restore occupied path: {child}")
+                    os.replace(previous_child, child)
+            except OSError as exc:
+                rollback_errors.append(exc)
+        if rollback_errors:
+            categories = ", ".join(type(error).__name__ for error in rollback_errors)
+            raise _RestoreRollbackError(
+                f"Restore failed ({type(original_error).__name__}); rollback failed "
+                f"({categories}); recovery material retained at {previous.parent}"
+            ) from original_error
         raise
 
 
@@ -261,6 +293,40 @@ def _preserve_migration_recovery_files(data_dir: Path, staging: Path) -> None:
     shutil.copytree(source, destination, dirs_exist_ok=True)
 
 
+def _restore_mounted_backup(
+    data_dir: Path, input_dir: Path, manifest: dict[str, Any]
+) -> dict[str, Any]:
+    workspace = data_dir / f"{_RESTORE_WORKSPACE_PREFIX}{uuid.uuid4().hex}"
+    workspace.mkdir()
+    staging = workspace / "incoming"
+    previous = workspace / "previous"
+    try:
+        shutil.copytree(input_dir, staging)
+        if validate_backup(staging) != manifest:
+            raise BackupError("Staged backup manifest changed during restore")
+        (staging / BACKUP_MANIFEST_FILENAME).unlink()
+        _preserve_migration_recovery_files(data_dir, staging)
+        _assert_database_available_for_restore(data_dir)
+        _restore_mount_contents(data_dir, staging, previous)
+    except _RestoreRollbackError:
+        raise
+    except Exception:
+        try:
+            shutil.rmtree(workspace)
+        except OSError as cleanup_error:
+            raise BackupError(
+                f"Restore failed; cleanup incomplete; inspect recovery workspace {workspace}"
+            ) from cleanup_error
+        raise
+    try:
+        shutil.rmtree(workspace)
+    except OSError as exc:
+        raise BackupError(
+            f"Restored, cleanup incomplete; recovery workspace retained at {workspace}"
+        ) from exc
+    return manifest
+
+
 def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
     data_dir = data_dir.resolve()
     input_dir = input_dir.resolve()
@@ -268,7 +334,10 @@ def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
         raise BackupError(f"Backup directory does not exist: {input_dir}")
     if _is_within(input_dir, data_dir):
         raise BackupError("Backup input must be outside the data directory")
+    _assert_no_restore_workspace(data_dir)
     manifest = validate_backup(input_dir)
+    if data_dir.exists() and os.path.ismount(data_dir):
+        return _restore_mounted_backup(data_dir, input_dir, manifest)
     data_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = data_dir.parent / f".{data_dir.name}.restore-{uuid.uuid4().hex}"
     previous = data_dir.parent / f".{data_dir.name}.previous-{uuid.uuid4().hex}"
@@ -283,18 +352,14 @@ def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
         _database_schema_version(staging / HOBAT_DATABASE_FILENAME)
         _assert_database_available_for_restore(data_dir)
         had_existing = data_dir.exists()
-        mounted_data_dir = had_existing and os.path.ismount(data_dir)
-        if mounted_data_dir:
-            _restore_mount_contents(data_dir, staging, previous)
-        elif had_existing:
+        if had_existing:
             os.replace(data_dir, previous)
-        if not mounted_data_dir:
-            try:
-                os.replace(staging, data_dir)
-            except Exception:
-                if had_existing:
-                    os.replace(previous, data_dir)
-                raise
+        try:
+            os.replace(staging, data_dir)
+        except Exception:
+            if had_existing:
+                os.replace(previous, data_dir)
+            raise
         if had_existing:
             shutil.rmtree(previous)
         return manifest

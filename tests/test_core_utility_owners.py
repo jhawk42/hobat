@@ -52,9 +52,9 @@ def test_network_helpers_cover_prefix_identity_and_address_selection(monkeypatch
     assert util_network.is_child_rloc16_of_parent("0x4c92", "0x4c01") is False
     assert util_network.find_omr_address_in_list(
         ["fd00:1234::1", "fd00:abcd::2"],
-        "fd00:abcd",
+        "fd00:abcd::/64",
     ) == "fd00:abcd::2"
-    assert util_network.find_omr_address_in_list([], "fd00:abcd") is None
+    assert util_network.find_omr_address_in_list([], "fd00:abcd::/64") is None
 
 
 @pytest.mark.parametrize(
@@ -171,6 +171,47 @@ def test_network_helpers_extract_rloc16_from_thread_ipv6_addresses() -> None:
     ) == "0x1c05"
     assert util_network.extract_rloc16_from_ipv6_address("fd3b:a255::1c05") is None
     assert util_network.find_rloc16_in_ipv6_addresses(None) is None
+
+
+@pytest.mark.parametrize(("prefix", "inside", "outside"), [
+    ("fda5:494c:9a12:0::/64", "fda5:494c:9a12::1234", "fda5:494c:9a12:01::1234"),
+    ("fd00:abcd:1234:5600::/56", "fd00:abcd:1234:56ff:ffff:ffff:ffff:ffff", "fd00:abcd:1234:5700::"),
+])
+def test_omr_membership_respects_cidr_boundaries(prefix, inside, outside):
+    assert util_network.is_ipv6_address_in_omr_prefix(inside, prefix)
+    assert not util_network.is_ipv6_address_in_omr_prefix(outside, prefix)
+    assert util_network.find_omr_address_in_list([outside, inside], prefix) == inside
+
+
+def test_omr_selection_skips_bad_entries_and_preserves_original_spelling(caplog):
+    address = "FD00:ABCD:0000:0000:0000:0000:0000:0002"
+    assert util_network.find_omr_address_in_list(
+        [None, "not-an-address", "192.0.2.1", address], "fd00:abcd::/64"
+    ) == address
+    assert len(caplog.records) == 1
+    with pytest.raises(ValueError, match="explicit"):
+        util_network.find_omr_address_in_list([], "fd00:abcd")
+
+
+@pytest.mark.parametrize("info", [
+    {"prefix_omr_ipv6addr_prefix": "fd00:abcd"},
+    {"prefix_omr": "fd00:abcd"},
+    {"prefix_omr": None},
+    {"prefix_omr": "fd00:abcd::/64", "prefixOmr": "fd00:abcd:1::/64"},
+])
+def test_omr_resolution_never_guesses_or_ignores_conflicts(info, caplog):
+    assert util_network.resolve_omr_network(info) is None
+    assert caplog.records
+
+
+def test_omr_resolution_accepts_equivalent_aliases_without_mutation():
+    info = {"prefix_omr": "FD00:ABCD:0000:0000::/56", "prefixOmr": "fd00:abcd::/56",
+            "prefix_omr_ipv6addr_prefix": "fd00:abcd"}
+    before = dict(info)
+    assert util_network.resolve_omr_network(info) == "fd00:abcd::/56"
+    assert util_network.resolve_omr_network(None) is None
+    assert util_network.resolve_omr_network({}) is None
+    assert info == before
 
 
 @pytest.mark.parametrize(

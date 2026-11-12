@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+from http.client import IncompleteRead, RemoteDisconnected
 from unittest.mock import patch
 from urllib.error import HTTPError
 
@@ -23,19 +24,24 @@ class FakeResponse:
         self,
         payload: bytes = b'{"data":{"id":"node-1","type":"threadBorderRouter","attributes":{"role":"router"}}}',
         content_type: str = "application/vnd.api+json",
+        read_error: Exception | None = None,
     ) -> None:
         self.payload = payload
         self.headers = FakeHeaders({"Content-Type": content_type})
         self.status = 200
+        self.read_error = read_error
+        self.closed = False
 
     def read(self) -> bytes:
+        if self.read_error is not None:
+            raise self.read_error
         return self.payload
 
     def __enter__(self) -> "FakeResponse":
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
-        return None
+        self.closed = True
 
 
 def make_http_error(
@@ -392,3 +398,106 @@ def test_terminal_retry_error_preserves_last_parsed_details(monkeypatch) -> None
     assert error.value.errors[0].detail == "terminal failure"
     assert error.value.payload["errors"][0]["detail"] == "terminal failure"
     assert "terminal failure" in error.value.body
+
+
+@pytest.mark.parametrize("error_factory", [
+    lambda: IncompleteRead(b"PRIVATE-PARTIAL", 100),
+    lambda: RemoteDisconnected("PRIVATE-DETAIL"),
+    lambda: TimeoutError("PRIVATE-DETAIL"),
+    lambda: ConnectionResetError("PRIVATE-DETAIL"),
+], ids=["truncated", "disconnected", "timeout", "reset"])
+@pytest.mark.parametrize("recover", [True, False])
+def test_body_read_failure_obeys_attempts_and_discards_partial_data(
+    monkeypatch, caplog, error_factory, recover,
+):
+    client = client_module.OTBRRestApiClient(base_url="http://example.test", retries=2)
+    error = error_factory()
+    first = FakeResponse(read_error=error)
+    second = FakeResponse(read_error=None if recover else error)
+    sleeps = []
+    monkeypatch.setattr(client_module.time, "sleep", sleeps.append)
+    caplog.set_level(logging.DEBUG)
+    with patch.object(client_module, "urlopen", side_effect=[first, second]) as request:
+        if recover:
+            assert client.get_node()["id"] == "node-1"
+        else:
+            with pytest.raises(client_module.OTBRConnectionError) as raised:
+                client.get_node()
+            assert raised.value.__cause__ is error
+            assert "PRIVATE" not in str(raised.value)
+    assert request.call_count == 2
+    assert sleeps == [1.0]
+    assert first.closed and second.closed
+    assert "PRIVATE" not in caplog.text
+
+
+class BrokenErrorBody(io.BytesIO):
+    def read(self, *args, **kwargs):
+        raise IncompleteRead(b"PRIVATE-PARTIAL", 10)
+
+
+@pytest.mark.parametrize("status", [400, 503])
+def test_broken_http_error_body_retains_status_and_closes_response(monkeypatch, caplog, status):
+    client = client_module.OTBRRestApiClient(base_url="http://example.test", retries=2)
+    body = BrokenErrorBody()
+    error = HTTPError(
+        "http://example.test/api/node", status, "Unavailable",
+        FakeHeaders({"Content-Type": "application/vnd.api+json"}), body,
+    )
+    sleeps = []
+    monkeypatch.setattr(client_module.time, "sleep", sleeps.append)
+    failures = [make_http_error(503, detail="stale body"), error] if status == 503 else [error]
+    caplog.set_level(logging.DEBUG)
+    with patch.object(client_module, "urlopen", side_effect=failures) as request:
+        with pytest.raises(client_module.OTBRHTTPError) as raised:
+            client.get_node()
+    assert raised.value.status_code == status
+    assert raised.value.__cause__ is error
+    assert raised.value.body is None
+    assert raised.value.payload is None
+    assert body.closed
+    assert request.call_count == (2 if status == 503 else 1)
+    assert sleeps == ([1.0] if status == 503 else [])
+    assert "PRIVATE" not in caplog.text
+
+
+def test_retryable_http_error_with_broken_body_can_recover(monkeypatch):
+    client = client_module.OTBRRestApiClient(base_url="http://example.test", retries=2)
+    body = BrokenErrorBody()
+    error = HTTPError("http://example.test/api/node", 503, "Unavailable",
+                      FakeHeaders({"Retry-After": "0"}), body)
+    sleep = patch.object(client_module.time, "sleep")
+    with sleep as sleep_mock, patch.object(
+        client_module, "urlopen", side_effect=[error, FakeResponse()],
+    ) as request:
+        assert client.get_node()["id"] == "node-1"
+    assert body.closed
+    assert request.call_count == 2
+    sleep_mock.assert_not_called()
+
+
+def test_read_failure_at_deadline_does_not_sleep_or_request_again(monkeypatch):
+    client = client_module.OTBRRestApiClient(base_url="http://example.test", retries=3)
+    error = TimeoutError("PRIVATE-DETAIL")
+    response = FakeResponse(read_error=error)
+    clock = iter([100.0, 102.0])
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: next(clock))
+    with patch.object(client_module.time, "sleep") as sleep, patch.object(
+        client_module, "urlopen", return_value=response,
+    ) as request:
+        with pytest.raises(client_module.OTBRConnectionError) as raised:
+            client.get_action("action-1", deadline=101.0)
+    assert raised.value.__cause__ is error
+    assert response.closed
+    request.assert_called_once()
+    sleep.assert_not_called()
+
+
+def test_complete_invalid_json_is_not_retried():
+    client = client_module.OTBRRestApiClient(base_url="http://example.test", retries=3)
+    response = FakeResponse(payload=b'{"unfinished":')
+    with patch.object(client_module, "urlopen", return_value=response) as request:
+        with pytest.raises(client_module.OTBRInvalidResponseError):
+            client.get_node()
+    request.assert_called_once()
+    assert response.closed

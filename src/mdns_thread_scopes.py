@@ -100,8 +100,8 @@ def _enrich_properties(properties: dict) -> dict:
 def _resolve_optional_omr_ipv6addr_prefix() -> str | None:
     """Return the OMR prefix used for optional mDNS address enrichment."""
     try:
-        return util_network.build_omr_ipv6_address_prefix(
-            util_network.fetch_omr_prefix()
+        return util_network.resolve_omr_network(
+            {"prefix_omr": util_network.fetch_omr_prefix()}
         )
     except (util_network.PrefixFetchError, OSError, RuntimeError, TypeError, ValueError) as exc:
         logging.warning("mDNS browse continues without OMR address enrichment: %s", exc)
@@ -126,6 +126,24 @@ class MDNSDumpListener(ServiceListener):
         self._command = command
         self._checkpoint_write_lock = threading.Lock()
         self._address_warning_categories = set()
+        self._stop_event = threading.Event()
+        self._failure: Exception | None = None
+
+    def _record_failure(self, error: Exception) -> None:
+        with self._lock:
+            if self._failure is None:
+                self._failure = error
+        self._stop_event.set()
+        self.idle_done.set()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def raise_if_failed(self) -> None:
+        with self._lock:
+            error = self._failure
+        if error is not None:
+            raise error
 
     def _warn_address_failure(self, category, exc):
         with self._lock:
@@ -350,7 +368,8 @@ class MDNSDumpListener(ServiceListener):
                     indent=2,
                     writer=save_json_atomic,
                 )
-            except Exception:
+            except Exception as exc:
+                self._record_failure(exc)
                 log_event(
                     "checkpoint",
                     source="mdns",
@@ -385,12 +404,15 @@ class MDNSDumpListener(ServiceListener):
     def wait_for_idle(self, idle_timeout: float = 30.0, poll: float = 0.5):
         """Block until no service events have arrived for *idle_timeout* seconds,
         then set idle_done so callers can close Zeroconf cleanly."""
-        while True:
-            time.sleep(poll)
-            self._write_checkpoint_snapshot()
-            if time.time() - self._last_update >= idle_timeout:
-                self.idle_done.set()
-                return
+        try:
+            while not self._stop_event.wait(poll):
+                self._write_checkpoint_snapshot()
+                if time.time() - self._last_update >= idle_timeout:
+                    return
+        except Exception as exc:
+            self._record_failure(exc)
+        finally:
+            self.idle_done.set()
 
     def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         self._update_last_event_time()
@@ -617,79 +639,94 @@ options:
         command=scope_tag,
     )
 
-    # Start browsers for each scope
-    browsers = [ServiceBrowser(zeroconf, s, listener) for s in selected_scopes]
-
-    # Monitor in a background thread; signals idle_done when quiet for IDLE_TIMEOUT seconds
-    idle_thread = threading.Thread(
-        target=listener.wait_for_idle,
-        kwargs={"idle_timeout": IDLE_TIMEOUT},
-        daemon=True,
-    )
-    idle_thread.start()
-
+    idle_thread = None
     try:
+        browsers = [ServiceBrowser(zeroconf, s, listener) for s in selected_scopes]
+        idle_thread = threading.Thread(
+            target=listener.wait_for_idle,
+            kwargs={"idle_timeout": IDLE_TIMEOUT},
+            daemon=True,
+        )
+        idle_thread.start()
         logging.info(
             f"Waiting (exits automatically after {int(IDLE_TIMEOUT)}s of no new updates)..."
         )
         listener.idle_done.wait()
     except KeyboardInterrupt:
         pass
+    except Exception as exc:
+        listener._record_failure(exc)
     finally:
         logging.info("Stopping...")
-        zeroconf.close()
+        listener.stop()
+        try:
+            zeroconf.close()
+        except Exception as exc:
+            listener._record_failure(exc)
+        finally:
+            if idle_thread is not None and idle_thread.ident is not None:
+                idle_thread.join()
 
-        records = listener.get_records()
-        log_event(
-            "collector_summary",
-            source="mdns",
-            command=scope_tag,
-            stage="browse",
-            elapsed_s=round(max(0.0, time.monotonic() - browse_started), 6),
-            discovered_records=len(records),
+    try:
+        listener.raise_if_failed()
+    except Exception as exc:
+        logging.error(
+            "mDNS collection failed: command=%s output=%s error_type=%s; retained previous finals",
+            scope_tag, output_file, type(exc).__name__,
         )
-        if args.write_scope_snapshots:
-            records = _records_for_service_types(records, selected_scopes)
+        return 3
 
-        output_written = _save_final_snapshot(
-            convert_keys_to_camel_case(records),
-            output_file,
-            command=scope_tag,
-            records=len(records),
-            dataset=scope_tag,
-            ext_pan_id=args.ext_pan_id,
-        )
+    records = listener.get_records()
+    log_event(
+        "collector_summary",
+        source="mdns",
+        command=scope_tag,
+        stage="browse",
+        elapsed_s=round(max(0.0, time.monotonic() - browse_started), 6),
+        discovered_records=len(records),
+    )
+    if args.write_scope_snapshots:
+        records = _records_for_service_types(records, selected_scopes)
 
-        if args.write_scope_snapshots:
-            for dataset_tag, service_types in MDNS_SPLIT_SCOPE_SERVICE_TYPES.items():
-                scope_records = _records_for_service_types(records, service_types)
-                scope_output_file = resolve_data_file_path(
-                    MDNS_SCOPE_FILENAMES[dataset_tag], td_data_dir
-                )
-                scope_written = _save_final_snapshot(
-                    convert_keys_to_camel_case(scope_records),
+    output_written = _save_final_snapshot(
+        convert_keys_to_camel_case(records),
+        output_file,
+        command=scope_tag,
+        records=len(records),
+        dataset=scope_tag,
+        ext_pan_id=args.ext_pan_id,
+    )
+
+    if args.write_scope_snapshots:
+        for dataset_tag, service_types in MDNS_SPLIT_SCOPE_SERVICE_TYPES.items():
+            scope_records = _records_for_service_types(records, service_types)
+            scope_output_file = resolve_data_file_path(
+                MDNS_SCOPE_FILENAMES[dataset_tag], td_data_dir
+            )
+            scope_written = _save_final_snapshot(
+                convert_keys_to_camel_case(scope_records),
+                scope_output_file,
+                command=scope_tag,
+                records=len(scope_records),
+                dataset=dataset_tag,
+                ext_pan_id=args.ext_pan_id,
+            )
+            if scope_written:
+                logging.info(
+                    "Saved %d mDNS record(s) to %s",
+                    len(scope_records),
                     scope_output_file,
-                    command=scope_tag,
-                    records=len(scope_records),
-                    dataset=dataset_tag,
-                    ext_pan_id=args.ext_pan_id,
                 )
-                if scope_written:
-                    logging.info(
-                        "Saved %d mDNS record(s) to %s",
-                        len(scope_records),
-                        scope_output_file,
-                    )
-                else:
-                    logging.info("Retained previous mDNS scope data at %s", scope_output_file)
+            else:
+                logging.info("Retained previous mDNS scope data at %s", scope_output_file)
 
-        if output_written:
-            logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
-        else:
-            logging.info("Retained previous mDNS scope data at %s", output_file)
-        logging.debug(json.dumps(records, indent=2))
-        logging.debug("mDNS scope data for %s:\n%s",
-                output_file, json.dumps(records, indent=2))
+    if output_written:
+        logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
+    else:
+        logging.info("Retained previous mDNS scope data at %s", output_file)
+    logging.debug(json.dumps(records, indent=2))
+    logging.debug("mDNS scope data for %s:\n%s",
+            output_file, json.dumps(records, indent=2))
 
 
 def _save_final_snapshot(

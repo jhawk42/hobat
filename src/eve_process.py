@@ -43,11 +43,7 @@ def load_and_parse_eve_file(
 
     result = {}
 
-    omr_ipv6addr_prefix = (
-        thread_network_info["prefix_omr_ipv6addr_prefix"]
-        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
-        else None
-    )
+    omr_ipv6addr_prefix = util_network.resolve_omr_network(thread_network_info)
     
     meshlocal_ipv6addr_prefix = (
         thread_network_info["prefix_meshlocal_ipv6addr_prefix"]

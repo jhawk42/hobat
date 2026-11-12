@@ -2,9 +2,24 @@ from __future__ import annotations
 
 import json
 import logging
+import pytest
 
 import eve_process
 import util_data
+
+
+@pytest.mark.parametrize("legacy_only", [False, True])
+def test_eve_omr_enrichment_requires_full_observed_cidr(tmp_path, monkeypatch, legacy_only):
+    address = "fda5:494c:9a12::1234"
+    source = tmp_path / "eve.json"
+    source.write_text(json.dumps({"nodes": [{"id": "one", "rloc16": 7, "ip_addresses": [address]}]}))
+    info = {"prefix_omr_ipv6addr_prefix": "fda5:494c:9a12:0"}
+    if not legacy_only:
+        info["prefix_omr"] = "fda5:494c:9a12:0::/64"
+    monkeypatch.setattr(eve_process.util_network, "fetch_omr_prefix", lambda: pytest.fail("unexpected network query"))
+    result = eve_process.load_and_parse_eve_file(source, info)
+    assert result["one"].get("omrIpv6Address") == (None if legacy_only else address)
+    assert info["prefix_omr_ipv6addr_prefix"] == "fda5:494c:9a12:0"
 
 
 def test_eve_enrichment_counts_each_decision_branch_exclusively(

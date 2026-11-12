@@ -1054,6 +1054,14 @@ activating the replacement. Stop the web server and all writers first; restore
 also refuses a database with an active writer. If validation or activation
 fails, the original data directory is retained or restored.
 
+Mounted restores keep staging and rollback copies in a temporary
+`.hobat-restore-<uuid>` directory inside the mount so renames do not cross
+filesystems. The mount root remains intact. An incomplete rollback or cleanup
+reports the retained recovery directory and blocks further backup/restore until
+it is resolved. Preserve these files for operator recovery. This handles
+operation failures, not automatic recovery after power loss or `SIGKILL`;
+real Home Assistant local-storage acceptance remains a separate requirement.
+
 Backups are unredacted and may contain device identifiers, topology, labels,
 network credentials from collector snapshots, and configuration. Restrict
 filesystem access and treat Home Assistant backup inclusion as sensitive.

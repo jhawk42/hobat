@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -35,14 +36,15 @@ DIAGNOSTIC_FIXTURE = (
 
 class FakeWebSocket:
     def __init__(self, frames: list[dict[str, Any]]) -> None:
-        self.incoming: asyncio.Queue[str] = asyncio.Queue()
+        self.incoming: asyncio.Queue[str | bytes] = asyncio.Queue()
         for frame in frames:
             self.incoming.put_nowait(json.dumps(frame))
         self.sent: list[dict[str, Any]] = []
         self.closed = False
+        self.close_count = 0
         self.on_send = None
 
-    async def recv(self) -> str:
+    async def recv(self) -> str | bytes:
         return await self.incoming.get()
 
     async def send(self, payload: str) -> None:
@@ -53,6 +55,7 @@ class FakeWebSocket:
 
     async def close(self) -> None:
         self.closed = True
+        self.close_count += 1
 
     def queue(self, frame: dict[str, Any]) -> None:
         self.incoming.put_nowait(json.dumps(frame))
@@ -64,6 +67,128 @@ def _server_info() -> dict[str, Any]:
 
 def _server_info_with_schema(schema_version: int) -> dict[str, Any]:
     return dict(_server_info(), schema_version=schema_version)
+
+
+@pytest.mark.parametrize(("frame", "error_type"), [
+    ("not-json", MatterWsTransportError),
+    (b"{}", MatterWsTransportError),
+    ("[]", MatterWsTransportError),
+    ("{}", MatterWsContractError),
+])
+def test_failed_handshake_closes_once_without_installing_reader(monkeypatch, frame, error_type):
+    async def scenario():
+        socket = FakeWebSocket([])
+        socket.incoming.put_nowait(frame)
+        monkeypatch.setattr(ha_matter_ws_client.websockets, "connect", lambda *a, **k: socket)
+        client = HaMatterWsClient(connect_timeout=0.1)
+        with pytest.raises(error_type):
+            await client.__aenter__()
+        assert socket.close_count == 1
+        assert client._reader_task is None
+        assert client._pending == {}
+        assert client._server_info is None
+        assert client._websocket is None
+        await client.close()
+        assert socket.close_count == 1
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("error_type", [MatterWsTransportError, MatterWsContractError])
+def test_failed_handshake_preserves_original_local_error_instance(monkeypatch, error_type):
+    async def scenario():
+        socket = FakeWebSocket([])
+        monkeypatch.setattr(ha_matter_ws_client.websockets, "connect", lambda *a, **k: socket)
+        client = HaMatterWsClient()
+        error = error_type("original")
+        monkeypatch.setattr(client, "_receive_frame", AsyncMock(side_effect=error))
+        with pytest.raises(error_type) as raised:
+            await client.__aenter__()
+        assert raised.value is error
+        assert socket.close_count == 1
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure", ["os", "websocket", "timeout", "programming"])
+def test_failed_entry_cleanup_is_bounded_and_reports_known_failures(monkeypatch, caplog, failure):
+    async def scenario():
+        socket = FakeWebSocket([])
+        monkeypatch.setattr(ha_matter_ws_client.websockets, "connect", lambda *a, **k: socket)
+        client = HaMatterWsClient(connect_timeout=0.01)
+        error = MatterWsTransportError("original handshake")
+        monkeypatch.setattr(client, "_receive_frame", AsyncMock(side_effect=error))
+        close_finished = asyncio.Event()
+        original_close = socket.close
+
+        async def close():
+            await original_close()
+            try:
+                if failure == "timeout":
+                    await asyncio.Event().wait()
+                if failure == "programming":
+                    raise RuntimeError("programming error")
+                if failure == "websocket":
+                    raise ha_matter_ws_client.websockets.WebSocketException("PRIVATE-CLOSE")
+                raise OSError("PRIVATE-CLOSE")
+            finally:
+                close_finished.set()
+
+        monkeypatch.setattr(socket, "close", close)
+        with pytest.raises(RuntimeError if failure == "programming" else MatterWsTransportError) as raised:
+            await asyncio.wait_for(client.__aenter__(), timeout=1)
+        if failure == "programming":
+            assert type(raised.value) is RuntimeError
+        else:
+            assert raised.value is error
+            assert "cleanup incomplete" in caplog.text
+            assert "PRIVATE-CLOSE" not in caplog.text
+        assert close_finished.is_set()
+        assert client._reader_task is None
+        assert client._websocket is None
+        await client.close()
+        assert socket.close_count == 1
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("cancel_cleanup", [False, True])
+def test_handshake_cancellation_closes_once_and_second_cancellation_propagates(monkeypatch, cancel_cleanup):
+    async def scenario():
+        socket = FakeWebSocket([])
+        monkeypatch.setattr(ha_matter_ws_client.websockets, "connect", lambda *a, **k: socket)
+        client = HaMatterWsClient(connect_timeout=0.2)
+        receiving = asyncio.Event()
+        closing = asyncio.Event()
+        close_finished = asyncio.Event()
+        original_recv, original_close = socket.recv, socket.close
+
+        async def recv():
+            receiving.set()
+            return await original_recv()
+
+        async def close():
+            await original_close()
+            closing.set()
+            try:
+                if cancel_cleanup:
+                    await asyncio.Event().wait()
+            finally:
+                close_finished.set()
+
+        monkeypatch.setattr(socket, "recv", recv)
+        monkeypatch.setattr(socket, "close", close)
+        task = asyncio.create_task(client.__aenter__())
+        await asyncio.wait_for(receiving.wait(), timeout=1)
+        task.cancel()
+        if cancel_cleanup:
+            await asyncio.wait_for(closing.wait(), timeout=1)
+            task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert close_finished.is_set()
+        assert client._reader_task is None
+        assert client._pending == {}
+        await client.close()
+        assert socket.close_count == 1
+    asyncio.run(scenario())
 
 
 def test_client_correlates_out_of_order_responses_and_routes_events(monkeypatch) -> None:

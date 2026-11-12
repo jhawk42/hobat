@@ -267,6 +267,21 @@ def test_fetch_dataset_active_hides_secrets_even_if_ot_ctl_returns_them(caplog):
         assert runtime.td_data_dir == env_datadir
 
 
+@pytest.mark.parametrize("response", [
+    "Network Name: mesh\nError 7: PRIVATE_ERROR",
+    "Network Name: mesh\nmalformed PRIVATE_VALUE",
+    "Network Name: \nDone",
+    "Network Key: PRIVATE_KEY\nPSKc: PRIVATE_PSKC\nDone",
+])
+def test_dataset_parser_rejects_invalid_output_without_disclosing_it(monkeypatch, caplog, response):
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(util_network.util_ot_ctl, "exec_ot_ctl", lambda _: response)
+    with pytest.raises(util_network.DatasetFetchError) as error:
+        util_network.fetch_dataset_active()
+    assert "PRIVATE" not in str(error.value)
+    assert "PRIVATE" not in caplog.text
+
+
 class TestIntegrationScenario:
     """Integration tests combining multiple helper functions."""
     

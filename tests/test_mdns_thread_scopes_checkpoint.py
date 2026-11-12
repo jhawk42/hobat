@@ -5,9 +5,11 @@ import json
 import sys
 import tempfile
 import unittest
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+import pytest
 
 import mdns_thread_scopes as mdns
 import util_network
@@ -517,6 +519,92 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
             command="thread",
         )
         save_final_json.assert_called_once()
+
+
+@pytest.mark.parametrize("origin", ["monitor", "callback", "shutdown"])
+def test_collection_failure_releases_waiter_and_preserves_all_finals(tmp_path, monkeypatch, origin):
+    listener = mdns.MDNSDumpListener(checkpoint_output_file=tmp_path / "checkpoint.json")
+    listener._upsert_record({
+        "record_key": "test", "scope": "_meshcop._udp.local.", "name": "test",
+    })
+    originals = {}
+    for filename in mdns.MDNS_SCOPE_FILENAMES.values():
+        for path in (tmp_path / filename, util_data.network_scope_path(tmp_path / filename)):
+            path.write_bytes(b"previous")
+            originals[path] = path.read_bytes()
+    real_wait = listener.wait_for_idle
+    monkeypatch.setattr(listener, "wait_for_idle", lambda **kwargs: real_wait(idle_timeout=0, poll=0.001))
+    completed = []
+    event_wait = listener.idle_done.wait
+    monkeypatch.setattr(listener.idle_done, "wait", lambda: completed.append(event_wait(1)))
+    discovery = MagicMock()
+    if origin == "shutdown":
+        discovery.close.side_effect = OSError("private close detail")
+    else:
+        monkeypatch.setattr(mdns, "save_checkpoint_json", MagicMock(side_effect=OSError("private write detail")))
+    if origin == "callback":
+        monkeypatch.setattr(mdns, "ServiceBrowser", lambda *args: listener._write_checkpoint_snapshot())
+    else:
+        monkeypatch.setattr(mdns, "ServiceBrowser", MagicMock())
+    threads = []
+    real_thread = threading.Thread
+
+    def monitor_thread(*args, **kwargs):
+        thread = real_thread(*args, **kwargs)
+        threads.append(thread)
+        return thread
+
+    monkeypatch.setattr(mdns.threading, "Thread", monitor_thread)
+    monkeypatch.setattr(mdns, "Zeroconf", lambda: discovery)
+    monkeypatch.setattr(mdns, "MDNSDumpListener", lambda **kwargs: listener)
+    monkeypatch.setattr(mdns, "_resolve_optional_omr_ipv6addr_prefix", lambda: None)
+    monkeypatch.setattr(mdns, "save_final_json", lambda *a, **k: pytest.fail("unexpected final write"))
+    assert mdns.main(["thread", "--write-scope-snapshots", "--datadir", str(tmp_path)]) == 3
+    assert completed == ([] if origin == "callback" else [True])
+    assert all(not thread.is_alive() for thread in threads)
+    discovery.close.assert_called_once()
+    assert {path: path.read_bytes() for path in originals} == originals
+
+
+def test_manual_stop_without_failure_still_publishes_collected_records(tmp_path, monkeypatch):
+    listener = mdns.MDNSDumpListener()
+    monkeypatch.setattr(listener.idle_done, "wait", MagicMock(side_effect=KeyboardInterrupt))
+    discovery = MagicMock()
+    monkeypatch.setattr(mdns, "Zeroconf", lambda: discovery)
+    monkeypatch.setattr(mdns, "MDNSDumpListener", lambda **kwargs: listener)
+    monkeypatch.setattr(mdns, "ServiceBrowser", MagicMock())
+    monkeypatch.setattr(mdns.threading, "Thread", MagicMock())
+    monkeypatch.setattr(mdns, "_resolve_optional_omr_ipv6addr_prefix", lambda: None)
+    save = MagicMock(return_value=True)
+    monkeypatch.setattr(mdns, "save_final_json", save)
+    assert mdns.main(["thread", "--datadir", str(tmp_path)]) is None
+    save.assert_called_once()
+    discovery.close.assert_called_once()
+
+
+def test_normal_idle_monitor_completes_and_can_be_joined():
+    listener = mdns.MDNSDumpListener()
+    thread = threading.Thread(target=listener.wait_for_idle, kwargs={"idle_timeout": 0, "poll": 0.001})
+    thread.start()
+    try:
+        assert listener.idle_done.wait(1)
+    finally:
+        listener.stop()
+        thread.join(1)
+    assert not thread.is_alive()
+    listener.raise_if_failed()
+
+
+def test_mdns_enrichment_uses_one_full_cidr_query(monkeypatch):
+    fetch = MagicMock(return_value="fda5:494c:9a12:0::/64")
+    monkeypatch.setattr(util_network, "fetch_omr_prefix", fetch)
+    prefix = mdns._resolve_optional_omr_ipv6addr_prefix()
+    listener = mdns.MDNSDumpListener(omr_ipv6addr_prefix=prefix)
+    info = SimpleNamespace(properties={}, addresses=[],
+                           parsed_addresses=lambda: ["fda5:494c:9a12::1234"])
+    record = listener._build_record_from_service_info("_hap._udp.local.", "test", info, "add")
+    assert record["omrIpv6Address"] == "fda5:494c:9a12::1234"
+    fetch.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -1,9 +1,11 @@
 import ipaddress
 import json
+import re
 import util_ot_ctl
 import logging
 import sys
 import time
+from collections.abc import Mapping
 
 from td_logging import log_event
 
@@ -12,6 +14,10 @@ THREAD_RLOC16_ADDRESS_PREFIX = ":0:ff:fe00:"
 
 class PrefixFetchError(ValueError):
     """Raised when ot-ctl does not return a valid IPv6 prefix."""
+
+
+class DatasetFetchError(ValueError):
+    """Raised when ot-ctl does not return usable active-dataset fields."""
 
 
 def extract_rloc16_from_ipv6_address(addr):
@@ -302,35 +308,58 @@ def build_omr_ipv6_address_prefix(omr_prefix):
     return _build_ipv6_prefix_by_type(omr_prefix, "omr")
 
 
+def _parse_omr_network(prefix: object) -> ipaddress.IPv6Network:
+    if not isinstance(prefix, str) or "/" not in prefix:
+        raise ValueError("OMR network requires an explicit IPv6 CIDR prefix")
+    return ipaddress.IPv6Network(prefix, strict=False)
+
+
+def resolve_omr_network(network_info: Mapping[str, object] | None) -> str | None:
+    """Resolve optional full OMR evidence without guessing a legacy prefix length."""
+    if network_info is None:
+        return None
+    values = [network_info[key] for key in ("prefix_omr", "prefixOmr") if key in network_info]
+    if not values:
+        if network_info.get("prefix_omr_ipv6addr_prefix") or network_info.get("prefixOmrIpv6AddrPrefix"):
+            logging.warning("OMR prefix length unavailable; skipping enrichment until full CIDR evidence is supplied")
+        return None
+    try:
+        networks = [_parse_omr_network(value) for value in values]
+        if any(network != networks[0] for network in networks[1:]):
+            raise ValueError("Conflicting OMR networks")
+    except ValueError:
+        logging.warning("Invalid or conflicting OMR CIDR evidence; skipping optional enrichment")
+        return None
+    return str(networks[0])
+
+
 def is_ipv6_address_in_omr_prefix(addr, omr_prefix):
-    """
-    Checks if a given IPv6 address falls within a specified OMR (On-Mesh Routable) ipv6 prefix.
-
-    Args:
-        addr: The IPv6 address to check (e.g., "fdde:ad00:beef:0:0:ff:fe00:5000")
-        omr_prefix: The OMR (On-Mesh Routable) IPv6 prefix to check against (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
-
-    Returns:
-        True if the IPv6 address is within the prefix, False otherwise.
-    """
-    if not isinstance(addr, str) or not isinstance(omr_prefix, str):
+    """Check an address against an explicit OMR IPv6 CIDR network."""
+    network = _parse_omr_network(omr_prefix)
+    try:
+        if not isinstance(addr, str):
+            raise ValueError("IPv6 address must be text")
+        return ipaddress.IPv6Address(addr) in network
+    except ValueError:
+        logging.warning("Invalid/non-IPv6 address skipped during OMR enrichment")
         return False
-    return addr.startswith(omr_prefix)
 
 
 def find_omr_address_in_list(ipv6_addrs, omr_prefix):
-    """
-    Retrieves the OMR (On-Mesh Routable) address from a list of IPv6 addresses based on the OMR prefix.
-
-    Args:
-        ipv6_addrs: List of IPv6 address strings to check (e.g., ["fdde:ad00:beef:0:0:ff:fe00:5000", "fdde:ad00:beef:0:0:ff:fe00:6000"])
-        omr_prefix: The OMR (On-Mesh Routable) IPv6 prefix to check against (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
-
-    Returns:
-        The first IPv6 address from the list that matches the OMR prefix, or None if no match is found.
-    """
+    """Return the first original address in an explicit OMR IPv6 CIDR network."""
+    network = _parse_omr_network(omr_prefix)
+    warned = False
     for addr in ipv6_addrs:
-        if is_ipv6_address_in_omr_prefix(addr, omr_prefix):
+        try:
+            if not isinstance(addr, str):
+                raise ValueError("IPv6 address must be text")
+            address = ipaddress.IPv6Address(addr)
+        except ValueError:
+            if not warned:
+                logging.warning("Invalid/non-IPv6 addresses skipped during OMR enrichment")
+                warned = True
+            continue
+        if address in network:
             return addr
     return None
 
@@ -443,15 +472,17 @@ def fetch_dataset_active(hide_sensitive_info=True):
     command = "dataset active"
     if hide_sensitive_info:
         command += " -ns"  # Add -ns flag to hide sensitive info in the output
-    raw_output = util_ot_ctl.exec_ot_ctl(command).strip()
+    raw_output = util_ot_ctl.exec_ot_ctl(command)
+    if not isinstance(raw_output, str):
+        raise DatasetFetchError("Active dataset response must be text")
     from td_logging import redact_sensitive_output
 
-    logging.debug(
-        "[DEBUG] Dataset Active Output:\n%s\n",
-        redact_sensitive_output(raw_output),
-    )
-
     dataset_info = {}
+    recognized_fields = {
+        "active_timestamp", "channel", "wakeup_channel", "channel_mask",
+        "ext_pan_id", "mesh_local_prefix", "network_name", "pan_id",
+        "security_policy",
+    }
 
     # Parse key: value pairs from output
     for line in raw_output.split("\n"):
@@ -460,16 +491,28 @@ def fetch_dataset_active(hide_sensitive_info=True):
         # Skip empty lines and "Done" line
         if not line or line == "Done":
             continue
+        if re.match(r"error(?:\s+\d+)?\s*:", line, re.IGNORECASE):
+            raise DatasetFetchError("Active dataset command returned an error")
+        if ":" not in line:
+            raise DatasetFetchError("Malformed active dataset response")
 
         # Split by the first colon
         if ":" in line:
             key, value = line.split(":", 1)
             key = key.strip().lower().replace(" ", "_").replace("-", "_")
             value = value.strip()
+            if not key or not value:
+                raise DatasetFetchError("Empty active dataset field")
             if hide_sensitive_info and key in {"network_key", "pskc"}:
                 continue
             dataset_info[key] = value
 
+    if not recognized_fields.intersection(dataset_info):
+        raise DatasetFetchError("Active dataset response contains no usable dataset fields")
+    logging.debug(
+        "[DEBUG] Dataset Active Output:\n%s\n",
+        redact_sensitive_output(raw_output),
+    )
     logging.debug(
         "[DEBUG] Parsed Dataset Info: %s\n",
         redact_sensitive_output(json.dumps(dataset_info)),

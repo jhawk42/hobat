@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -209,7 +210,7 @@ def test_restore_mount_root_reinstates_contents_after_activation_failure(
     real_replace = os.replace
 
     def fail_snapshot_activation(source, destination):
-        if ".restore-" in str(source) and Path(source).name == "snapshot.json":
+        if Path(source).parent.name == "incoming" and Path(source).name == "snapshot.json":
             raise OSError("injected mount activation failure")
         real_replace(source, destination)
 
@@ -221,3 +222,123 @@ def test_restore_mount_root_reinstates_contents_after_activation_failure(
     assert data_dir.is_dir()
     assert (data_dir / "snapshot.json").read_text(encoding="utf-8") == "current\n"
     assert (data_dir / "current" / "value.txt").read_text(encoding="utf-8") == "current\n"
+
+
+def test_mounted_restore_uses_only_target_filesystem_moves(tmp_path, monkeypatch):
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    root_identity = (data_dir.stat().st_dev, data_dir.stat().st_ino)
+    recovery = data_dir / ".migration-backups"
+    recovery.mkdir()
+    (recovery / "copy.sqlite").write_bytes(b"recovery")
+    real_replace = os.replace
+
+    def same_filesystem_replace(source, destination):
+        assert Path(source).is_relative_to(data_dir)
+        assert Path(destination).is_relative_to(data_dir)
+        real_replace(source, destination)
+
+    monkeypatch.setattr(td_system_backups.os.path, "ismount", lambda path: path == data_dir)
+    monkeypatch.setattr(td_system_backups.os, "replace", same_filesystem_replace)
+    restore_backup(data_dir, backup_dir)
+    assert (data_dir.stat().st_dev, data_dir.stat().st_ino) == root_identity
+    assert (recovery / "copy.sqlite").read_bytes() == b"recovery"
+    assert not list(data_dir.glob(".hobat-restore-*"))
+
+
+def test_restore_on_real_second_filesystem(tmp_path, monkeypatch):
+    root = Path("/dev/shm")
+    if not root.is_dir() or root.stat().st_dev == tmp_path.stat().st_dev or not os.access(root, os.W_OK):
+        pytest.skip("No writable second filesystem available")
+    source = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    manifest = create_backup(source, backup_dir)
+    with tempfile.TemporaryDirectory(prefix="hobat-restore-test-", dir=root) as name:
+        data_dir = _data_dir(Path(name))
+        identity = data_dir.stat().st_ino
+        real_replace = os.replace
+
+        def guarded_replace(source, destination):
+            assert Path(source).parent.stat().st_dev == Path(destination).parent.stat().st_dev
+            real_replace(source, destination)
+
+        monkeypatch.setattr(td_system_backups.os.path, "ismount", lambda path: path == data_dir)
+        monkeypatch.setattr(td_system_backups.os, "replace", guarded_replace)
+        assert restore_backup(data_dir, backup_dir) == manifest
+        assert data_dir.stat().st_ino == identity
+        assert td_system_backups._manifest_files(data_dir) == manifest["files"]
+        assert not list(data_dir.glob(".hobat-restore-*"))
+
+
+@pytest.mark.parametrize("stage", ["evacuation", "activation"])
+def test_mounted_restore_rolls_back_partial_moves(tmp_path, monkeypatch, stage):
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    (data_dir / "snapshot.json").write_text("current")
+    (data_dir / "dangling").symlink_to("missing-target")
+    td_system_backups._assert_database_available_for_restore(data_dir)
+    before = td_system_backups._manifest_files(data_dir)
+    real_replace = os.replace
+    moved = 0
+
+    def fail_after_one_move(source, destination):
+        nonlocal moved
+        selected = (
+            Path(destination).parent.name == "previous"
+            if stage == "evacuation" else Path(source).parent.name == "incoming"
+        )
+        if selected:
+            moved += 1
+            if moved == 2:
+                raise OSError("injected partial move failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(td_system_backups.os.path, "ismount", lambda path: path == data_dir)
+    monkeypatch.setattr(td_system_backups.os, "replace", fail_after_one_move)
+    with pytest.raises(OSError, match="partial move"):
+        restore_backup(data_dir, backup_dir)
+    assert td_system_backups._manifest_files(data_dir) == before
+    assert (data_dir / "dangling").is_symlink()
+    assert os.readlink(data_dir / "dangling") == "missing-target"
+    assert not list(data_dir.glob(".hobat-restore-*"))
+
+
+@pytest.mark.parametrize("failure", ["rollback", "cleanup"])
+def test_mounted_restore_retains_unresolved_recovery(tmp_path, monkeypatch, failure):
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    (data_dir / "snapshot.json").write_text("current")
+    real_replace = os.replace
+    real_remove = td_system_backups.shutil.rmtree
+
+    def fail_moves(source, destination):
+        parent = Path(source).parent.name
+        if failure == "rollback" and (
+            (parent == "incoming" and Path(source).name == "snapshot.json")
+            or (parent == "previous" and Path(source).name == "snapshot.json")
+        ):
+            raise OSError("injected move failure")
+        real_replace(source, destination)
+
+    def fail_cleanup(path, *args, **kwargs):
+        if failure == "cleanup" and Path(path).name.startswith(".hobat-restore-"):
+            raise OSError("injected cleanup failure")
+        return real_remove(path, *args, **kwargs)
+
+    monkeypatch.setattr(td_system_backups.os.path, "ismount", lambda path: path == data_dir)
+    monkeypatch.setattr(td_system_backups.os, "replace", fail_moves)
+    monkeypatch.setattr(td_system_backups.shutil, "rmtree", fail_cleanup)
+    with pytest.raises(BackupError, match="recovery.*at") as error:
+        restore_backup(data_dir, backup_dir)
+    workspace, = data_dir.glob(".hobat-restore-*")
+    assert str(workspace) in str(error.value)
+    assert (workspace / "previous" / "snapshot.json").read_text() == "current"
+    if failure == "cleanup":
+        assert (data_dir / "snapshot.json").read_text() == '{"value": 1}\n'
+    with pytest.raises(BackupError, match="Unfinished restore workspace"):
+        restore_backup(data_dir, backup_dir)
+    with pytest.raises(BackupError, match="Unfinished restore workspace"):
+        create_backup(data_dir, tmp_path / "another-backup")

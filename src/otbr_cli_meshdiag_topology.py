@@ -205,11 +205,7 @@ def enrich_topology_routers(
         Enriched topology data with additional fields/calculations
     """
 
-    omr_ipv6addr_prefix = (
-        thread_network_info["prefix_omr_ipv6addr_prefix"]
-        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
-        else None
-    )
+    omr_ipv6addr_prefix = util_network.resolve_omr_network(thread_network_info)
 
     topology_data_enhanced = []
     for router in topology_data:

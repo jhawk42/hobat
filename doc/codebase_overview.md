@@ -143,6 +143,10 @@ Transport methods do not write files. Resource dispatchers or composite
 workflows own command output because they know the command and resolved path.
 Mutating action POSTs are not retried after an ambiguous response because the
 OTBR action API has no idempotency key; idempotent reads use bounded retries.
+Truncated, timed-out, or reset response reads use that same attempt/deadline
+budget and discard incomplete bytes. Broken HTTP error bodies retain their
+known status. An interrupted action POST remains indeterminate: no replay or
+polling is started without an acknowledged action ID.
 
 ### Home Assistant Matter WebSocket
 
@@ -160,8 +164,17 @@ The source is read-only and controller-scoped. Its fallback URI is
 `ws://localhost:5580/ws`; environment variables and CLI endpoint options can
 override it. Missing or unavailable node telemetry remains
 explicitly absent. It does not replace OTBR network-wide collection.
+Failed handshake entry attempts one close within the existing connection
+timeout, preserving the original error or cancellation. A close failure/timeout
+is reported as incomplete cleanup, not guaranteed peer acknowledgement.
 
 ### Other Sources and Processing
+
+mDNS checkpoint failures are handed back to the main waiter before discovery
+shutdown and monitor join; a collection or cleanup failure retains prior finals.
+OMR enrichment in mDNS, topology collectors, and Eve uses explicit full CIDR
+evidence. Shortened legacy display prefixes are retained but never assigned a
+guessed mask; missing/conflicting evidence skips optional enrichment.
 
 | Files | Responsibility |
 |---|---|

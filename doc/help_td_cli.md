@@ -519,6 +519,16 @@ large IDs in JavaScript; unsafe numeric values lose precision.
 `--write-scope-snapshots` writes the `br`, `hap`, and `matter` snapshots from
 the same records collected by a `thread` browse.
 
+A checkpoint or discovery-shutdown failure stops the browse, closes discovery,
+and returns `3` without replacing final/split snapshots or their scope files.
+Already saved usable checkpoints remain available. Ctrl+C still publishes
+collected records when no failure occurred.
+
+OMR address enrichment uses the full `prefix_omr`/`prefixOmr` IPv6 CIDR, not the
+shortened legacy display prefix. Legacy-only or conflicting evidence produces
+a warning and skips enrichment without discarding records or making an extra
+live query. Cache field names and shortened display values are unchanged.
+
 Final collector snapshots have sibling `.network.json` files containing
 provenance and the snapshot SHA-256. Merge excludes known cross-instance and
 digest-mismatched inputs, treats missing sidecars as unknown instance, and
@@ -603,6 +613,17 @@ must not already exist or be inside the active data directory. Restore requires
 confirmation, validates checksums and database integrity, stages the complete
 replacement, and refuses an active database writer. Stop the web server and all
 writers before restore. Backups are unredacted and can contain credentials.
+
+Mounted-directory restores stage and retain rollback copies on the target
+filesystem without replacing the mount root. If rollback or cleanup cannot
+finish, the error identifies a `.hobat-restore-<uuid>` recovery workspace.
+Inspect and recover it before another backup or restore; do not delete recovery
+copies blindly. Handled activation failures roll back; automatic recovery after
+power loss or forced termination is not provided.
+
+`otbr-cli thread-network-info` rejects error-shaped, empty, or malformed active
+dataset responses with exit code `5`, retaining the previous final and scope
+companion. Runtime failures still return `3`.
 
 ### `system device ping`
 

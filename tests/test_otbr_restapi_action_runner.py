@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from http.client import IncompleteRead
 from unittest.mock import MagicMock
 
 import pytest
+import otbr_restapi_util as client_module
 
 from otbr_restapi_actions import dispatch_actions
 from otbr_restapi_util import (
@@ -13,6 +15,8 @@ from otbr_restapi_util import (
     OTBRActionDisappearedError,
     OTBRActionTimeoutError,
     OTBRHTTPError,
+    OTBRConnectionError,
+    OTBRIndeterminateEnqueueError,
     OTBRInvalidResponseError,
     OTBRRestApiClient,
     OTBRUsageError,
@@ -185,3 +189,27 @@ def test_cli_wait_uses_shared_runner() -> None:
     assert kwargs["task_timeout"] == 15
     assert kwargs["poll_interval"] == 0.5
     assert kwargs["poll_timeout"] == 20.0
+
+
+def test_truncated_enqueue_is_indeterminate_without_replay_poll_or_cleanup(monkeypatch):
+    client = OTBRRestApiClient(base_url="http://example.test", retries=4)
+    read_error = IncompleteRead(b"partial action", 100)
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.read.side_effect = read_error
+    request = MagicMock(return_value=response)
+    monkeypatch.setattr(client_module, "urlopen", request)
+    sleep = MagicMock()
+    monkeypatch.setattr(client_module.time, "sleep", sleep)
+    client.wait_for_action = MagicMock()
+    client.delete_action = MagicMock()
+    with pytest.raises(OTBRIndeterminateEnqueueError) as raised:
+        client.trigger_and_wait_device_collection()
+    assert isinstance(raised.value.__cause__, OTBRConnectionError)
+    assert raised.value.__cause__.__cause__ is read_error
+    request.assert_called_once()
+    assert request.call_args.args[0].method == "POST"
+    response.__exit__.assert_called_once()
+    sleep.assert_not_called()
+    client.wait_for_action.assert_not_called()
+    client.delete_action.assert_not_called()

@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from http.client import IncompleteRead, RemoteDisconnected
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 from urllib.error import HTTPError, URLError
@@ -77,6 +78,7 @@ RETRY_BACKOFF_MAX = 8.0
 RETRY_JITTER_DEFAULT = 0.0
 RETRYABLE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+_BODY_READ_ERRORS = (IncompleteRead, RemoteDisconnected, TimeoutError, ConnectionError)
 SENSITIVE_BODY_KEY_MARKERS = (
     "credential",
     "networkkey",
@@ -3343,6 +3345,7 @@ class OTBRRestApiClient:
         last_exc_body: bytes = b""
 
         for attempt in range(effective_attempts):
+            last_exc_body = b""
             try:
                 request_timeout = self._request_timeout(timeout, deadline)
                 with urlopen(request, timeout=request_timeout) as response:
@@ -3378,12 +3381,29 @@ class OTBRRestApiClient:
                 )
             except HTTPError as exc:
                 last_exc = exc
-                last_exc_body = exc.read()
                 can_retry = (
                     operation_is_retryable
                     and exc.code in RETRYABLE_STATUS_CODES
                     and attempt < effective_attempts - 1
                 )
+                try:
+                    try:
+                        last_exc_body = exc.read()
+                    except _BODY_READ_ERRORS as read_error:
+                        logging.warning(
+                            "HTTP error body unavailable: method=%s endpoint=%s status=%s "
+                            "attempt=%d/%d error_type=%s retry=%s",
+                            method, path, exc.code, attempt + 1, effective_attempts,
+                            type(read_error).__name__, can_retry,
+                        )
+                finally:
+                    try:
+                        exc.close()
+                    except (OSError, IncompleteRead, RemoteDisconnected) as close_error:
+                        logging.warning(
+                            "HTTP error response close failed: method=%s endpoint=%s error_type=%s",
+                            method, path, type(close_error).__name__,
+                        )
                 logging.debug(
                     "HTTP Error Response: status=%s, headers=%s, body_len=%s, retry=%s",
                     exc.code,
@@ -3408,15 +3428,16 @@ class OTBRRestApiClient:
                     "HTTP %d on attempt %d/%d for %s; retrying",
                     exc.code, attempt + 1, effective_attempts, url,
                 )
-            except URLError as exc:
+            except (URLError, *_BODY_READ_ERRORS) as exc:
                 last_exc = exc
                 can_retry = operation_is_retryable and attempt < effective_attempts - 1
                 logging.warning(
-                    "URLError on attempt %d/%d for %s: %s; retry=%s",
+                    "HTTP transport failure: method=%s endpoint=%s attempt=%d/%d error_type=%s retry=%s",
+                    method,
+                    path,
                     attempt + 1,
                     effective_attempts,
-                    url,
-                    exc.reason,
+                    type(exc).__name__,
                     can_retry,
                 )
                 if not can_retry:
@@ -3439,7 +3460,7 @@ class OTBRRestApiClient:
         if isinstance(last_exc, HTTPError):
             raise self._build_http_error(last_exc, url, last_exc_body) from last_exc
         raise OTBRConnectionError(
-            f"Failed to reach OTBR API at {url}: {last_exc}"
+            f"Failed to reach OTBR API at {url}: {type(last_exc).__name__}"
         ) from last_exc
 
     def _request_timeout(

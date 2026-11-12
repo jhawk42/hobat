@@ -1402,6 +1402,57 @@ def test_thread_network_info_without_output_reports_not_requested(monkeypatch, c
     assert "not-logged" not in caplog.text
 
 
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("response", [
+    "Error: command timed out after 30s", "error 7: NotFound", "", "Done",
+    "unknown payload", "Unknown: value", None,
+])
+def test_thread_network_info_rejects_failed_dataset_without_publication(
+    monkeypatch, tmp_path, caplog, existing, response
+):
+    output = tmp_path / OTBR_CLI_THREAD_NETWORK_INFO_FILENAME
+    sidecar = util_data.network_scope_path(output)
+    if existing:
+        output.write_bytes(b'{"networkName":"previous"}')
+        sidecar.write_bytes(b'{"previous":"scope"}')
+    replies = iter(["fd00:1:2:3::/64\nDone", "fd00:4:5:6::/64\nDone", response])
+    monkeypatch.setattr(thread_info.util_network.util_ot_ctl, "exec_ot_ctl", lambda _: next(replies))
+    monkeypatch.setattr(thread_info, "save_final_json", lambda *a, **k: pytest.fail("unexpected publication"))
+    assert thread_info.main(["--datadir", str(tmp_path)]) == 5
+    if existing:
+        assert output.read_bytes() == b'{"networkName":"previous"}'
+        assert sidecar.read_bytes() == b'{"previous":"scope"}'
+    else:
+        assert not output.exists()
+        assert not sidecar.exists()
+
+
+def test_meshdiag_topology_enrichment_uses_full_cidr(monkeypatch):
+    address = "fda5:494c:9a12::1234"
+    monkeypatch.setattr(meshdiag_topology.util_network, "fetch_omr_prefix", lambda: pytest.fail("unexpected query"))
+    rows = meshdiag_topology.enrich_topology_routers(
+        [{"id": "01", "ipv6_addrs": [address]}],
+        {"prefix_omr": "fda5:494c:9a12:0::/64", "prefix_omr_ipv6addr_prefix": "fda5:494c:9a12:0"},
+    )
+    assert rows[0]["omr_ipv6_addr"] == address
+
+
+def test_multicast_enrichment_passes_full_cidr_through_existing_queries(monkeypatch):
+    address = "fda5:494c:9a12::1234"
+    calls = []
+    monkeypatch.setattr(networkdiag.util_ot_ctl, "exec_ot_ctl", lambda command: calls.append(command) or "Done")
+    monkeypatch.setattr(networkdiag.time, "sleep", lambda _: None)
+    monkeypatch.setattr(networkdiag, "parse_multicast_diag_output", lambda *a, **k: {
+        "0x0400": {"extaddr": "0011223344556677", "rloc16": "0x0400", "ipv6_addrs": [address]},
+    })
+    result = networkdiag.fetch_network_diag_multicast(
+        "ff03::1", thread_network_info={"prefix_omr": "fda5:494c:9a12:0::/64"},
+    )
+    assert result["0x0400"]["omr_ipv6_addr"] == address
+    assert len(calls) == 4
+    assert all(command.startswith("networkdiagnostic get ") for command in calls)
+
+
 def test_meshdiag_empty_parsed_output_keeps_empty_result_policy(monkeypatch, caplog, tmp_path):
     caplog.set_level(logging.INFO)
     records = []

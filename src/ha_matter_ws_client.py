@@ -128,16 +128,25 @@ class HaMatterWsClient:
             self._reader_task = asyncio.create_task(self._reader_loop())
             return self
         except asyncio.CancelledError:
-            await self.close()
+            await self._close_failed_entry()
             raise
-        except MatterWsContractError:
-            await self.close()
+        except (MatterWsContractError, MatterWsTransportError):
+            await self._close_failed_entry()
             raise
         except (OSError, asyncio.TimeoutError, websockets.WebSocketException) as exc:
-            await self.close()
+            await self._close_failed_entry()
             raise MatterWsTransportError(
                 f"Unable to establish Matter WebSocket session: {exc}"
             ) from exc
+
+    async def _close_failed_entry(self) -> None:
+        try:
+            await asyncio.wait_for(self.close(), timeout=self.connect_timeout)
+        except (OSError, asyncio.TimeoutError, websockets.WebSocketException) as exc:
+            logging.warning(
+                "Matter WebSocket failed-entry cleanup incomplete: error_type=%s",
+                type(exc).__name__,
+            )
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         await self.close()
@@ -154,8 +163,9 @@ class HaMatterWsClient:
             self._event_condition.notify_all()
         self._fail_pending(MatterWsTransportError("Matter WebSocket session closed"))
         if self._websocket is not None:
-            await self._websocket.close()
+            websocket = self._websocket
             self._websocket = None
+            await websocket.close()
 
     def _next_message_id(self) -> str:
         self._message_id += 1

@@ -549,11 +549,7 @@ def fetch_network_diag_multicast(
         collection_context = create_diagnostic_collection_context()
 
     # Get OMR prefix from thread_network_info
-    omr_ipv6addr_prefix = (
-        thread_network_info["prefix_omr_ipv6addr_prefix"]
-        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
-        else None
-    )
+    omr_ipv6addr_prefix = util_network.resolve_omr_network(thread_network_info)
 
     # Get meshlocal prefix from thread_network_info
     meshlocal_prefix = (
@@ -2354,11 +2350,7 @@ def fetch_network_diag_topology(
     extaddr_to_rloc = {}
 
     # 2. Get OMR prefix
-    omr_ipv6addr_prefix = (
-        thread_network_info["prefix_omr_ipv6addr_prefix"]
-        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
-        else None
-    )
+    omr_ipv6addr_prefix = util_network.resolve_omr_network(thread_network_info)
 
     # 3. Get meshlocal prefix / rloc prefix from thread_network_info for building RLOC IPv6 addresses
     meshlocal_prefix = (
