@@ -71,6 +71,9 @@ EXPECTED = (
     (None,
      "d369ccc7cca9e30cd2016ac33213039343ef94d9d224ea73d2ffd2dbcb548dd6",
      "1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09"),
+    ("7dcbdf55b3bbcb083e0974f6bfcd485e3bb8dc36",
+     "ee673b43a09f1ed085d9d1026069205ada8624a362c177dab13317f255ecb947",
+     "bef3b4accb98e9c60d9ef7bcc75232caa3f20fa06ed1dbbc77e1e8ec2852a0b7"),
     ("65fb5c69690040bddc0af3fbeb10618c8a1760c2",
      "c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011",
      "1a99aac03615857a4d0c33019c227b9c732a867e473fd1624c4d938e122a8f09"),
@@ -119,8 +122,8 @@ def _resolve(resolver, dataset_id=DATASET_ID, **kwargs):
     return resolver.resolve_source(dataset_id, "otbr-cli", PROFILE_ID, SAMPLE_CONTRACT, **kwargs)
 
 
-def test_all_sixteen_exact_snapshots_and_original_policy_metadata(resolver):
-    assert len(resolver.revisions) == 16
+def test_all_seventeen_exact_snapshots_and_original_policy_metadata(resolver):
+    assert len(resolver.revisions) == 17
     assert len(resolver.declared_dataset_ids) == 23
     for revision, (commit, snapshot, projection) in zip(resolver.revisions, EXPECTED, strict=True):
         assert revision.commit == commit
@@ -148,7 +151,8 @@ def test_all_sixteen_exact_snapshots_and_original_policy_metadata(resolver):
     assert all(revision.capture_kind is None for revision in resolver.revisions[:8])
     assert resolver.revisions[13].capture_kind is None
     assert resolver.revisions[14].capture_kind is None
-    assert resolver.revisions[15].capture_kind == "worktree"
+    assert resolver.revisions[15].capture_kind is None
+    assert resolver.revisions[16].capture_kind == "worktree"
     assert resolver.revisions[3].manifest_digest != resolver.revisions[4].manifest_digest
     assert resolver.revisions[3].health_contract_digest == resolver.revisions[4].health_contract_digest
     assert resolver.current.is_current
@@ -181,11 +185,12 @@ def test_unified_exact_current_support_and_independent_vectors(resolver, dataset
         resolver.current.revision_id,
         "manifest-sha256:c74eca00bf7ba2175c2ae1df84e485e025a2fa27cb1c220a505d4bc484bb6011",
         "manifest-sha256:d369ccc7cca9e30cd2016ac33213039343ef94d9d224ea73d2ffd2dbcb548dd6",
+        "manifest-sha256:ee673b43a09f1ed085d9d1026069205ada8624a362c177dab13317f255ecb947",
     )))
     previous = resolver.resolve_source(
         dataset_id, dataset.datasource_id, dataset.health_profile.profile_id,
         "comparison-v1-unified",
-        revision_id="manifest-sha256:40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f",
+        revision_id="manifest-sha256:ee673b43a09f1ed085d9d1026069205ada8624a362c177dab13317f255ecb947",
     )
     assert previous.source_contract_digest == replay_digest
     assert resolver.resolve_target(previous, "comparison-v1-unified").reason is None

@@ -139,7 +139,7 @@ def test_reviewed_current_manifest_projection_and_archive_agree() -> None:
     resolver = load_manifest_history()
     current = load_health_manifest()
     assert resolver.current.datasets == current.datasets
-    assert resolver.current.manifest_digest == "ee673b43a09f1ed085d9d1026069205ada8624a362c177dab13317f255ecb947"
+    assert resolver.current.manifest_digest == "43cdeb81065f5241ba0fa328c4eb63ffbdfb8dda231afc66eaca0ec3e71b94a0"
     assert resolver.current.health_contract_digest == "bef3b4accb98e9c60d9ef7bcc75232caa3f20fa06ed1dbbc77e1e8ec2852a0b7"
     assert canonical_digest(health_projection(resolver.current.manifest)) == resolver.current.health_contract_digest
     assert resolver.current.revision_id not in {revision.revision_id for revision in resolver.revisions}

@@ -1022,6 +1022,12 @@ assert.ok(
     ].includes(entry.value))
     .every((entry) => entry.defaultLinkFilter === "all_links"),
 );
+const haUnified = DATASET_REGISTRY.find((entry) => entry.value === "ha_matter_ws_unified");
+const haThreadTopology = DATASET_REGISTRY.find((entry) => entry.value === "ha_matter_ws_thread_topology");
+assert.equal(haUnified.defaultPhysicsProfile, "mesh-balanced");
+assert.equal(haUnified.defaultLinkFilter, "all_links");
+assert.equal(haUnified.defaultPhysicsProfile, haThreadTopology.defaultPhysicsProfile);
+assert.equal(haUnified.defaultLinkFilter, haThreadTopology.defaultLinkFilter);
 assert.ok(DATASET_REGISTRY.every((dataset) => ADAPTOR_HANDLERS[dataset.adaptor]));
 for (const dataset of DATASET_REGISTRY) {
   const finalRawFiles = dataset.files.map((_, index) =>
