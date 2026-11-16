@@ -26,6 +26,7 @@
     "device.betterPartitionAttachAttempts": ["metric", "value", "thresholds"],
     "device.totalParentPartitionChanges": ["metric", "value", "thresholds"],
     "device.routerRolePercent": ["metric", "value", "thresholds"],
+    "device.routingRolePercent": ["metric", "value", "thresholds", "trackedTimeMs", "minimumTrackedTimeMs"],
     "device.detachedDisabledPercent": ["metric", "value", "thresholds"],
     "device.totalMacErrorRatio": ["metric", "value", "denominator", "unstableThreshold"],
     "device.totalMacDiscardRatio": ["metric", "value", "denominator", "unstableThreshold"],
@@ -324,6 +325,22 @@
       "thresholdKeys": ["thresholds.routerRolePercent"],
       "action": "Compare against a future observation and the device's intended role.",
       "verify": "Process another complete observation and compare the delta or trend."
+    },
+    {
+      "ruleId": "device.routingRolePercent",
+      "order": 2105,
+      "title": "Routing-Role Time Since Reset",
+      "description": "Assesses cumulative Router plus Leader participation after at least ten minutes of tracked time; legitimate child-role time is not a connectivity failure.",
+      "evidenceKind": "since-reset",
+      "sourceRequirements": ["timeStatistics"],
+      "scopes": ["device"],
+      "roles": ["router", "leader"],
+      "relationshipTypes": [],
+      "requiredCapability": "resilience",
+      "materiality": "informational",
+      "thresholdKeys": ["thresholds.routerRolePercent"],
+      "action": "For low participation, compare newer observations and the device's intended role before investigating a fault.",
+      "verify": "Use a newer cached observation with at least ten minutes of total tracked time and valid Router and Leader times; processing the same snapshot is not a new sample."
     },
     {
       "ruleId": "device.detachedDisabledPercent",

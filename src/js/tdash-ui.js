@@ -3513,6 +3513,13 @@ function ensureFindingRosterActionEligibility(model, assessment) {
   }
 }
 
+function findingAffectedItemSelector(group, findingId, endpointId) {
+  const deviceSelector = endpointId ? `[data-device-id="${CSS.escape(endpointId)}"]` : "";
+  const findingSelector = group.scope === "device" && endpointId
+    ? "" : `[data-finding-id="${CSS.escape(findingId)}"]`;
+  return `.health-affected-select${findingSelector}${deviceSelector}`;
+}
+
 function renderSelectedHealthFinding() {
   if (healthInsightsTab !== "findings" || !healthInsightsViewState.detailsOpen
       || !healthInsightsViewState.selectedGroupId) return;
@@ -3586,8 +3593,7 @@ function renderSelectedHealthFinding() {
       };
       renderSelectedHealthFinding();
       requestAnimationFrame(() => document.querySelector(
-        `.health-affected-select[data-finding-id="${CSS.escape(findingId)}"]`
-          + (endpointId ? `[data-device-id="${CSS.escape(endpointId)}"]` : ""),
+        findingAffectedItemSelector(group, findingId, endpointId),
       )?.focus({ preventScroll: true }));
     },
     showTopology: (selectedGroupId) => navigateToHealthTargets(
@@ -3925,8 +3931,7 @@ function returnToHealthFinding() {
           ? `[data-finding-id="${CSS.escape(context.findingId)}"]`
           : "")
       : findingId
-        ? `.health-affected-select[data-finding-id="${CSS.escape(findingId)}"]`
-          + (endpointId ? `[data-device-id="${CSS.escape(endpointId)}"]` : "")
+        ? findingAffectedItemSelector(group, findingId, endpointId)
         : `.health-finding-select[data-group-id="${CSS.escape(context.groupId)}"]`;
     (returnTarget || document.querySelector(focusSelector))?.focus({ preventScroll: true });
   });

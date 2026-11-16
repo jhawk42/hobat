@@ -2435,6 +2435,39 @@ def test_multi_endpoint_finding_projects_and_inspects_each_canonical_device() ->
       const collapsed = toggleHealthFindingEndpointSelection(
         switched.findingId, switched.endpointId, "finding-1", "extaddr:2",
       );
+      const sourceGroup = {
+        ...group, count: 6,
+        findings: [1, 2].flatMap((device) => [1, 2, 3].map((source) => ({
+          ...finding,
+          findingId: `finding-${device}-${source}`, scope: "device",
+          summary: `Device ${device}, source ${source}`,
+          deviceIds: [`extaddr:${device}`], relationshipIds: [], routerEndpoints: [],
+          endpoints: [{deviceId: `extaddr:${device}`, displayName: "Shared label"}],
+          sourceFiles: [`source-${source}.json`], evidence: {value: device * 10 + source},
+        }))),
+      };
+      const sourceModel = projectHealthFindingDetail(sourceGroup, "finding-1-2", "extaddr:1");
+      const sourceContainer = new Element("section");
+      const sourceInspected = [];
+      renderHealthFindingDetails(sourceContainer, sourceModel, {
+        inspectableDeviceIds: new Set(["extaddr:1", "extaddr:2"]),
+        inspectDevice: (...args) => sourceInspected.push(args),
+      });
+      const sourceEntries = sourceContainer.children.find((child) =>
+        child.children[0]?.textContent === "Affected items",
+      ).children[1].children;
+      const sourceDetails = sourceEntries[0].children[1];
+      const sourceRecords = sourceDetails.children.filter(
+        (child) => child.className === "health-source-finding",
+      );
+      sourceDetails.children.find((child) => child.textContent === "Inspect device")
+        ?.listeners.click();
+      const sourceSelection = toggleHealthFindingEndpointSelection(
+        "finding-1-2", "extaddr:1", sourceModel.items[0].findingId, "extaddr:1",
+      );
+      const collapsedSources = projectHealthFindingDetail(
+        sourceGroup, sourceSelection.findingId, sourceSelection.endpointId,
+      );
       console.log(JSON.stringify({
         entries: model.items.map(({label, endpointId, isExpanded}) => [label, endpointId, isExpanded]),
         joinedLabels: model.items.some(({label}) => label.includes(",")),
@@ -2442,6 +2475,21 @@ def test_multi_endpoint_finding_projects_and_inspects_each_canonical_device() ->
         relatedDevices: model.relatedDevices.map(({deviceId, association}) => [deviceId, association]),
         relatedInspected, inspectName: inspectButton.attributes["aria-label"],
         inspected, selected, comparisonEnabled, switched, collapsed,
+        sourceGroups: {
+          devices: sourceModel.items.map((item) => item.endpointId),
+          records: sourceModel.items.map((item) => item.sourceItems?.length),
+          expanded: sourceModel.items.map((item) => item.isExpanded),
+          count: sourceContainer.children[1].children[1].textContent,
+          sourceHeadings: sourceRecords.map((record) => record.children[0].textContent),
+          evidence: sourceRecords.map((record) => record.children.find(
+            (child) => child.tagName === "dl",
+          )?.children[1].textContent),
+          inspected: sourceInspected,
+          collapsed: collapsedSources.items.map((item) => item.isExpanded),
+          relationshipEntries: projectHealthFindingDetail({
+            ...sourceGroup, scope: "relationship",
+          }).items.length,
+        },
       }));
     """
     completed = subprocess.run(
@@ -2469,6 +2517,20 @@ def test_multi_endpoint_finding_projects_and_inspects_each_canonical_device() ->
         "selected": [["finding-1", "extaddr:1"]],
       "switched": {"findingId": "finding-1", "endpointId": "extaddr:2"},
       "collapsed": {"findingId": None, "endpointId": None},
+      "sourceGroups": {
+          "devices": ["extaddr:1", "extaddr:2"],
+          "records": [3, 3],
+          "expanded": [True, False],
+          "count": "2 devices · 6 source findings",
+          "sourceHeadings": [
+              "Source: source-1.json", "Source: source-2.json", "Source: source-3.json",
+          ],
+          "evidence": ["11", "12", "13"],
+          "inspected": [["extaddr:1", "finding-1-2", "extaddr:1",
+              "finding-inspect:finding-1-2:extaddr:1"]],
+          "collapsed": [False, False],
+          "relationshipEntries": 6,
+      },
     }
 
 

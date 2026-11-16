@@ -1658,6 +1658,12 @@ div.vis-network div.vis-navigation div.vis-button:focus-visible,
 .health-affected-details { padding: 0 8px; }
 .health-affected-details[hidden] { display: none; }
 .health-affected-evidence { margin-top: 8px; }
+.health-source-finding + .health-source-finding {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.health-source-finding h4 { margin: 8px 0; font-size: 12px; overflow-wrap: anywhere; }
 
 #data-table tbody tr[tabindex="-1"]:focus-visible {
   outline: 2px solid var(--accent, #1769aa);

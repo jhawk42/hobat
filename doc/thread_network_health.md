@@ -892,6 +892,7 @@ also project catalog-owned `evidenceKind`, `materiality`, `actionKey`, and
 | `device.betterPartitionAttachAttempts` | Better-Partition Attach Attempts Since Counter Reset | Classifies the observed since-reset better-partition attach attempt count directly; the count alone does not establish current instability. |
 | `device.totalParentPartitionChanges` | Parent and Partition Changes Since Counter Reset | Reports a cumulative combined parent and partition change counter. |
 | `device.routerRolePercent` | Low Router-Role Time Since Reset | Reports low cumulative Router-role time for an observed Router or Leader. |
+| `device.routingRolePercent` | Routing-Role Time Since Reset | Assesses cumulative Router plus Leader participation after at least ten minutes of tracked time; legitimate child-role time is not a connectivity failure. |
 | `device.detachedDisabledPercent` | Detached or Disabled Time Since Reset | Reports cumulative detached or disabled uptime without claiming current detachment. |
 | `device.totalMacErrorRatio` | High Device MAC Error Ratio | Reports a current device-wide MAC error ratio with a valid packet denominator. |
 | `device.totalMacDiscardRatio` | High Device MAC Discard Ratio | Reports a current device-wide MAC discard ratio with a valid packet denominator. |
@@ -899,6 +900,46 @@ also project catalog-owned `evidenceKind`, `materiality`, `actionKey`, and
 | `relationship.bidirectional-lq3` | Strong Bidirectional Link (LQ3) | Reports a relationship where both observed directions have LQ3. |
 | `relationship.directional-quality` | Link Quality or Delivery Degradation | Reports current directional LQ, delivery, RSS, or margin degradation using relationship-specific policy and path evidence. |
 | `relationship.queued-messages` | Indirect Messages Queued for Child | Classifies the current queued-message count on one parent-child relationship; one snapshot does not establish persistence or message age. |
+
+### Routing-role participation
+
+New cache-only assessments use `snapshot-v22` and report **Routing-Role Time
+Since Reset** for observed Routers and Leaders that report raw timing counters.
+Devices whose firmware does not report those counters are omitted from this
+finding, not marked Unknown. Reported but partial or invalid counters still
+produce Unknown, as does a tracked duration below ten minutes. The percentage is
+`100 * (Router time + Leader time) / tracked time`; OpenThread role-time counters
+are milliseconds. Both role times and a positive tracked duration must be
+present, finite, nonnegative, and consistent with the total.
+
+| Combined routing-role participation | Status |
+|---|---|
+| At least 80% | Strong |
+| At least 50%, below 80% | Moderate |
+| Below 50% | Poor |
+| Less than ten minutes tracked (600,000 ms), or missing/invalid timing evidence | Unknown |
+
+The bands reuse the policy's `thresholds.routerRolePercent` values
+(`unstableBelow` and `highBelow`). Strong emits a positive finding. Confidence
+remains Low and materiality remains Informational: these cumulative
+participation grades do not establish current connectivity or independently
+downgrade network health. Legitimate child-role operation can lower the
+percentage without indicating a fault. Unknown explains whether the sample is
+still warming up or its timing evidence is incomplete or invalid.
+
+Raw role times are retained in the assessment's evaluation inputs, without
+changing existing observation metrics or sample contracts. Retained
+assessments without those inputs keep their original evaluator, Router-only
+finding, and replay semantics; they are not relabeled or rewritten. Refresh
+Health processes the currently cached evidence under the new rule. A newer
+source snapshot, not another processing pass, is needed to advance tracked time.
+
+Each rule change has its own evaluator identity, so processing the same
+cached observation creates a new assessment instead of reusing an older one.
+Retained `snapshot-v20` assessments keep their original one-hour warm-up.
+Retained `snapshot-v21` assessments keep the ten-minute warm-up and Unknown
+findings for devices without timing counters. Neither is overwritten, and both
+retain their replay semantics. Comparisons require matching evaluator versions.
 
 ## Storage Safety
 
@@ -1319,6 +1360,10 @@ Work, Needs Attention, and Going Well without reclassifying them in the
 browser. Status, scope, and evidence-kind filters narrow the grouped findings;
 each expanded finding includes structured evidence, materiality, confidence,
 impact, action, verification, and source provenance.
+Device-scope details list each affected device once. When several source
+findings refer to the same device, the header distinguishes device and source
+finding counts, and expanding that device shows each source's labeled evidence.
+Device inspection and roster actions remain attached to the canonical device.
 
 Available finding actions can select attributed devices or relationships in
 Topology, filter matching rows in Table, inspect one device, compare two

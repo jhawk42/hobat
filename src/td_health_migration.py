@@ -24,8 +24,8 @@ from td_health_evaluator import (
     EVALUATOR_VERSION,
     UNIFIED_EVALUATOR_VERSION,
     MESH_UNIFIED_EVALUATOR_VERSION,
-    evaluator_version_for_dataset,
-    evaluator_version_for_unified_context,
+    ROUTING_ROLE_EVALUATOR_VERSIONS,
+    evaluator_version_for_inputs,
     evaluate_observation,
     evaluation_inputs_from_payload,
 )
@@ -61,6 +61,7 @@ from td_health_sqlite import (
 _SUPPORTED_EVALUATORS = frozenset({
     "snapshot-v10", "snapshot-v11", "snapshot-v15", "snapshot-v16", "snapshot-v17",
     EVALUATOR_VERSION, UNIFIED_EVALUATOR_VERSION, MESH_UNIFIED_EVALUATOR_VERSION,
+    *ROUTING_ROLE_EVALUATOR_VERSIONS,
 })
 _DEVICE_ID_PREFIX = "extaddr:"
 
@@ -828,12 +829,9 @@ def inventory_health_history(
                 adapter_id = target.adapter_id
                 retained_context = json.loads(source["reproduction_context_json"])
                 unified_health = retained_context.get("unifiedHealth")
-                target_evaluator_version = (
-                    evaluator_version_for_unified_context(unified_health)
-                    if source["sample_contract_version"] == "comparison-v1-unified"
-                    else evaluator_version_for_dataset(
-                        dataset.dataset_id, source["sample_contract_version"]
-                    )
+                target_evaluator_version = evaluator_version_for_inputs(
+                    dataset.dataset_id, source["sample_contract_version"], inputs,
+                    unified_health,
                 )
                 item_target_digest = target_contract_digest(
                     dataset, source["sample_contract_version"],

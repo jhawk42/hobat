@@ -1372,7 +1372,7 @@ def test_file_mode_uses_bound_rest_recovery_and_exposes_coverage(tmp_path, datas
     )
 
     assert result.observation.completeness is Completeness.COMPLETE
-    assert result.assessment.evaluator_version == "snapshot-v17"
+    assert result.assessment.evaluator_version == "snapshot-v22"
     coverage = result.assessment.coverage["restDiagnostics"]
     assert coverage["summary"]["recoveredChildren"] == 1
     assert coverage["summary"]["recoveredRouters"] == 1
@@ -1893,6 +1893,205 @@ def test_mle_and_time_statistics_are_extracted_as_metric_samples(tmp_path) -> No
     assert metrics_by_name["totalParentPartitionChanges"].value == 11
     assert metrics_by_name["routerRolePercent"].value == 40.0
     assert metrics_by_name["detachedDisabledPercent"].value == 3.0
+
+
+@pytest.mark.parametrize(("tracked", "router", "leader", "status", "reason"), [
+    (3_600_000, 3_600_000, 0, "strong", None),
+    (3_600_000, 180_000, 3_420_000, "strong", None),
+    (3_600_000, 2_880_000, 0, "strong", None),
+    (3_600_000, 2_879_999, 0, "moderate", None),
+    (3_600_000, 1_800_000, 0, "moderate", None),
+    (3_600_000, 1_799_999, 0, "poor", None),
+    (600_000, 600_000, 0, "strong", None),
+    (600_000, 300_000, 0, "moderate", None),
+    (600_000, 0, 0, "poor", None),
+    (599_999, 0, 0, "unknown", "insufficient-tracked-time"),
+    (0, 0, 0, "unknown", "inconsistent-role-times"),
+    (3_600_000, 3_600_000, 1, "unknown", "inconsistent-role-times"),
+    (3_600_000, -1, 0, "unknown", "missing-or-invalid-role-times"),
+    (3_600_000, 0, None, "unknown", "missing-or-invalid-role-times"),
+    (None, 0, 0, "unknown", "missing-or-invalid-role-times"),
+    (3_600_000, True, 0, "unknown", "missing-or-invalid-role-times"),
+])
+def test_routing_role_grades_raw_times_and_ten_minute_warmup(
+    tmp_path, tracked, router, leader, status, reason,
+) -> None:
+    _write_seed(tmp_path, [{
+        "extAddress": "8672766ae0578187", "role": "leader",
+        "timeStatistics": {
+            "trackedTime": tracked, "routerTime": router, "leaderTime": leader,
+            "routerPct": 5.0,
+        },
+    }])
+    result = build_processing_result(
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
+        policy=load_health_policy(), allow_partial=True,
+    )
+    findings = result.assessment.findings
+    finding = next(item for item in findings if item.rule_id == "device.routingRolePercent")
+    assert finding.status.value == status
+    assert finding.evidence["reasonCode"] == reason
+    assert finding.evidence["minimumTrackedTimeMs"] == 600_000
+    assert finding.evidence["materiality"] == "informational"
+    assert finding.confidence.value == "low"
+    assert not any(item.rule_id == "device.routerRolePercent" for item in findings)
+    if reason is None:
+        assert finding.evidence["value"] == pytest.approx((router + leader) / tracked * 100)
+    elif reason == "insufficient-tracked-time":
+        assert "less than ten minutes" in finding.summary
+    inputs = evaluation_inputs_from_payload(result.assessment.reproduction_context["evaluationInputs"])
+    baseline = evaluate_observation(
+        result.observation, load_health_policy(),
+        profile=load_health_manifest().dataset("otbr_cli_diagnostics_fetch").health_profile,
+        sample_contract_version=result.assessment.sample_contract_version,
+        evaluation_inputs=replace(inputs, routing_role_samples=None),
+    )
+    assert result.assessment.status is baseline.status
+    assert result.assessment.evaluator_version == "snapshot-v22"
+
+
+@pytest.mark.parametrize("times", [
+    {"time_statistics": {"tracked_time": 3_600_000, "router_time": 180_000, "leader_time": 3_420_000}},
+    {"mleCounters": {"totalTrackingTime": 3_600_000, "routerRoleTime": 180_000, "leaderRoleTime": 3_420_000}},
+])
+@pytest.mark.parametrize("without_times", [
+    {},
+    {"timeStatistics": {}},
+    {"timeStatistics": {"routerPct": 5.0}},
+    {"mleCounters": {"newParentCount": 1}},
+])
+def test_routing_role_supports_cli_and_rest_times_without_grading_children(
+    tmp_path, times, without_times,
+) -> None:
+    _write_seed(tmp_path, [
+        {"extAddress": "1111111111111111", "role": "router", **times},
+        {"extAddress": "2222222222222222", "role": "child", **times},
+        {"extAddress": "3333333333333333", "role": "router", **without_times},
+        {"extAddress": "4444444444444444", "role": "router",
+         "timeStatistics": {"trackedTime": 600_000, "routerTime": 600_000}},
+    ])
+    result = build_processing_result(
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
+        policy=load_health_policy(), allow_partial=True,
+    )
+    findings = {
+        finding.device_ids[0]: finding
+        for finding in result.assessment.findings
+        if finding.rule_id == "device.routingRolePercent"
+    }
+    assert findings["extaddr:1111111111111111"].status is HealthStatus.STRONG
+    assert "extaddr:3333333333333333" not in findings
+    assert findings["extaddr:4444444444444444"].status is HealthStatus.UNKNOWN
+    assert "extaddr:2222222222222222" not in findings
+
+
+def test_routing_role_refresh_preserves_retained_observation_and_replay(tmp_path) -> None:
+    _write_seed(tmp_path, [{
+        "extAddress": "8672766ae0578187", "role": "leader",
+        "timeStatistics": {
+            "trackedTime": 1_800_000, "routerTime": 90_000,
+            "leaderTime": 1_710_000, "routerPct": 5.0,
+        },
+    }, {"extAddress": "8888888888888888", "role": "router"}])
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    policy = load_health_policy()
+    current = build_processing_result(
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
+        policy=policy, store=store, allow_partial=True,
+    )
+    profile = load_health_manifest().dataset("otbr_cli_diagnostics_fetch").health_profile
+    inputs = evaluation_inputs_from_payload(current.assessment.reproduction_context["evaluationInputs"])
+    legacy_inputs = replace(inputs, routing_role_samples=None)
+    legacy = evaluate_observation(
+        current.observation, policy, profile=profile, evaluation_inputs=legacy_inputs,
+        sample_contract_version=current.assessment.sample_contract_version,
+    )
+    assert legacy.evaluator_version == "snapshot-v14"
+    assert next(f for f in legacy.findings if f.rule_id == "device.routerRolePercent").status is HealthStatus.UNKNOWN
+    assert "routingRoleSamples" not in legacy.reproduction_context["evaluationInputs"]
+    store.save_processing_result(current.observation, legacy, prepare=True)
+    one_hour = evaluate_observation(
+        current.observation, policy, profile=profile, evaluation_inputs=inputs,
+        sample_contract_version=current.assessment.sample_contract_version,
+        evaluator_version="snapshot-v20",
+    )
+    one_hour_finding = next(
+        f for f in one_hour.findings
+        if f.rule_id == "device.routingRolePercent"
+        and "extaddr:8672766ae0578187" in f.device_ids
+    )
+    assert one_hour_finding.status is HealthStatus.UNKNOWN
+    assert one_hour_finding.evidence["minimumTrackedTimeMs"] == 3_600_000
+    assert "less than one hour" in one_hour_finding.summary
+    assert "at least one hour" in one_hour_finding.why_it_matters
+    assert "at least one hour" in one_hour_finding.verify
+    store.save_processing_result(current.observation, one_hour, prepare=True)
+    ten_minute = evaluate_observation(
+        current.observation, policy, profile=profile, evaluation_inputs=inputs,
+        sample_contract_version=current.assessment.sample_contract_version,
+        evaluator_version="snapshot-v21",
+    )
+    assert next(
+        f for f in ten_minute.findings
+        if f.rule_id == "device.routingRolePercent"
+        and "extaddr:8888888888888888" in f.device_ids
+    ).status is HealthStatus.UNKNOWN
+    store.save_processing_result(current.observation, ten_minute, prepare=True)
+    with closing(store._connect()) as connection:
+        originals = {
+            assessment.assessment_id: tuple(connection.execute(
+                "SELECT * FROM assessments WHERE assessment_id=?",
+                (assessment.assessment_id,),
+            ).fetchone())
+            for assessment in (legacy, one_hour, ten_minute)
+        }
+    inventory = inventory_health_history(
+        SQLiteHealthStore(store.path, read_only=True), target_policy=policy,
+        dataset_ids=("otbr_cli_diagnostics_fetch",),
+    )
+    assert inventory.items[0].source_assessment_id == ten_minute.assessment_id
+    assert inventory.items[0].eligibility.value == "replayable-with-gaps"
+    refreshed = process_health(
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
+        policy=policy, store=store, allow_partial=True,
+    )
+    assert refreshed.observation.observation_id == current.observation.observation_id
+    assert refreshed.assessment.evaluator_version == "snapshot-v22"
+    assert refreshed.assessment.assessment_id not in originals
+    refreshed_finding = next(
+        f for f in refreshed.assessment.findings if f.rule_id == "device.routingRolePercent"
+    )
+    assert refreshed_finding.status is HealthStatus.STRONG
+    assert refreshed_finding.evidence["minimumTrackedTimeMs"] == 600_000
+    assert not any(
+        f.rule_id == "device.routingRolePercent" and "extaddr:8888888888888888" in f.device_ids
+        for f in refreshed.assessment.findings
+    )
+    repeated = process_health(
+        data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
+        policy=policy, store=store, allow_partial=True,
+    )
+    assert repeated.assessment.assessment_id == refreshed.assessment.assessment_id
+    assert store.latest_assessment(
+        current.observation.network_id, current.observation.dataset_id,
+    )["assessment_id"] == refreshed.assessment.assessment_id
+    with closing(store._connect()) as connection:
+        for assessment_id, original in originals.items():
+            assert tuple(connection.execute(
+                "SELECT * FROM assessments WHERE assessment_id=?", (assessment_id,),
+            ).fetchone()) == original
+        for assessment in (legacy, one_hour, ten_minute, refreshed.assessment):
+            observation, retained, _, _, _, replay_inputs = store._reassessment_inputs(
+                connection, assessment.assessment_id,
+            )
+            replay = evaluate_observation(
+                observation, policy, profile=profile, evaluation_inputs=replay_inputs,
+                sample_contract_version=assessment.sample_contract_version,
+                evaluator_version=retained.evaluator_version,
+            )
+            assert replay.assessment_id == assessment.assessment_id
+            assert replay.findings == assessment.findings
+            assert retained.evaluator_version == assessment.evaluator_version
 
 
 def test_mac_counter_ratios_remain_unit_ratios(tmp_path) -> None:

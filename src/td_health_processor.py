@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +32,7 @@ from td_health_observation_model import (
     MetricSample,
     Observation,
     RelationshipSample,
+    RoutingRoleSample,
     SourceEvidence,
     device_id_from_ext_address,
     network_id_from_ext_pan_id,
@@ -237,6 +239,57 @@ def _normalize_samples(
         tuple(sorted(projection.duplicate_relationship_ids)),
         device_ipv6_addresses,
     )
+
+
+def _routing_role_samples(
+    payloads: Mapping[str, Any], devices: tuple[DeviceSample, ...],
+) -> tuple[RoutingRoleSample, ...]:
+    eligible_ids = {
+        device.device_id for device in devices
+        if (device.role or "").lower() in {"router", "leader"}
+    }
+    samples: dict[tuple[str, str], RoutingRoleSample] = {}
+    for filename, payload in sorted(payloads.items()):
+        for raw_record in _records(payload):
+            record = normalize_input_record(raw_record, source=filename)
+            address = get_canonical_ext_address(record)
+            if not address or f"extaddr:{address}" not in eligible_ids:
+                continue
+            device_id = f"extaddr:{address}"
+            stats = record.get("timeStatistics")
+            if isinstance(stats, dict) and any(
+                key in stats for key in (
+                    "trackedTime", "tracked_time", "routerTime", "router_time",
+                    "leaderTime", "leader_time",
+                )
+            ):
+                values = tuple(
+                    stats[preferred] if preferred in stats else stats.get(alias)
+                    for preferred, alias in (
+                        ("trackedTime", "tracked_time"),
+                        ("routerTime", "router_time"),
+                        ("leaderTime", "leader_time"),
+                    )
+                )
+            else:
+                mle = record.get("mleCounters")
+                if not isinstance(mle, dict) or not any(
+                    key in mle for key in (
+                        "totalTrackingTime", "routerRoleTime", "leaderRoleTime",
+                    )
+                ):
+                    continue
+                values = tuple(mle.get(key) for key in (
+                    "totalTrackingTime", "routerRoleTime", "leaderRoleTime",
+                ))
+            times = tuple(
+                number if number is not None and math.isfinite(number) else None
+                for value in values for number in (_number(value),)
+            )
+            samples[(device_id, filename)] = RoutingRoleSample(
+                device_id, filename, *times,
+            )
+    return tuple(samples[key] for key in sorted(samples))
 
 
 def _partition_membership_inputs(
@@ -1427,6 +1480,7 @@ def build_processing_result(
         history_boundary=roster_inputs["historyBoundary"],
         partition_membership=partition_membership,
         partition_membership_evidence=partition_membership_evidence,
+        routing_role_samples=_routing_role_samples(available_finals, devices),
     )
     assessment = evaluate_observation(
         observation,

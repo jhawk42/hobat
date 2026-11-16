@@ -107,6 +107,15 @@ class MetricSample:
 
 
 @dataclass(frozen=True)
+class RoutingRoleSample:
+    device_id: str
+    source_file: str
+    tracked_time_ms: float | None
+    router_time_ms: float | None
+    leader_time_ms: float | None
+
+
+@dataclass(frozen=True)
 class Finding:
     finding_id: str
     rule_id: str
@@ -200,6 +209,7 @@ class EvaluationInputs:
         )
     )
     partition_membership_evidence: Mapping[str, Any] | None = None
+    routing_role_samples: tuple[RoutingRoleSample, ...] | None = None
 
     def __post_init__(self) -> None:
         values = (

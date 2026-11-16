@@ -1121,9 +1121,10 @@ class SQLiteHealthStore:
         if row is None:
             return None
         unified = row["sample_contract_version"] == "comparison-v1-unified"
-        from td_health_evaluator import evaluator_version_for_dataset
-        current_contract = row["evaluator_version"] == evaluator_version_for_dataset(
-            row["dataset_id"], row["sample_contract_version"],
+        from td_health_evaluator import ROUTING_ROLE_EVALUATOR_VERSIONS, evaluator_version_for_dataset
+        current_contract = row["evaluator_version"] in (
+            *ROUTING_ROLE_EVALUATOR_VERSIONS,
+            evaluator_version_for_dataset(row["dataset_id"], row["sample_contract_version"]),
         )
         observation = (
             SQLiteHealthStore._retained_observation(connection, row, history=history)
@@ -3211,6 +3212,7 @@ class SQLiteHealthStore:
             row["dataset_id"], row["sample_contract_version"],
             context.get("evaluatorVersion"),
             unified_health=context.get("unifiedHealth"),
+            evaluation_inputs=evaluation_inputs,
         ):
             raise ReassessmentBaselineUnavailable(
                 "reassessment-baseline-unavailable: refresh health from retained snapshots before changing the roster"
@@ -3402,6 +3404,7 @@ class SQLiteHealthStore:
                 unified_health=unified_health,
                 rest_diagnostics=old_context.get("restDiagnostics"),
                 retained_assessment=replace(previous, findings=tuple(previous_findings)),
+                evaluator_version=previous.evaluator_version,
             )
             assessment_created = self._insert_assessment(connection, assessment)
             if assessment_created:

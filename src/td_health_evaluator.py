@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -22,6 +23,7 @@ from td_health_observation_model import (
     FindingScope,
     HealthStatus,
     Observation,
+    RoutingRoleSample,
 )
 from td_health_policy import HealthPolicy
 from td_health_manifest import HealthProfile
@@ -34,6 +36,12 @@ UNIFIED_EVALUATOR_VERSION = "snapshot-v18"
 MESH_UNIFIED_EVALUATOR_VERSION = "snapshot-v19"
 RETAINED_UNIFIED_EVALUATOR_VERSION = "snapshot-v17"
 REST_RECOVERY_EVALUATOR_VERSION = "snapshot-v17"
+RETAINED_ROUTING_ROLE_EVALUATOR_VERSION = "snapshot-v20"
+ROUTING_ROLE_EVALUATOR_VERSION = "snapshot-v22"
+ROUTING_ROLE_EVALUATOR_VERSIONS = frozenset({
+    RETAINED_ROUTING_ROLE_EVALUATOR_VERSION, "snapshot-v21", ROUTING_ROLE_EVALUATOR_VERSION,
+})
+MINIMUM_ROUTING_ROLE_TRACKED_TIME_MS = 600_000
 RETAINED_UNIFIED_EVALUATOR_VERSIONS = frozenset({
     RETAINED_UNIFIED_EVALUATOR_VERSION, UNIFIED_EVALUATOR_VERSION, MESH_UNIFIED_EVALUATOR_VERSION,
 })
@@ -80,7 +88,10 @@ def evaluator_version_for_unified_context(unified_health: Mapping[str, Any] | No
 def supports_retained_evaluator_version(
     dataset_id: str, sample_contract_version: str, evaluator_version: str,
     *, unified_health: Mapping[str, Any] | None = None,
+    evaluation_inputs: EvaluationInputs | None = None,
 ) -> bool:
+    if evaluation_inputs is not None and evaluation_inputs.routing_role_samples is not None:
+        return evaluator_version in ROUTING_ROLE_EVALUATOR_VERSIONS
     if sample_contract_version == "comparison-v1-unified":
         return (
             evaluator_version in RETAINED_UNIFIED_EVALUATOR_VERSIONS
@@ -89,6 +100,19 @@ def supports_retained_evaluator_version(
     return evaluator_version == evaluator_version_for_dataset(
         dataset_id, sample_contract_version,
     )
+
+
+def evaluator_version_for_inputs(
+    dataset_id: str,
+    sample_contract_version: str,
+    inputs: EvaluationInputs,
+    unified_health: Mapping[str, Any] | None = None,
+) -> str:
+    if inputs.routing_role_samples is not None:
+        return ROUTING_ROLE_EVALUATOR_VERSION
+    if sample_contract_version == "comparison-v1-unified":
+        return evaluator_version_for_unified_context(unified_health)
+    return evaluator_version_for_dataset(dataset_id, sample_contract_version)
 
 _DIRECT_THRESHOLD_COUNT_METRICS = frozenset(
     {"parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"}
@@ -117,7 +141,9 @@ EVALUATOR_THRESHOLD_OWNERS = {
     "thresholds.betterPartitionAttachAttempts": frozenset({"device.betterPartitionAttachAttempts"}),
     "thresholds.queuedMessages": frozenset({"relationship.queued-messages"}),
     "thresholds.totalParentPartitionChanges": frozenset({"device.totalParentPartitionChanges"}),
-    "thresholds.routerRolePercent": frozenset({"device.routerRolePercent"}),
+    "thresholds.routerRolePercent": frozenset({
+        "device.routerRolePercent", "device.routingRolePercent",
+    }),
     "thresholds.detachedDisabledPercent": frozenset({"device.detachedDisabledPercent"}),
     "thresholds.partitionDistribution": frozenset({"network.partition-distribution"}),
 }
@@ -645,6 +671,18 @@ def _evaluation_inputs_payload(inputs: EvaluationInputs) -> dict[str, Any]:
             dict(inputs.partition_membership_evidence)
             if inputs.partition_membership_evidence is not None else None
         ),
+        **({
+            "routingRoleSamples": [
+                {
+                    "deviceId": sample.device_id,
+                    "sourceFile": sample.source_file,
+                    "trackedTimeMs": sample.tracked_time_ms,
+                    "routerTimeMs": sample.router_time_ms,
+                    "leaderTimeMs": sample.leader_time_ms,
+                }
+                for sample in inputs.routing_role_samples
+            ],
+        } if inputs.routing_role_samples is not None else {}),
     }
 
 
@@ -685,6 +723,38 @@ def evaluation_inputs_from_payload(raw: object) -> EvaluationInputs:
         else EvaluationInputDomain(EvaluationInputState.NOT_APPLICABLE)
     )
     partition_evidence = raw.get("partitionMembershipEvidence")
+    routing_samples = None
+    if "routingRoleSamples" in raw:
+        items = raw["routingRoleSamples"]
+        if not isinstance(items, list):
+            raise ValueError("Invalid saved routing-role samples")
+        parsed_samples: list[RoutingRoleSample] = []
+        seen: set[tuple[str, str]] = set()
+        for item in items:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("deviceId"), str)
+                or not isinstance(item.get("sourceFile"), str)
+                or not item["deviceId"] or not item["sourceFile"]
+                or any(
+                    key not in item or item[key] is not None and (
+                        not isinstance(item[key], (int, float))
+                        or isinstance(item[key], bool)
+                        or not math.isfinite(item[key])
+                    )
+                    for key in ("trackedTimeMs", "routerTimeMs", "leaderTimeMs")
+                )
+            ):
+                raise ValueError("Invalid saved routing-role sample")
+            key = (item["deviceId"], item["sourceFile"])
+            if key in seen:
+                raise ValueError("Duplicate saved routing-role sample")
+            seen.add(key)
+            parsed_samples.append(RoutingRoleSample(
+                item["deviceId"], item["sourceFile"],
+                item["trackedTimeMs"], item["routerTimeMs"], item["leaderTimeMs"],
+            ))
+        routing_samples = tuple(parsed_samples)
     if partition_domain.state is EvaluationInputState.AVAILABLE:
         if not isinstance(partition_evidence, dict):
             raise ValueError("Invalid saved partition membership evidence")
@@ -774,6 +844,7 @@ def evaluation_inputs_from_payload(raw: object) -> EvaluationInputs:
         history_boundary=history_boundary,
         partition_membership=partition_domain,
         partition_membership_evidence=partition_evidence,
+        routing_role_samples=routing_samples,
     )
 
 
@@ -1045,6 +1116,119 @@ def _legacy_evaluation_inputs(
     )
 
 
+def _evaluate_routing_role_time(
+    observation: Observation,
+    policy: HealthPolicy,
+    profile: HealthProfile,
+    samples: tuple[RoutingRoleSample, ...],
+    evaluator_version: str,
+) -> list[Finding]:
+    rule_id = "device.routingRolePercent"
+    if not _profile_supports_rule(profile, rule_id):
+        return []
+    thresholds = _policy_value(policy, rule_id, "thresholds.routerRolePercent")
+    retained_one_hour = evaluator_version == RETAINED_ROUTING_ROLE_EVALUATOR_VERSION
+    minimum_tracked_time_ms = (
+        3_600_000 if retained_one_hour else MINIMUM_ROUTING_ROLE_TRACKED_TIME_MS
+    )
+    by_device: dict[str, list[RoutingRoleSample]] = {}
+    device_ids = {device.device_id for device in observation.devices}
+    source_files = {source.filename for source in observation.sources}
+    for sample in samples:
+        if sample.device_id not in device_ids or sample.source_file not in source_files:
+            raise ValueError("Routing-role sample does not belong to this observation")
+        by_device.setdefault(sample.device_id, []).append(sample)
+    findings: list[Finding] = []
+    for device in observation.devices:
+        if (device.role or "").lower() not in {"router", "leader"}:
+            continue
+        device_samples = by_device.get(device.device_id)
+        if not device_samples:
+            if evaluator_version not in {RETAINED_ROUTING_ROLE_EVALUATOR_VERSION, "snapshot-v21"}:
+                continue
+            device_samples = [RoutingRoleSample(device.device_id, "", None, None, None)]
+        for sample in device_samples:
+            tracked = sample.tracked_time_ms
+            router = sample.router_time_ms
+            leader = sample.leader_time_ms
+            value = None
+            status = HealthStatus.UNKNOWN
+            reason = None
+            if (
+                tracked is None or router is None or leader is None
+                or any(not math.isfinite(time) or time < 0 for time in (tracked, router, leader))
+            ):
+                reason = "missing-or-invalid-role-times"
+            elif tracked <= 0 or router + leader > tracked:
+                reason = "inconsistent-role-times"
+            elif tracked < minimum_tracked_time_ms:
+                reason = "insufficient-tracked-time"
+            else:
+                value = (router + leader) / tracked * 100
+                status = (
+                    HealthStatus.POOR if value < thresholds["highBelow"]
+                    else HealthStatus.MODERATE if value < thresholds["unstableBelow"]
+                    else HealthStatus.STRONG
+                )
+            summary = (
+                (
+                    "Routing-role participation is Unknown: less than one hour has "
+                    "been tracked since reset."
+                    if retained_one_hour
+                    else "Routing-role participation is Unknown: tracked time since reset "
+                    "is less than ten minutes."
+                )
+                if reason == "insufficient-tracked-time"
+                else "Routing-role participation is Unknown: complete, valid "
+                "Router, Leader, and tracked times are required."
+                if reason is not None
+                else f"Router + Leader time is {value:.1f}% of tracked time since reset; "
+                "this does not establish current connectivity."
+            )
+            finding = _finding(
+                observation,
+                rule_id="device.routingRolePercent",
+                status=status,
+                scope=FindingScope.DEVICE,
+                rank=(
+                    FindingRank.POOR if status is HealthStatus.POOR
+                    else FindingRank.MODERATE if status is HealthStatus.MODERATE
+                    else FindingRank.INFO
+                ),
+                summary=summary,
+                evidence={
+                    "metric": "routingRolePercent",
+                    "value": value,
+                    "unit": "percent",
+                    "thresholds": dict(thresholds),
+                    "routerTimeMs": router,
+                    "leaderTimeMs": leader,
+                    "trackedTimeMs": tracked,
+                    "minimumTrackedTimeMs": minimum_tracked_time_ms,
+                    "reasonCode": reason,
+                },
+                device_ids=(device.device_id,),
+                target_parts=(sample.source_file,) if sample.source_file else (),
+                source_files=(sample.source_file,) if sample.source_file else device.source_files,
+                source_requirement="timeStatistics",
+                confidence=Confidence.LOW,
+            )
+            if retained_one_hour:
+                finding = replace(
+                    finding,
+                    why_it_matters=(
+                        "Assesses cumulative Router plus Leader participation after at least "
+                        "one hour of tracked time; legitimate child-role time is not a connectivity failure."
+                    ),
+                    verify=(
+                        "Use a newer cached observation with at least one hour of tracked Router, "
+                        "Leader, and total time; processing the same snapshot is not a new sample."
+                    ),
+                )
+            findings.append(finding)
+    return findings
+
+
 def _evaluate_metrics(
     observation: Observation,
     policy: HealthPolicy,
@@ -1052,6 +1236,7 @@ def _evaluate_metrics(
     attachment_failed_device_ids: frozenset[str],
     *,
     include_findings: bool = True,
+    routing_role_time: bool = False,
 ) -> tuple[list[Finding], MetricFacts]:
     findings: list[Finding] = []
     metric_sources: dict[str, set[str]] = {}
@@ -1074,6 +1259,8 @@ def _evaluate_metrics(
             meshdiag_not_provided_device_ids.add(metric.device_id)
             continue
         if not include_findings:
+            continue
+        if routing_role_time and metric.metric == "routerRolePercent":
             continue
         metric_rule_id = f"device.{metric.metric}"
         if metric_rule_id not in HEALTH_RULE_CATALOG.rule_ids:
@@ -1632,6 +1819,7 @@ def _evaluate_observation_evidence(
     complete: bool,
     omr_prefix: str | None,
     device_ipv6_addresses: Mapping[str, tuple[str, ...]],
+    evaluator_version: str,
 ) -> tuple[list[Finding], TopologyFacts, MetricFacts]:
     findings: list[Finding] = []
     attachment_failed_device_ids = availability_facts.attachment_failed_device_ids
@@ -1650,9 +1838,14 @@ def _evaluate_observation_evidence(
     bridge_relationship_ids = topology_facts.bridge_relationship_ids
 
     metric_findings, metric_facts = _evaluate_metrics(
-        observation, policy, profile, attachment_failed_device_ids
+        observation, policy, profile, attachment_failed_device_ids,
+        routing_role_time=inputs.routing_role_samples is not None,
     )
     findings.extend(metric_findings)
+    if inputs.routing_role_samples is not None:
+        findings.extend(_evaluate_routing_role_time(
+            observation, policy, profile, inputs.routing_role_samples, evaluator_version,
+        ))
     metric_sources = metric_facts.metric_sources
     lq_counts = metric_facts.lq_counts
     device_roles = metric_facts.device_roles
@@ -1820,26 +2013,15 @@ def evaluate_observation(
     unified_health: Mapping[str, Any] | None = None,
     rest_diagnostics: Mapping[str, Any] | None = None,
     retained_assessment: Assessment | None = None,
+    evaluator_version: str | None = None,
 ) -> Assessment:
     """Evaluate fully, or reuse admitted non-roster evidence for the same observation."""
-    evaluator_version = evaluator_version_for_dataset(
-        observation.dataset_id, sample_contract_version
-    )
     declared_profile = profile
     if sample_contract_version == "comparison-v1-unified":
-        from dataclasses import replace
         from td_health_unified import validate_context
         from td_health_manifest import load_health_manifest
         dataset = load_health_manifest().dataset(observation.dataset_id)
         validate_context({"unifiedHealth": unified_health}, dataset, observation)
-        evaluator_version = evaluator_version_for_unified_context(unified_health)
-        if retained_assessment is not None:
-            if not supports_retained_evaluator_version(
-                observation.dataset_id, sample_contract_version,
-                retained_assessment.evaluator_version, unified_health=unified_health,
-            ):
-                raise ValueError("Retained Unified evaluator does not match its provenance contract")
-            evaluator_version = retained_assessment.evaluator_version
         profile = replace(
             profile, coverage=unified_health["effectiveCoverage"],
             topology_authority=bool(unified_health["absenceWitness"]),
@@ -1856,6 +2038,15 @@ def evaluate_observation(
         device_ipv6_addresses=device_ipv6_addresses,
         profile=profile,
     )
+    if evaluator_version is None:
+        evaluator_version = evaluator_version_for_inputs(
+            observation.dataset_id, sample_contract_version, inputs, unified_health,
+        )
+    elif not supports_retained_evaluator_version(
+        observation.dataset_id, sample_contract_version, evaluator_version,
+        unified_health=unified_health, evaluation_inputs=inputs,
+    ):
+        raise ValueError("Unsupported evaluator version for evaluation inputs")
     expected_device_ids = (
         inputs.expected_device_ids or frozenset()
         if inputs.roster.state is EvaluationInputState.AVAILABLE
@@ -1897,6 +2088,7 @@ def evaluate_observation(
             _evaluate_observation_evidence(
                 observation, policy, profile, inputs, availability_facts, complete,
                 omr_prefix, device_ipv6_addresses,
+                evaluator_version,
             )
         )
         findings.extend(evidence_findings)

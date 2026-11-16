@@ -921,7 +921,8 @@ def compare_interval(
             old_context = before_assessment.reproduction_context.get("unifiedHealth", {})
             new_context = after_assessment.reproduction_context.get("unifiedHealth", {})
             if (old_context.get("version") == new_context.get("version") == "unified-health-v2"
-                    and before_assessment.evaluator_version == after_assessment.evaluator_version == "snapshot-v19"
+                    and before_assessment.evaluator_version == after_assessment.evaluator_version
+                    and before_assessment.evaluator_version in {"snapshot-v19", "snapshot-v20", "snapshot-v21", "snapshot-v22"}
                     and old_context.get("recipeContractDigest")
                     and old_context["recipeContractDigest"] == new_context.get("recipeContractDigest")
                     and old_context.get("reportContractDigest")
@@ -934,7 +935,7 @@ def compare_interval(
                     and (
                         before_assessment.evaluator_version == "snapshot-v16"
                         or (
-                            before_assessment.evaluator_version in {"snapshot-v17", "snapshot-v18"}
+                            before_assessment.evaluator_version in {"snapshot-v17", "snapshot-v18", "snapshot-v20", "snapshot-v21", "snapshot-v22"}
                             and old_context.get("reportContractDigest")
                             and old_context["reportContractDigest"] == new_context.get("reportContractDigest")
                         )

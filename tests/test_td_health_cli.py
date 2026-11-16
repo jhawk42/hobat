@@ -1330,7 +1330,12 @@ def test_history_upgrade_identity_is_independent_of_dataset_scope(tmp_path) -> N
         ).fetchone()[0] == 2
 
 
-def test_migration_prefers_upgraded_endpoints_and_stores_comparison(tmp_path) -> None:
+@pytest.mark.parametrize("retain_routing_inputs", [False, True])
+def test_migration_prefers_upgraded_endpoints_and_stores_comparison(
+    tmp_path, monkeypatch, retain_routing_inputs,
+) -> None:
+    if not retain_routing_inputs:
+        monkeypatch.setattr("td_health_processor._routing_role_samples", lambda *_args: None)
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     _seed(data_dir)
@@ -1369,12 +1374,13 @@ def test_migration_prefers_upgraded_endpoints_and_stores_comparison(tmp_path) ->
         store=store,
     )
     with closing(store._connect()) as connection, connection:
-        connection.execute(
-            """UPDATE assessments
-               SET evaluator_version=?, reproduction_context_json='{}'
-               WHERE assessment_id=?""",
-            ("snapshot-v10", first.assessment.assessment_id),
-        )
+        if not retain_routing_inputs:
+            connection.execute(
+                """UPDATE assessments
+                   SET evaluator_version=?, reproduction_context_json='{}'
+                   WHERE assessment_id=?""",
+                ("snapshot-v10", first.assessment.assessment_id),
+            )
         connection.execute("DELETE FROM comparisons")
         old_endpoint = store._endpoint(connection, second.assessment.assessment_id)
         assert old_endpoint is not None
@@ -1394,9 +1400,10 @@ def test_migration_prefers_upgraded_endpoints_and_stores_comparison(tmp_path) ->
     before_detail = before_service.comparison(
         comparison_id=pinned_before["comparisonId"], limit=25, offset=0
     )
-    assert set(before_detail["persistedReasons"]) >= {
-        "evaluator-mismatch", "policy-mismatch"
-    }
+    assert "policy-mismatch" in before_detail["persistedReasons"]
+    assert ("evaluator-mismatch" in before_detail["persistedReasons"]) is (
+        not retain_routing_inputs
+    )
 
     inventory = inventory_health_history(
         SQLiteHealthStore(database_path, read_only=True),
