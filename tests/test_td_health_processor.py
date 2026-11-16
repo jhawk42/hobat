@@ -1372,7 +1372,7 @@ def test_file_mode_uses_bound_rest_recovery_and_exposes_coverage(tmp_path, datas
     )
 
     assert result.observation.completeness is Completeness.COMPLETE
-    assert result.assessment.evaluator_version == "snapshot-v22"
+    assert result.assessment.evaluator_version == "snapshot-v23"
     coverage = result.assessment.coverage["restDiagnostics"]
     assert coverage["summary"]["recoveredChildren"] == 1
     assert coverage["summary"]["recoveredRouters"] == 1
@@ -1947,7 +1947,7 @@ def test_routing_role_grades_raw_times_and_ten_minute_warmup(
         evaluation_inputs=replace(inputs, routing_role_samples=None),
     )
     assert result.assessment.status is baseline.status
-    assert result.assessment.evaluator_version == "snapshot-v22"
+    assert result.assessment.evaluator_version == "snapshot-v23"
 
 
 @pytest.mark.parametrize("times", [
@@ -2037,26 +2037,32 @@ def test_routing_role_refresh_preserves_retained_observation_and_replay(tmp_path
         and "extaddr:8888888888888888" in f.device_ids
     ).status is HealthStatus.UNKNOWN
     store.save_processing_result(current.observation, ten_minute, prepare=True)
+    previous = evaluate_observation(
+        current.observation, policy, profile=profile, evaluation_inputs=inputs,
+        sample_contract_version=current.assessment.sample_contract_version,
+        evaluator_version="snapshot-v22",
+    )
+    store.save_processing_result(current.observation, previous, prepare=True)
     with closing(store._connect()) as connection:
         originals = {
             assessment.assessment_id: tuple(connection.execute(
                 "SELECT * FROM assessments WHERE assessment_id=?",
                 (assessment.assessment_id,),
             ).fetchone())
-            for assessment in (legacy, one_hour, ten_minute)
+            for assessment in (legacy, one_hour, ten_minute, previous)
         }
     inventory = inventory_health_history(
         SQLiteHealthStore(store.path, read_only=True), target_policy=policy,
         dataset_ids=("otbr_cli_diagnostics_fetch",),
     )
-    assert inventory.items[0].source_assessment_id == ten_minute.assessment_id
+    assert inventory.items[0].source_assessment_id == previous.assessment_id
     assert inventory.items[0].eligibility.value == "replayable-with-gaps"
     refreshed = process_health(
         data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
         policy=policy, store=store, allow_partial=True,
     )
     assert refreshed.observation.observation_id == current.observation.observation_id
-    assert refreshed.assessment.evaluator_version == "snapshot-v22"
+    assert refreshed.assessment.evaluator_version == "snapshot-v23"
     assert refreshed.assessment.assessment_id not in originals
     refreshed_finding = next(
         f for f in refreshed.assessment.findings if f.rule_id == "device.routingRolePercent"
@@ -2080,7 +2086,7 @@ def test_routing_role_refresh_preserves_retained_observation_and_replay(tmp_path
             assert tuple(connection.execute(
                 "SELECT * FROM assessments WHERE assessment_id=?", (assessment_id,),
             ).fetchone()) == original
-        for assessment in (legacy, one_hour, ten_minute, refreshed.assessment):
+        for assessment in (legacy, one_hour, ten_minute, previous, refreshed.assessment):
             observation, retained, _, _, _, replay_inputs = store._reassessment_inputs(
                 connection, assessment.assessment_id,
             )

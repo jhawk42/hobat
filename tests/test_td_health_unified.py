@@ -13,6 +13,7 @@ import pytest
 
 from td_health_manifest import load_health_manifest
 from td_health_migration import inventory_health_history
+from td_health_observation_model import HealthStatus
 from td_health_policy import load_health_policy
 from td_health_processor import HealthProcessingError, build_processing_result, process_health
 from td_health_read import TDHealthReadService
@@ -272,7 +273,7 @@ def test_typed_controller_health_is_complete_without_absence_authority(tmp_path,
     assert context["absenceWitness"] is None
     assert first.observation.completeness.value == "complete"
     assert evaluator_version_for_unified_context(context) == version
-    assert first.assessment.evaluator_version == "snapshot-v22"
+    assert first.assessment.evaluator_version == "snapshot-v23"
     assert not first.assessment.coverage["offlineEligible"]
     assert not first.assessment.coverage["topologyAuthority"]
     assert first.assessment.coverage["sourceObservationKinds"] == {
@@ -581,7 +582,7 @@ def test_rest_unified_revalidates_recovery_and_preserves_other_gates(tmp_path, c
     result = process(tmp_path, "otbr_restapi_unified")
     coverage = result.assessment.coverage["restDiagnostics"]
     assert coverage["summary"]["recoveredChildren"] == (case != "missing-binding")
-    assert result.assessment.evaluator_version == "snapshot-v22"
+    assert result.assessment.evaluator_version == "snapshot-v23"
     assert {name: (tmp_path / name).read_bytes() for name in originals} == originals
 
 
@@ -604,7 +605,7 @@ def test_rest_mesh_health_matches_cached_projection_and_reopens(tmp_path, monkey
     assert context["version"] == "unified-health-v2"
     assert context["restMeshDiagnostics"] == projection
     assert context["restMeshDiagnosticsDigest"] == digest(projection)
-    assert result.assessment.evaluator_version == "snapshot-v22"
+    assert result.assessment.evaluator_version == "snapshot-v23"
     assert (result.observation.completeness.value == "complete") is (case in {"valid", "expansion-only-child", "changed-rloc"})
     if case == "expansion-only-child":
         assert "unresolvedRestChildIdentities" not in context
@@ -1840,6 +1841,10 @@ def test_original_and_unified_same_collection_count_once_in_current_and_reassess
             "device.offline" if day >= load_health_policy().offline_consecutive_complete_observations
             else "device.missing"
         )
+        assert finding.status is (
+            HealthStatus.POOR if finding.rule_id == "device.offline"
+            else HealthStatus.MODERATE
+        )
     # A roster-only reassessment uses retained witnesses, not the current cache.
     for path in tmp_path.glob("*.json"):
         path.unlink()
@@ -1870,6 +1875,7 @@ def test_same_witness_positive_projection_overrides_current_negative(tmp_path):
     finding = missing_finding(result)
     assert finding.rule_id == "device.missing"
     assert finding.evidence["consecutiveCompleteAbsences"] == 0
+    assert finding.status is HealthStatus.UNKNOWN
     assert result.assessment.reproduction_context["unifiedHealth"]["positiveDeviceIds"] == [MISSING]
 
 
@@ -1882,6 +1888,7 @@ def test_different_witnesses_at_same_time_are_unavailable_not_consecutive(tmp_pa
     result = process(tmp_path, "otbr_cli_unified", store)
     assert result.assessment.reproduction_context["evaluationInputs"]["domains"]["absenceHistory"]["state"] == "unavailable"
     assert missing_finding(result).rule_id == "device.missing"
+    assert missing_finding(result).status is HealthStatus.UNKNOWN
 
 
 def test_never_stitch_cli_and_rest_absence_domains(tmp_path):
@@ -2243,7 +2250,7 @@ def test_unified_comparison_requires_matching_current_evaluator(tmp_path, monkey
     collection(tmp_path, "otbr_cli_unified", 2)
     after = process(tmp_path, "otbr_cli_unified")
     roles = source_roles_for_dataset(load_health_manifest().dataset("otbr_cli_unified"))
-    assert after.assessment.evaluator_version == "snapshot-v22"
+    assert after.assessment.evaluator_version == "snapshot-v23"
     for old_version, new_version, comparable in (
         ("snapshot-v15", "snapshot-v15", False),
         ("snapshot-v15", "snapshot-v17", False),
@@ -2258,6 +2265,8 @@ def test_unified_comparison_requires_matching_current_evaluator(tmp_path, monkey
         ("snapshot-v20", "snapshot-v21", False),
         ("snapshot-v22", "snapshot-v22", True),
         ("snapshot-v21", "snapshot-v22", False),
+        ("snapshot-v23", "snapshot-v23", True),
+        ("snapshot-v22", "snapshot-v23", False),
     ):
         legacy = replace(before.assessment, evaluator_version=old_version)
         after_assessment = replace(after.assessment, evaluator_version=new_version)
@@ -2274,7 +2283,7 @@ def test_current_unified_comparison_requires_same_retained_contract(tmp_path):
     collection(tmp_path, "otbr_cli_unified", 2)
     after = process(tmp_path, "otbr_cli_unified")
     roles = source_roles_for_dataset(load_health_manifest().dataset("otbr_cli_unified"))
-    assert before.assessment.evaluator_version == after.assessment.evaluator_version == "snapshot-v22"
+    assert before.assessment.evaluator_version == after.assessment.evaluator_version == "snapshot-v23"
     interval, _ = derive_comparison((before.observation, before.assessment), (after.observation, after.assessment), source_roles=roles)
     assert interval.compatibility.comparable
     for field in ("reportContractDigest", "recipeContractDigest"):
@@ -2353,7 +2362,7 @@ def test_cli_and_health_api_expose_the_same_explicit_qualified_profiles(tmp_path
     assert result.returncode == 0, result.stderr
     document = json.loads(result.stdout)
     assert document["datasetId"] == dataset_id
-    assert document["evaluatorVersion"] == "snapshot-v22"
+    assert document["evaluatorVersion"] == "snapshot-v23"
     assert not (tmp_path / "hobat_v1.db").exists()
     store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
     persisted = process(tmp_path, dataset_id, store)

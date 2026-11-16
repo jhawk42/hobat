@@ -23,6 +23,7 @@ from td_health_observation_model import (
     EvaluationInputDomain,
     EvaluationInputState,
     EvaluationInputs,
+    FindingRank,
     HealthStatus,
     MetricSample,
     Observation,
@@ -939,6 +940,68 @@ def test_router_neighbor_queue_depth_is_not_applicable() -> None:
         finding.rule_id == "relationship.queued-messages"
         for finding in assessment.findings
     )
+
+
+@pytest.mark.parametrize(
+    "version,completeness,history_available,prior,status,rule",
+    [
+        ("snapshot-v23", Completeness.COMPLETE, True, 0, HealthStatus.MODERATE, "device.missing"),
+        ("snapshot-v23", Completeness.COMPLETE, True, 1, HealthStatus.POOR, "device.offline"),
+        ("snapshot-v23", Completeness.PARTIAL, True, 0, HealthStatus.UNKNOWN, "device.missing"),
+        ("snapshot-v23", Completeness.DEGRADED, True, 0, HealthStatus.UNKNOWN, "device.missing"),
+        ("snapshot-v23", Completeness.COMPLETE, False, 0, HealthStatus.UNKNOWN, "device.missing"),
+        ("snapshot-v22", Completeness.COMPLETE, True, 0, HealthStatus.UNKNOWN, "device.missing"),
+    ],
+)
+def test_missing_device_grading_preserves_uncertainty_and_retained_ratings(
+    version, completeness, history_available, prior, status, rule,
+) -> None:
+    observation = replace(_observation(_relationship()), completeness=completeness)
+    absent_id = "extaddr:3333333333333333"
+    baseline = evaluate_observation(
+        observation, load_health_policy(), profile=PROFILE,
+        expected_device_ids=frozenset({absent_id}),
+        prior_complete_absences={absent_id: prior},
+    )
+    inputs = replace(
+        evaluation_inputs_from_payload(baseline.reproduction_context["evaluationInputs"]),
+        routing_role_samples=(),
+    )
+    if not history_available:
+        inputs = replace(
+            inputs,
+            absence_history=EvaluationInputDomain(
+                EvaluationInputState.UNAVAILABLE, ("input-not-retained",),
+            ),
+            prior_complete_absences=None,
+        )
+    assessment = evaluate_observation(
+        observation, load_health_policy(), profile=PROFILE,
+        evaluation_inputs=inputs, evaluator_version=version,
+    )
+    finding = next(f for f in assessment.findings if f.rule_id == rule)
+    assert finding.status is status
+    assert finding.rank is (
+        FindingRank.MODERATE if status is HealthStatus.MODERATE
+        else FindingRank.POOR if status is HealthStatus.POOR else FindingRank.INFO
+    )
+    if status is HealthStatus.MODERATE:
+        assert finding.summary == (
+            "Expected device is absent from 1 complete observation; Offline requires 2."
+        )
+        assert assessment.status is baseline.status
+    assert any(f.rule_id == "network.offline-impact" for f in assessment.findings) == (
+        status is HealthStatus.POOR
+    )
+    replay = evaluate_observation(
+        observation, load_health_policy(), profile=PROFILE,
+        evaluation_inputs=evaluation_inputs_from_payload(
+            assessment.reproduction_context["evaluationInputs"],
+        ),
+        evaluator_version=version,
+    )
+    assert replay.assessment_id == assessment.assessment_id
+    assert replay.findings == assessment.findings
 
 
 def test_device_offline_is_independent_of_network_impact_ratio() -> None:

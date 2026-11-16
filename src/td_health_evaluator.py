@@ -38,8 +38,10 @@ RETAINED_UNIFIED_EVALUATOR_VERSION = "snapshot-v17"
 REST_RECOVERY_EVALUATOR_VERSION = "snapshot-v17"
 RETAINED_ROUTING_ROLE_EVALUATOR_VERSION = "snapshot-v20"
 ROUTING_ROLE_EVALUATOR_VERSION = "snapshot-v22"
+DEVICE_AVAILABILITY_EVALUATOR_VERSION = "snapshot-v23"
 ROUTING_ROLE_EVALUATOR_VERSIONS = frozenset({
     RETAINED_ROUTING_ROLE_EVALUATOR_VERSION, "snapshot-v21", ROUTING_ROLE_EVALUATOR_VERSION,
+    DEVICE_AVAILABILITY_EVALUATOR_VERSION,
 })
 MINIMUM_ROUTING_ROLE_TRACKED_TIME_MS = 600_000
 RETAINED_UNIFIED_EVALUATOR_VERSIONS = frozenset({
@@ -109,7 +111,7 @@ def evaluator_version_for_inputs(
     unified_health: Mapping[str, Any] | None = None,
 ) -> str:
     if inputs.routing_role_samples is not None:
-        return ROUTING_ROLE_EVALUATOR_VERSION
+        return DEVICE_AVAILABILITY_EVALUATOR_VERSION
     if sample_contract_version == "comparison-v1-unified":
         return evaluator_version_for_unified_context(unified_health)
     return evaluator_version_for_dataset(dataset_id, sample_contract_version)
@@ -207,6 +209,7 @@ def _evaluate_availability(
     witness_positive_ids: frozenset[str] = frozenset(),
     *,
     include_observed_findings: bool = True,
+    grade_missing_devices: bool = False,
 ) -> tuple[list[Finding], AvailabilityFacts]:
     findings: list[Finding] = []
     observed_ids = frozenset(device.device_id for device in observation.devices)
@@ -272,16 +275,35 @@ def _evaluate_availability(
     for device_id in missing_expected_ids:
         prior = absences.get(device_id, 0) if absence_history_available else None
         is_offline = device_id in offline_candidate_ids
+        is_missing_warning = (
+            grade_missing_devices
+            and not is_offline
+            and complete
+            and absence_history_available
+            and device_id not in witness_positive_ids
+        )
         findings.append(
             _finding(
                 observation,
                 rule_id="device.offline" if is_offline else "device.missing",
-                status=HealthStatus.POOR if is_offline else HealthStatus.UNKNOWN,
+                status=(
+                    HealthStatus.POOR if is_offline
+                    else HealthStatus.MODERATE if is_missing_warning else HealthStatus.UNKNOWN
+                ),
                 scope=FindingScope.DEVICE,
-                rank=FindingRank.POOR if is_offline else FindingRank.INFO,
+                rank=(
+                    FindingRank.POOR if is_offline
+                    else FindingRank.MODERATE if is_missing_warning else FindingRank.INFO
+                ),
                 summary=(
                     f"Expected device is absent from {prior + 1} consecutive complete observations."
                     if is_offline
+                    else (
+                        f"Expected device is absent from {prior + 1} complete "
+                        f"{'observation' if prior == 0 else 'observations'}; "
+                        f"Offline requires {offline_required}."
+                    )
+                    if is_missing_warning
                     else "Expected device is not present, but Offline is not established."
                 ),
                 evidence={
@@ -2080,6 +2102,7 @@ def evaluate_observation(
         observation, policy, inputs, expected_device_ids, absences, complete,
         frozenset(unified_health.get("positiveDeviceIds", ())) if unified_health else frozenset(),
         include_observed_findings=retained_assessment is None,
+        grade_missing_devices=evaluator_version == DEVICE_AVAILABILITY_EVALUATOR_VERSION,
     )
     observed_ids = availability_facts.observed_ids
     missing_expected_ids = availability_facts.missing_expected_ids

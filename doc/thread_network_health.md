@@ -642,8 +642,11 @@ The evaluator reports these device states and related device findings:
   from complete observations.
 - `missing`: a device explicitly in the active `expected` roster is absent from
   the current observation, but the configured consecutive-complete-observation
-  requirement has not been met. The finding is device-scoped, Unknown, and low
-  confidence. A complete observation increments the absence count; a degraded
+  requirement has not been met. With complete collection, available absence
+  history, and no contradictory positive presence evidence, the device-scoped
+  finding is Moderate and reports the absence count and Offline threshold.
+  Otherwise it remains Unknown. Confidence remains low until Offline is
+  established. A complete observation increments the absence count; a degraded
   or partial observation reports the absence without advancing that history.
 - `offline`: an active expected-roster device is absent for the configured
   number of consecutive complete observations. The default and minimum policy
@@ -663,14 +666,25 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_unified --init-roster-from-label-map
 ```
 
-An expected device absent from one complete observation remains missing with
-Unknown status. A device becomes Offline after absence from two distinct
+An expected device absent from one complete observation is missing with Moderate
+status when absence history is available and no same-collection positive evidence
+contradicts the absence; incomplete or conflicting evidence remains Unknown.
+A device becomes Offline after absence from two distinct
 eligible complete observations, independent of other roster devices. Offline is
 a device-level Poor finding and does not by itself make the network Poor. The
 separate `network.offline-impact` rule makes the network Poor when more than 15%
 of the expected roster is Offline. Partial and degraded observations do not
 increment absence history. Stage 1 reports observation counts, not wall-clock
 offline duration.
+
+New cache-only assessments use `snapshot-v23` for this conditional missing-device
+grading. Missing-device findings remain informational for network aggregation:
+Moderate is a device warning, not a network-health downgrade. Returning devices
+move to Observed Devices (Strong presence evidence, not proof of overall health).
+Retained assessments through `snapshot-v22` keep their original Unknown missing
+ratings during replay and roster-only reassessment. Process the cached dataset
+again to produce a new assessment with the updated grading; this does not
+require live collection or alter historical assessments.
 
 List or update one network's roster from the CLI:
 
@@ -903,7 +917,7 @@ also project catalog-owned `evidenceKind`, `materiality`, `actionKey`, and
 
 ### Routing-role participation
 
-New cache-only assessments use `snapshot-v22` and report **Routing-Role Time
+Assessments from `snapshot-v22` onward report **Routing-Role Time
 Since Reset** for observed Routers and Leaders that report raw timing counters.
 Devices whose firmware does not report those counters are omitted from this
 finding, not marked Unknown. Reported but partial or invalid counters still
