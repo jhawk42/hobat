@@ -368,10 +368,10 @@ def test_initialized_schema_matches_frozen_contract(tmp_path) -> None:
         "309af9199b3f0c778a99407e89433d1f6da6f052604fcf6bdc8cbf51b72e9189"
     )
     assert schema_objects_digest == (
-        "28ca8ba725b3b632c0b07cbf5f1e748928b23651ee517818ec6ab139c6cbaa98"
+        "c58dad5dac98336080812fe65ce28353ec9425353d2be62a8517d61d378d47a4"
     )
-    assert SCHEMA_VERSION == 10
-    assert max_migration == 10
+    assert SCHEMA_VERSION == 11
+    assert max_migration == 11
 
 
 def test_roster_source_time_and_partial_observation_do_not_refresh_projection(tmp_path) -> None:
@@ -1077,6 +1077,7 @@ def test_schema_seven_adds_and_backfills_receipt_device_scope(tmp_path) -> None:
     with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("DROP INDEX idx_roster_receipts_network_device")
         connection.execute("ALTER TABLE roster_mutation_receipts DROP COLUMN device_id")
+        connection.execute("DROP TABLE roster_eui_aliases")
         connection.execute("DELETE FROM schema_migrations WHERE version>=7")
 
     migrated = SQLiteHealthStore(path)

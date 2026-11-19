@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from contextlib import closing
+from datetime import datetime
 
 import pytest
 
@@ -104,7 +105,8 @@ def test_preview_apply_backup_and_normal_roster_read(case, capsys, tmp_path):
         db.execute("DROP TABLE roster_eui_aliases")
         db.execute("DELETE FROM schema_migrations WHERE version=11")
     service = TDHealthReadService(tmp_path)
-    before = service.roster(network_id=NETWORK)
+    read_time = datetime.fromisoformat(END)
+    before = service.roster(network_id=NETWORK, read_time=read_time)
     args = ["--datadir", str(tmp_path), "health", "backfill-roster-eui",
             "--network", NETWORK, "--evidence-dir", str(evidence)]
     assert td_cli.main(args) == 0
@@ -119,7 +121,7 @@ def test_preview_apply_backup_and_normal_roster_read(case, capsys, tmp_path):
     assert len(applied["applied"]) == 2
     with closing(sqlite3.connect(applied["backupPath"])) as db:
         assert db.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 10
-    after = service.roster(network_id=NETWORK)
+    after = service.roster(network_id=NETWORK, read_time=read_time)
     for a, b, eui in zip(after["devices"], before["devices"], EUIS):
         assert a["fields"]["eui"]["value"] == eui
         assert a["fields"]["eui"]["sourceObservedAt"] is None
