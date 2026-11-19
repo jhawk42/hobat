@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -85,3 +87,52 @@ def test_repack_reports_a_busy_database(tmp_path, monkeypatch) -> None:
         with pytest.raises(DatabaseRepackError, match="database is busy"):
             repack_database(data_dir)
         connection.rollback()
+
+
+def test_repack_rejects_insufficient_disk_space_before_opening_database(
+    tmp_path, monkeypatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    database_path = _create_database(data_dir)
+    required = database_path.stat().st_size
+    usage = Mock(return_value=SimpleNamespace(free=required - 1))
+    monkeypatch.setattr("shutil.disk_usage", usage)
+    connect = Mock()
+    monkeypatch.setattr(td_system_database.sqlite3, "connect", connect)
+
+    with pytest.raises(DatabaseRepackError, match="Not enough free disk space") as error:
+        repack_database(data_dir)
+
+    assert f"requires at least {required} bytes" in str(error.value)
+    assert f"{required - 1} bytes available" in str(error.value)
+    assert str(database_path) in str(error.value)
+    usage.assert_called_once_with(database_path.resolve().parent)
+    connect.assert_not_called()
+
+
+@pytest.mark.parametrize("extra_bytes", [0, 1])
+def test_repack_accepts_disk_space_at_or_above_database_size(
+    tmp_path, monkeypatch, extra_bytes,
+) -> None:
+    data_dir = tmp_path / "data"
+    database_path = _create_database(data_dir)
+    free = database_path.stat().st_size + extra_bytes
+    monkeypatch.setattr("shutil.disk_usage", lambda path: SimpleNamespace(free=free))
+
+    assert repack_database(data_dir) == database_path
+    with closing(sqlite3.connect(database_path)) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+
+def test_repack_reports_disk_space_check_failure(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    _create_database(data_dir)
+    usage = Mock(side_effect=OSError("disk usage unavailable"))
+    monkeypatch.setattr("shutil.disk_usage", usage)
+    connect = Mock()
+    monkeypatch.setattr(td_system_database.sqlite3, "connect", connect)
+
+    with pytest.raises(DatabaseRepackError, match="disk usage unavailable"):
+        repack_database(data_dir)
+
+    connect.assert_not_called()

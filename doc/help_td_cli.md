@@ -622,6 +622,13 @@ reclaiming unused pages without changing stored records or the schema. The
 database must already exist. Repacking requires exclusive database access; if
 another process is using it, stop that process and retry.
 
+Before opening the database, the command checks free space on the database's
+filesystem. It requires at least the current database file size in free space;
+otherwise it reports the required and available bytes and exits without
+repacking. Failure to inspect disk space also stops the command. This is a
+minimum check, not a guarantee: SQLite temporary/journal files and concurrent
+disk use can require additional space.
+
 ### `system backups`
 
 ```text

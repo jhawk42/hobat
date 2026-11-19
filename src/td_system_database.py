@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -23,7 +24,22 @@ def repack_database(data_dir: Path) -> Path:
             f"Hobat database is not available: {database_path}"
         )
 
-    database_uri = f"{database_path.resolve().as_uri()}?mode=rw"
+    try:
+        resolved_database_path = database_path.resolve()
+        required_bytes = resolved_database_path.stat().st_size
+        free_bytes = shutil.disk_usage(resolved_database_path.parent).free
+    except OSError as exc:
+        raise DatabaseRepackError(
+            f"Could not check free disk space for Hobat database at {database_path}: {exc}"
+        ) from exc
+    if free_bytes < required_bytes:
+        raise DatabaseRepackError(
+            f"Not enough free disk space to repack Hobat database at {database_path}: "
+            f"requires at least {required_bytes} bytes; {free_bytes} bytes available. "
+            "Free disk space and retry."
+        )
+
+    database_uri = f"{resolved_database_path.as_uri()}?mode=rw"
     try:
         with closing(
             sqlite3.connect(

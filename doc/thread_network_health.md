@@ -1110,7 +1110,10 @@ Purge removes records but does not guarantee an immediate reduction in the
 database file size. Repack is a separate, optional `VACUUM` operation; stop the
 web server and other database users before repacking to avoid lock contention.
 Allow working disk space for the purge's WAL growth and repack's temporary
-files. No exact reclaimed size or runtime is guaranteed.
+files. Repack checks that the database filesystem has at least the current
+database file size in free space and refuses to start if space is insufficient
+or cannot be checked. Additional temporary/journal space may still be needed.
+No exact reclaimed size or runtime is guaranteed.
 
 Create and restore a complete data-directory backup:
 

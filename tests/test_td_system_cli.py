@@ -6,6 +6,7 @@ import io
 import json
 import sqlite3
 from contextlib import closing, redirect_stdout
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -88,6 +89,26 @@ def test_top_level_database_repack_missing_db_does_not_create_it(tmp_path, capsy
 
     assert "not available" in capsys.readouterr().err
     assert not database_path.exists()
+
+
+def test_top_level_database_repack_reports_insufficient_disk_space(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    data_dir = tmp_path / "data"
+    _seed(data_dir)
+    database_path = data_dir / HOBAT_DATABASE_FILENAME
+    required = database_path.stat().st_size
+    monkeypatch.setattr("shutil.disk_usage", lambda path: SimpleNamespace(free=0))
+
+    assert td_cli.main([
+        "--datadir", str(data_dir), "system", "database", "repack",
+    ]) == 1
+
+    output = capsys.readouterr()
+    assert "Not enough free disk space" in output.err
+    assert f"requires at least {required} bytes" in output.err
+    assert "0 bytes available" in output.err
+    assert "Repacked Hobat database" not in output.out
 
 
 def test_restore_can_be_cancelled_without_reading_backup(tmp_path) -> None:
