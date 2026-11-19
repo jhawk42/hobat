@@ -689,30 +689,41 @@ partial, without promoting that preview to the rollback baseline.
 
 ## Device Labels
 
-`GET /api/device/{extAddress}` reads the authoritative
-`td-static-extaddr-device-label.json` record. Missing maps or addresses return
-404.
+`GET /api/device/{extAddress}` returns the matching primary map entry and its
+stored `eui`, `comment`, and `lastUpdated` when present. It tries the exact
+address, an unambiguous previous address, then an optional `?eui=...` with a
+unique owner. If none matches, it returns 404.
 
-`PATCH /api/device/{extAddress}` accepts exactly:
+`PATCH /api/device/{extAddress}` accepts a required `deviceLabel` and optional
+`observedEui` and `comment`:
 
 ```json
-{"deviceLabel": "Office Sensor"}
+{"deviceLabel": "Office Sensor", "observedEui": "0222334455667788", "comment": "Near the window"}
 ```
 
+Omitting `comment` preserves any saved note; an empty string clears it.
+Comments may have at most 512 characters and no control characters.
+Device Details shows the saved EUI and comment as read-only values, not the
+previous-address list.
+
 The server validates the 16-hex-digit address and label, acquires the
-`merge-extaddr` source lock, invokes the CLI upsert, and reads the persisted
-record back before responding. Updating returns 200; inserting returns 201.
-Invalid input returns 400, CLI failure or timeout returns 502, and invalid or
-unreadable persisted state returns 500. Device API responses use
+`merge-extaddr` source lock and invokes the `device-label` CLI upsert. Its
+result supplies both the status (200 for an existing row, 201 for an insert)
+and the observed-EUI outcome from the same locked operation. Invalid input
+returns 400, CLI failure or timeout returns 502, and an unreadable CLI result
+returns 500. Device API responses use
 `Cache-Control: no-store`.
 
 The browser checks request generation and selected address after both response
 headers and the JSON body arrive. A stale label read cannot overwrite a newer
 selection's label, status, loading state, or controls.
 
-Atomic replacement prevents partial JSON. The in-process lock does not
-coordinate a separate writer process, so cross-process writes are
-last-write-wins.
+The CLI holds a shared file lock across read, validation, backup, and atomic
+replacement, serializing the dashboard save with other CLI writers. The
+server does not acquire this file lock itself. Display lookups use exact
+primary addresses before unambiguous previous addresses and unique EUI matches;
+explicit label
+edits still target only a primary address.
 
 ## Browser Application Layers
 

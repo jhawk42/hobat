@@ -3053,6 +3053,15 @@ button[aria-expanded="true"] > .disclosure-icon {
   min-width: 0;
 }
 
+#device-settings-list .detail-kv-row[hidden] {
+  display: none;
+}
+
+#device-comment {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
 #device-settings-list .device-label-row {
   flex-wrap: wrap;
 }

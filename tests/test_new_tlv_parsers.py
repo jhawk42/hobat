@@ -709,6 +709,12 @@ def test_direct_router_path_decodes_raw_version_and_preserves_empty_vendor(monke
     assert observation["capture_stage"] == "direct-router"
     assert observation["query_id"] is None
     assert observation["request_association"] == "responder-target"
+    assert observation["address_list_evidence"]["ext_address"] == extaddr
+    assert observation["address_list_evidence"]["ipv6_addresses"] == ["fd00::1"]
+    assert observation["address_list_evidence"]["captured_at_epoch"] > 0
+    snapshot_evidence = topology.convert_keys_to_camel_case(observation)["addressListEvidence"]
+    assert snapshot_evidence["extAddress"] == extaddr
+    assert snapshot_evidence["ipv6Addresses"] == ["fd00::1"]
     assert observation["requested_type_ids"] == [int(t) for t in TLV_VALUES_DETAILED.split()]
     assert observation["omitted_type_ids"] == [4, 5, 6, 9, 16, 23, 34]
     assert observation["unrequested_type_ids"] == []

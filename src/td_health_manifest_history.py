@@ -8,6 +8,7 @@ import math
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
@@ -26,6 +27,7 @@ from td_health_manifest import (
 
 
 HISTORY_PATH = Path(__file__).with_name("td-dataset-manifest-history.json")
+_MAX_CACHED_ARCHIVE_BYTES = 2 * 1024 * 1024
 PROJECTION_VERSION = "health-manifest-v1"
 REPLAY_CONTRACT_VERSION = "retained-replay-v1"
 TARGET_CONTRACT_VERSION = "health-target-v2"
@@ -611,18 +613,33 @@ def _revision(entry: object) -> ManifestRevision:
                             capture_kind=entry.get("captureKind"), captured_at=entry.get("capturedAt"))
 
 
-def load_manifest_history(manifest_path: Path = MANIFEST_PATH,
-                          history_path: Path = HISTORY_PATH) -> ManifestHistoryResolver:
-    """Load both required files once; retain exact bytes for locked revalidation."""
-    manifest_path, history_path = Path(manifest_path), Path(history_path)
-    manifest_bytes, history_bytes = _read(manifest_path), _read(history_path)
-    raw = parse_json(manifest_bytes)
+def _parse_archive(history_bytes: bytes) -> tuple[ManifestRevision, ...]:
     archive = parse_json(history_bytes)
     if (not isinstance(archive, dict) or set(archive) != {"schemaVersion", "projectionVersion", "revisions"}
             or type(archive["schemaVersion"]) is not int or archive["schemaVersion"] != 1
             or archive["projectionVersion"] != PROJECTION_VERSION
             or not isinstance(archive["revisions"], list)):
         raise ManifestHistoryError("Unsupported manifest history wrapper")
+    revisions = tuple(_revision(entry) for entry in archive["revisions"])
+    ids = [revision.revision_id for revision in revisions]
+    commits = [revision.commit for revision in revisions if revision.commit is not None]
+    if len(set(ids)) != len(ids) or len(set(commits)) != len(commits):
+        raise ManifestHistoryError("Duplicate revision ID or conflicting commit declaration")
+    return revisions
+
+
+_cached_archive = lru_cache(maxsize=4)(_parse_archive)
+
+
+def load_manifest_history(manifest_path: Path = MANIFEST_PATH,
+                          history_path: Path = HISTORY_PATH) -> ManifestHistoryResolver:
+    """Load both required files once; retain exact bytes for locked revalidation."""
+    manifest_path, history_path = Path(manifest_path), Path(history_path)
+    manifest_bytes, history_bytes = _read(manifest_path), _read(history_path)
+    raw = parse_json(manifest_bytes)
+    # Only immutable validated revisions are shared; paths and current admission are not.
+    parse_archive = _cached_archive if len(history_bytes) <= _MAX_CACHED_ARCHIVE_BYTES else _parse_archive
+    revisions = parse_archive(history_bytes)
     digest = canonical_digest(raw)
     datasets = _parse_datasets(raw, digest, current=True)
     # The native loader remains authoritative, including its current catalog checks.
@@ -630,12 +647,7 @@ def load_manifest_history(manifest_path: Path = MANIFEST_PATH,
     current = ManifestRevision(f"manifest-sha256:{digest}", digest,
                                canonical_digest(health_projection(raw)), _freeze(raw),
                                datasets, is_current=True)
-    revisions = tuple(_revision(entry) for entry in archive["revisions"])
-    ids = [revision.revision_id for revision in revisions]
-    commits = [revision.commit for revision in revisions if revision.commit is not None]
-    if len(set(ids)) != len(ids) or len(set(commits)) != len(commits):
-        raise ManifestHistoryError("Duplicate revision ID or conflicting commit declaration")
-    if current.revision_id in ids:
+    if any(revision.revision_id == current.revision_id for revision in revisions):
         raise ManifestHistoryError("Current manifest must not be duplicated in the archive")
     snapshot_digest = canonical_digest({
         "snapshotVersion": "manifest-history-files-v1",

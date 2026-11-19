@@ -13,14 +13,19 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Sequence
 
-from td_health_history import import_expected_roster_from_label_map, network_id_for_dataset
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_health_history import (
+    import_expected_roster_from_label_map,
+    network_id_for_dataset,
+    previous_addresses_from_label_map,
+)
 from td_health_manifest import load_health_manifest
 from td_health_manifest_history import load_manifest_history
 from td_health_observation_model import device_id_from_ext_address
 from td_health_observation_store import HOBAT_DATABASE_FILENAME, HealthStoreError
 from td_health_policy import load_health_policy
-from td_health_processor import ProcessingResult, build_processing_result, process_health
-from td_health_roster_mutation import set_cli_roster_device
+from td_health_processor import HealthProcessingError, ProcessingResult, build_processing_result, process_health
+from td_health_roster_mutation import reconcile_previous_addresses, set_cli_roster_device
 from td_health_sqlite import (
     SQLiteHealthStore,
     apply_health_schema_migrations,
@@ -46,6 +51,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--datadir", default=None)
     commands = parser.add_subparsers(dest="health_command", required=True)
+    backfill = commands.add_parser(
+        "backfill-roster-eui", description="Preview or apply EUI aliases from a verified offline sweep.",
+    )
+    backfill.add_argument("--network", required=True)
+    backfill.add_argument("--evidence-dir", required=True, type=Path)
+    backfill.add_argument("--apply", action="store_true")
+    backfill.add_argument("--from-preview", type=Path)
+    select = backfill.add_mutually_exclusive_group()
+    select.add_argument("--select", action="append", default=[])
+    select.add_argument("--all-eligible", action="store_true")
     process_dataset = commands.add_parser(
         "process-dataset",
         description="Assess approved cached Thread datasets without live collection.",
@@ -77,6 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Explicitly import expected extAddress entries from the static label map.",
     )
+    process_dataset.add_argument(
+        "--reconcile-roster-from-label-map",
+        action="store_true",
+        help="Retire expected previous addresses recorded in the static label map.",
+    )
+    process_dataset.add_argument("--yes", "--apply", action="store_true")
     process_dataset.add_argument("--roster-list", action="store_true", help="List roster records for this network.")
     process_dataset.add_argument("--roster-device", metavar="EXTADDR", help="Add or update this roster device identity.")
     process_dataset.add_argument("--roster-label", help="Label to store with --roster-device.")
@@ -114,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--allow-policy-change", action="store_true")
     migrate.add_argument("--dry-run", action="store_true")
     migrate.add_argument("--json", action="store_true", dest="json_output")
-    migrate.add_argument("--yes", action="store_true")
+    migrate.add_argument("--yes", "--apply", action="store_true")
     migrate.add_argument("--backup-output", type=Path, default=None)
     schema_migrate = commands.add_parser(
         "migrate",
@@ -133,7 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Purge findings and comparisons for the seven retired health datasets only.",
     )
     retired.add_argument("--dry-run", action="store_true")
-    retired.add_argument("--yes", action="store_true")
+    retired.add_argument("--yes", "--apply", action="store_true")
     retired.add_argument("--json", action="store_true", dest="json_output")
     retired.add_argument("--backup-output", type=Path)
     for name, help_text in (
@@ -147,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         purge = commands.add_parser(name, description=help_text)
         purge.add_argument("--dry-run", action="store_true")
-        purge.add_argument("--yes", action="store_true")
+        purge.add_argument("--yes", "--apply", action="store_true")
         purge.add_argument("--json", action="store_true", dest="json_output")
         if name == "purge":
             purge.add_argument("--keep-days", type=int, default=DEFAULT_HEALTH_PURGE_KEEP_DAYS)
@@ -441,8 +462,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     data_dir = resolve_data_dir(
         args.datadir,
-        create_default=args.health_command not in {"migrate-history", "migrate", "prepare-history"},
+        create_default=(
+            args.health_command not in {"migrate-history", "migrate", "prepare-history",
+                                        "backfill-roster-eui"}
+            and not getattr(args, "reconcile_roster_from_label_map", False)
+        ),
     )
+    if args.health_command == "backfill-roster-eui":
+        from td_health_roster_backfill import backfill_roster_eui
+
+        if args.apply != (args.from_preview is not None):
+            parser.error("--apply and --from-preview must be used together")
+        try:
+            reviewed = json.loads(args.from_preview.read_bytes()) if args.from_preview else None
+            if args.apply and not isinstance(reviewed, dict):
+                raise ValueError("Saved preview must be a JSON object")
+            report = backfill_roster_eui(
+                data_dir / HOBAT_DATABASE_FILENAME, network=args.network,
+                evidence_dir=args.evidence_dir, reviewed=reviewed, selected=tuple(args.select),
+                all_eligible=args.all_eligible,
+            )
+        except (ValueError, OSError, HealthStoreError, sqlite3.DatabaseError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(report, sort_keys=True))
+        return 0
     if args.health_command == "migrate":
         return _run_schema_migration(args, data_dir)
     if args.health_command == "prepare-history":
@@ -518,12 +561,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{' (dry run)' if args.dry_run else ''}"
         ))
         return 0
-    policy = load_health_policy(args.policy_config_dir or Path.cwd() / "config")
     if args.dry_run and args.export_latest:
         parser.error("--dry-run cannot be combined with --export-latest")
     roster_actions = sum(
         bool(value)
-        for value in (args.init_roster_from_label_map, args.roster_list, args.roster_device)
+        for value in (args.init_roster_from_label_map, args.reconcile_roster_from_label_map,
+                      args.roster_list, args.roster_device)
     )
     if roster_actions > 1:
         parser.error("roster operations are mutually exclusive")
@@ -531,6 +574,49 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--roster-label and --roster-state require --roster-device")
     if args.dataset == "all" and (roster_actions or args.export_latest):
         parser.error("--dataset all cannot be combined with roster operations or --export-latest")
+
+    if args.reconcile_roster_from_label_map:
+        if args.dry_run and args.yes:
+            parser.error("--dry-run cannot be combined with --yes or --apply")
+        if args.export_latest:
+            parser.error("--export-latest cannot be combined with roster reconciliation")
+        database_path = data_dir / HOBAT_DATABASE_FILENAME
+        if not database_path.is_file():
+            parser.error("Health store is not available")
+        if not args.dry_run and not args.yes:
+            if not sys.stdin.isatty():
+                parser.error("Noninteractive roster reconciliation requires --yes or --apply")
+            if input("Retire previous roster addresses? [y/N] ").strip().lower() != "y":
+                print("Roster reconciliation cancelled.")
+                return 0
+        from contextlib import nullcontext
+        from device_label import _map_lock
+
+        try:
+            network_id = network_id_for_dataset(data_dir=data_dir, dataset_id=args.dataset)
+            map_path = data_dir / EXTADDR_DEVICE_LABEL_MAP_FILENAME
+            lock = nullcontext() if args.dry_run else _map_lock(map_path)
+            with lock:
+                addresses = previous_addresses_from_label_map(data_dir)
+                store = SQLiteHealthStore(database_path, read_only=True)
+                document = reconcile_previous_addresses(
+                    store, network_id=network_id, dataset_id=args.dataset,
+                    addresses=addresses, dry_run=args.dry_run,
+                )
+        except (HealthProcessingError, HealthStoreError, OSError, ValueError,
+                sqlite3.DatabaseError, TimeoutError) as exc:
+            parser.error(str(exc))
+        if args.json_output:
+            print(json.dumps(document, sort_keys=True))
+        else:
+            for item in document["items"]:
+                print(f"{item['deviceId']} -> {item['primaryDeviceId']}: "
+                      f"{item['action']} ({item['rosterState'] or 'not present'})")
+            print(f"{'Would retire' if args.dry_run else 'Retired'} {document['retired']} devices.")
+        return 0
+
+    if args.yes:
+        parser.error("--yes or --apply requires --reconcile-roster-from-label-map")
 
     if args.init_roster_from_label_map:
         store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
@@ -581,6 +667,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"{record['device_id']} {record['roster_state']}{label}")
         return 0
 
+    policy = load_health_policy(args.policy_config_dir or Path.cwd() / "config")
     dataset_ids = (
         sorted(load_health_manifest().datasets)
         if args.dataset == "all"

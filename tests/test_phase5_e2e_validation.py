@@ -20,7 +20,9 @@ from typing import Any
 import pytest
 
 from merge_dataset import main as merge_dataset_main
+from merge_dataset import parse_args, resolve_merge_command_inputs
 from td_device_fields import is_placeholder_ext_address
+from util_data import network_scope_path
 
 pytestmark = pytest.mark.requires_data_dir
 
@@ -41,10 +43,8 @@ def _data_manifest(data_dir: Path) -> dict[str, str]:
     return manifest
 
 
-def _run_e2e_merge_with_real_data(data_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Run the full merge pipeline and return merged/report data."""
-    output_file = data_dir / "td-merged-topology-all.json"
-    args = [
+def _merge_args(data_dir: Path) -> list[str]:
+    return [
         "--base-dir", str(data_dir),
         "--dataset-file", "td-otbr-cli-thread-network-info.json",
         "--output", "td-merged-topology-all.json",
@@ -52,7 +52,11 @@ def _run_e2e_merge_with_real_data(data_dir: Path) -> tuple[list[dict[str, Any]],
         "--report-file", "td-merge-report-phase5.json",
     ]
 
-    exit_code = merge_dataset_main(args)
+
+def _run_e2e_merge_with_real_data(data_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Run the full merge pipeline and return merged/report data."""
+    output_file = data_dir / "td-merged-topology-all.json"
+    exit_code = merge_dataset_main(_merge_args(data_dir))
     assert exit_code == 0, f"Merge failed with exit code {exit_code}"
     assert output_file.exists(), f"Output file not created: {output_file}"
     with output_file.open("r") as file_handle:
@@ -70,9 +74,22 @@ def _run_e2e_merge_with_real_data(data_dir: Path) -> tuple[list[dict[str, Any]],
 def isolated_data_dir(tmp_path_factory: pytest.TempPathFactory):
     original_manifest = _data_manifest(DATA_DIR)
     data_dir = tmp_path_factory.mktemp("phase5-data")
-    shutil.copytree(DATA_DIR, data_dir, dirs_exist_ok=True)
-    yield data_dir
-    assert _data_manifest(DATA_DIR) == original_manifest
+    try:
+        inputs = resolve_merge_command_inputs(parse_args(_merge_args(DATA_DIR)), DATA_DIR)
+        paths = {DATA_DIR / name for name in inputs.loaded_input_files}
+        paths.update(path for path in map(network_scope_path, tuple(paths)) if path.exists())
+        paths.update(path for path in (inputs.dataset_path, inputs.extaddr_map_path) if path.is_file())
+        for path in paths:
+            target = data_dir / path.relative_to(DATA_DIR)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+        copied = resolve_merge_command_inputs(parse_args(_merge_args(data_dir)), data_dir)
+        assert copied.input_files == inputs.input_files
+        assert copied.loaded_input_files == inputs.loaded_input_files
+        assert copied.skipped_files == inputs.skipped_files
+        yield data_dir
+    finally:
+        assert _data_manifest(DATA_DIR) == original_manifest
 
 
 @pytest.fixture(scope="module")
@@ -222,7 +239,7 @@ def test_performance_benchmarking(isolated_data_dir: Path):
 # Test 4: Data Loss Detection
 # =============================================================================
 
-def test_data_loss_detection(merged_data: list[dict[str, Any]], isolated_data_dir: Path):
+def test_data_loss_detection(merged_data: list[dict[str, Any]]):
     """Detect potential data loss during merge."""
     print("\n=== Test: Data Loss Detection ===")
     
@@ -246,7 +263,8 @@ def test_data_loss_detection(merged_data: list[dict[str, Any]], isolated_data_di
     input_extaddrs = set()
     
     for filename in input_files:
-        filepath = isolated_data_dir / filename
+        # This read-only audit includes captures outside the merge recipe.
+        filepath = DATA_DIR / filename
         assert filepath.is_file(), f"Required Phase 5 fixture is missing: {filename}"
         
         with filepath.open("r") as f:

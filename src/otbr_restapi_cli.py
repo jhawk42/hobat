@@ -259,10 +259,11 @@ def _add_devices_commands(
     )
 
     devices_clear = devices_subparsers.add_parser(
-        "clear", help="Clear the OTBR REST device collection (requires --yes)"
+        "clear", help="Clear the OTBR REST device collection (requires --yes or --apply)"
     )
     devices_clear.add_argument(
         "--yes",
+        "--apply",
         action="store_true",
         required=True,
         help="Confirm clearing the remote device collection; local caches are unchanged",

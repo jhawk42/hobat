@@ -144,6 +144,8 @@ def _create_schema_fixture(path, version: int) -> None:
             td_health_sqlite._migration_v9(connection)
         if version >= 10:
             td_health_sqlite._migration_v10(connection)
+        if version >= 11:
+            td_health_sqlite._migration_v11(connection)
 
         connection.execute("DELETE FROM schema_migrations")
         if version == 1:
@@ -576,7 +578,7 @@ def test_invalid_ledgers_fail_closed(versions, tmp_path) -> None:
         SQLiteHealthStore(path)
 
 
-def _delayed_migration_process(path, marker, *, sleep_seconds: int = 2):
+def _paused_migration_process(path, marker, release):
     script = """
 import sys
 import time
@@ -587,7 +589,12 @@ registry = health.SCHEMA_MIGRATIONS
 def delayed(connection):
     original.apply(connection)
     Path(sys.argv[2]).write_text("ready")
-    time.sleep(int(sys.argv[3]))
+    release = Path(sys.argv[3])
+    deadline = time.monotonic() + 30
+    while not release.exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("migration release was not signaled")
+        time.sleep(0.01)
 original = next(item for item in registry if item.to_version == 4)
 health.SCHEMA_MIGRATIONS = tuple(
     replace(item, apply=delayed) if item.to_version == 4 else item
@@ -608,7 +615,7 @@ print("migrated", flush=True)
             script,
             str(path),
             str(marker),
-            str(sleep_seconds),
+            str(release),
         ],
         env=environment,
         stdout=subprocess.PIPE,
@@ -648,12 +655,14 @@ def test_wal_reader_stays_available_during_locked_migration(tmp_path) -> None:
         reader.execute("BEGIN")
         assert reader.execute("SELECT MAX(version) FROM schema_migrations").fetchone() == (3,)
         marker = tmp_path / "migration-ready"
-        process = _delayed_migration_process(path, marker)
+        release = tmp_path / "migration-release"
+        process = _paused_migration_process(path, marker, release)
         try:
             _wait_for_marker(process, marker)
             assert reader.execute(
                 "SELECT MAX(version) FROM schema_migrations"
             ).fetchone() == (3,)
+            release.touch()
             stdout, stderr = process.communicate(timeout=10)
             assert process.returncode == 0, stderr
             assert stdout.strip() == "migrated"
@@ -703,7 +712,7 @@ def test_terminated_migration_rolls_back_and_retry_succeeds(tmp_path) -> None:
     path = tmp_path / "interrupted.db"
     _create_schema_fixture(path, 3)
     marker = tmp_path / "migration-ready"
-    process = _delayed_migration_process(path, marker, sleep_seconds=30)
+    process = _paused_migration_process(path, marker, tmp_path / "migration-release")
     try:
         _wait_for_marker(process, marker)
         process.terminate()

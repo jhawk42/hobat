@@ -41,7 +41,7 @@ reachability probes. Device labels use a separate static-map read/update API.
 | HTTP server | `td_webserver.py` | Static assets, catalog and source capabilities, data allowlist, cache policy, jobs, health APIs, device actions, and device labels |
 | CLI dispatcher | `td_cli.py` | Top-level command tree and command-family dispatch |
 | Collectors | `otbr_cli_*.py`, `otbr_restapi_*.py`, `ha_matter_ws_*.py`, `mdns_*.py`, `eve_process.py` | Live collection, parsing, normalization, checkpoints, final snapshots |
-| Processing | `td_unified_dataset.py`, `merge_dataset.py`, `merge_extaddr_device_label_map.py`, `td_health_*.py`, `td_system_*.py` | Cache-only Unified materialization, cross-source merge, label-map administration, health assessment/history, and system administration |
+| Processing | `td_unified_dataset.py`, `merge_dataset.py`, `device_label.py`, `td_health_*.py`, `td_system_*.py` | Cache-only Unified materialization, cross-source merge, label-map administration, health assessment/history, and system administration |
 | Shared contracts | `td_const.py`, `td_dataset_catalog.py`, `td_network_identity.py`, `td_source_authority.py`, `td_source_capabilities.py`, `td_device_fields.py`, `td_device_merge.py`, `td_record_merge.py`, `td_json_key_normalizer.py`, `util_*.py` | Catalog validation, source availability, filenames, identities, fields, merge policies, data paths, network and subprocess helpers |
 | Persistence | Effective data directory | Operator inputs, generated snapshots, and the Hobat-wide `hobat_v1.db` SQLite store |
 
@@ -221,7 +221,7 @@ guessed mask; missing/conflicting evidence skips optional enrichment.
 | `merge_dataset.py` | Input selection, normalization, identity-aware merge, validation report, and merged snapshot |
 | [merge_report.py](../src/merge_report.py) | Merge command input/result contracts, viable seed-identity checks, and atomic dataset/report publication with network context |
 | `merge_policy_identity.py`, `merge_policy_mdns.py`, `merge_policy_relationship.py` | Domain-specific identity matching, mDNS record handling, and relationship/route merge policy used by dataset merging |
-| `merge_extaddr_device_label_map.py` | Bulk merge plus single-record read/upsert for the static label map |
+| `device_label.py` | Bulk merge plus single-record read/upsert for the static label map |
 | `extaddr_device_label_map.py` | Static label-map loading |
 | `td_health_manifest.py`, `td-dataset-manifest.json` | Approved health dataset/profile contracts shared with browser registry metadata |
 | `td_health_rules.py`, `td-health-rules.json` | Health finding catalog validation and stable rule metadata |

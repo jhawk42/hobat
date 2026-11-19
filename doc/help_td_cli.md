@@ -162,7 +162,7 @@ for arbitrary unlabeled secrets in unrelated third-party output.
 | `source-probe` | Run a fresh live readiness probe for one supported collector source |
 | `unify-dataset` | Materialize a declared source-primary product using cached inputs only |
 | `merge-dataset` (`merge-data`) | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file; `merge-data` is a compatibility alias |
-| `merge-extaddr` | Read or upsert one device label, or bulk-merge missing extaddr entries into the static map |
+| `device-label` (alias `merge-extaddr`) | Read or upsert one device label, or bulk-merge missing extaddr entries into the static map |
 
 ---
 
@@ -544,16 +544,18 @@ td_cli process-eve ...
 
 ```text
 td_cli health process-dataset --dataset DATASET [--allow-partial] [--dry-run] [--json]
+td_cli health process-dataset --dataset DATASET --reconcile-roster-from-label-map
+                              [--dry-run | --yes | --apply] [--json]
                               [--export-latest [FILE]]
 td_cli health compare --before-assessment ID --after-assessment ID [--dry-run] [--json]
 td_cli health migrate (--check | --apply) [--json]
 td_cli health migrate-history --dataset all|DATASET [--network NETWORK_ID]
                               [--policy-config-dir DIR] [--allow-policy-change]
-                              [--dry-run] [--backup-output DIRECTORY] [--yes] [--json]
-td_cli health purge [--keep-days DAYS] [--dry-run] [--yes] [--json]
-td_cli health purge-all [--dry-run] [--yes] [--json]
+                              [--dry-run] [--backup-output DIRECTORY] [--yes | --apply] [--json]
+td_cli health purge [--keep-days DAYS] [--dry-run] [--yes | --apply] [--json]
+td_cli health purge-all [--dry-run] [--yes | --apply] [--json]
 td_cli health purge-by-device --device EXTADDR [--network NETWORK_ID]
-                              [--dry-run] [--yes] [--json]
+                              [--dry-run] [--yes | --apply] [--json]
 ```
 
 `process-dataset` assesses approved cached snapshots without starting
@@ -570,6 +572,26 @@ SQLite-only recovery copy under `<datadir>/.migration-backups/`; writable store
 startup can apply the same online migrations automatically. Schema migration
 does not replay history. Recovery copies are excluded from directory backups
 and preserved by restore.
+
+`health backfill-roster-eui` previews missing EUIs for existing devices in one
+network from a retained, producer-bound OTBR sweep. The output is always JSON.
+Keep both the evidence and saved preview private.
+
+```sh
+td_cli health backfill-roster-eui --network "$NET" --evidence-dir "$CAPTURE" > "$PREVIEW"
+td_cli health backfill-roster-eui --network "$NET" --evidence-dir "$CAPTURE" \
+  --apply --from-preview "$PREVIEW" --all-eligible
+```
+
+Review the preview before applying. Use repeated `--select ID` instead of
+`--all-eligible` to restrict the batch to reviewed `fill-eui` candidates.
+For a nonempty apply, the command takes a verified SQLite backup and adds the
+aliases in one transaction (including the v10-to-v11 upgrade if needed).
+Changed evidence or roster identity facts require a fresh preview. A fresh
+preview after a successful import reports matching aliases as no-ops.
+Normal roster EUI facts take precedence; list/detail reads expose the alias
+provenance and flag disagreement. The import does not change timestamps of
+observations, roster membership, assessments, Unified, or device labels.
 
 Roster writes are network-scoped. `--roster-label` without `--roster-state`
 preserves the existing designation and monitoring epoch. Setting
@@ -604,7 +626,7 @@ another process is using it, stop that process and retry.
 
 ```text
 td_cli system backups create --output DIRECTORY [--json]
-td_cli system backups restore --input BACKUP [--yes] [--json]
+td_cli system backups restore --input BACKUP [--yes | --apply] [--json]
 ```
 
 Create writes a versioned, checksummed copy of the complete effective data
@@ -642,28 +664,35 @@ OTBR or Matter device actions.
 td_cli {merge-dataset,merge-data} ...
 ```
 
-### `merge-extaddr`
+### `device-label`
 
 ```text
-td_cli merge-extaddr [--read-extaddr EXTADDR | --update-extaddr EXTADDR]
-                        [--device-label DEVICE_LABEL] [bulk-merge-options]
+td_cli device-label [--read-extaddr EXTADDR | --update-extaddr EXTADDR]
+                    [--device-label DEVICE_LABEL] [--eui EUI | --observed-eui EUI]
+                    [--comment COMMENT] [--yes | --apply]
+td_cli device-label --suggest-ha-matter --network NETWORK_ID
+td_cli device-label --suggest-hap CAPTURE_DIR --network NETWORK_ID
+td_cli device-label --compare-eve CAPTURE_DIR --network NETWORK_ID
+td_cli device-label [bulk-merge-options] [--dry-run]
 ```
 
+`merge-extaddr` is a compatibility alias for `device-label`.
 Single-record operations use the configured data directory's
 `td-static-extaddr-device-label.json`:
 
 ```bash
 # Read one mapping without writing.
 PYTHONPATH=src python3 -m td_cli --datadir ./data \
-  merge-extaddr --read-extaddr 4e866ce96501b9ed
+  device-label --read-extaddr 4e866ce96501b9ed
 
 # Update an existing mapping or insert it when absent.
 PYTHONPATH=src python3 -m td_cli --datadir ./data \
-  merge-extaddr --update-extaddr 4e866ce96501b9ed \
+  device-label --update-extaddr 4e866ce96501b9ed \
   --device-label "Office Sensor"
 ```
 
-Read success writes one JSON object to stdout:
+Read success writes one JSON object to stdout, including stored `eui`,
+`comment`, and `lastUpdated` when present:
 
 ```json
 {"deviceLabel": "Office Sensor", "extAddress": "4e866ce96501b9ed"}
@@ -674,6 +703,128 @@ Upsert success adds an `operation` field:
 ```json
 {"deviceLabel": "Office Sensor", "extAddress": "4e866ce96501b9ed", "operation": "updated"}
 ```
+
+`--eui` accepts a nonzero 64-bit hexadecimal EUI (with optional colons or
+hyphens). Replacing a different stored EUI requires `--apply` or `--yes`;
+neither flag permits taking another row's EUI. `--comment ""` clears a
+comment. `--observed-eui` is best effort; its `euiOutcome` reports whether
+the observation was recorded, matched, or skipped.
+
+Changed rows receive UTC `lastUpdated`. Real writes serialize under a
+per-map lock (exit `7` if busy) and keep one previous `.bak` copy. No-op edits
+leave the original map and backup untouched. Bulk merges still write by
+default; `--dry-run` previews them without locking or writing. New
+name-derived labels omit their declared DNS-SD service suffix.
+
+EUI sync defaults to a cache-only JSON preview. Specify the network as
+`extpan:<16-hex-digits>` and optionally select `--source health-roster`
+instead of `cache`. The default maximum evidence age is seven days; use
+`--max-evidence-age SECONDS` to change it. Without explicit capture
+directories, sync only fills missing EUIs with qualified cache evidence.
+Roster evidence is report-only.
+Direct REST results must match their diagnostic item's creation time and fall
+within the recorded collection interval.
+Return, duplicate merge, and `--keep` are not enabled.
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data device-label \
+  --sync-eui --network extpan:0011223344556677 > label-sync-preview.json
+# Inspect the preview before applying anything. Use --select ID (repeatable)
+# instead of --all-eligible to apply only specific reviewed candidates.
+PYTHONPATH=src python3 -m td_cli --datadir ./data device-label \
+  --sync-eui --network extpan:0011223344556677 --apply \
+  --from-preview label-sync-preview.json --all-eligible
+```
+
+Repeat the same source and evidence age options on apply. Changes
+to the map, evidence, or candidate decisions invalidate the preview.
+
+To preview a label move, supply retained `--before-capture` and
+`--after-capture` directories. They must include `run.meta`, the diagnostic
+snapshot and scope companion, and the bracketing network-info reads with
+their companions. The two captures must be recent, ordered and verified
+on the selected network. A move requires the same EUI in valid replies
+from two different extended addresses, with no observed overlap or
+ownership conflict.
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data device-label \
+  --sync-eui --network "$NET" --before-capture "$BEFORE" \
+  --after-capture "$AFTER" > rekey-preview.json
+# Inspect the preview. Replace CANDIDATE_ID with the approved rekey ID.
+PYTHONPATH=src python3 -m td_cli --datadir ./data device-label \
+  --sync-eui --network "$NET" --before-capture "$BEFORE" \
+  --after-capture "$AFTER" --apply --from-preview rekey-preview.json \
+  --select CANDIDATE_ID
+```
+
+Capture-pair mode requires explicit selection and does not accept
+`--all-eligible`. A rekey preserves the label and comment and saves the
+displaced map address in `previousExtAddresses`. Incomplete child-table
+coverage is shown in the preview; the move is not proof of absence and
+does not authorize health-roster retirement.
+
+For a read-only HA Matter name preview:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data device-label \
+  --suggest-ha-matter --network "$NET" > ha-matter-label-preview.json
+```
+
+The preview uses only the catalog's HA Matter Devices inventory, with an
+observed network companion bound to that snapshot by SHA-256. A candidate
+needs the same row's `thread.extAddress`, matching `thread.extendedPanId`,
+and `matter.rawNodeLabel` (endpoint 0 Basic Information `NodeLabel`). Older
+inventories without the raw attribute field do not offer names; the display
+name cannot prove provenance. Equal valid names are grouped, different valid
+names for one address conflict, and existing primary or previous map
+addresses are ineligible. JSON includes candidate IDs, row evidence pointers,
+and input fingerprints. Keep the output private. Preview mode does not
+run a collector or write the label map.
+
+`--suggest-hap CAPTURE_DIR` is a separate read-only preview. It requires a
+fresh paired capture: `network-start/`, `otbr/`, `hap/`, and `network-end/`
+each hold their source snapshot and network companion. `hap-capture.json`
+binds both files per stage with SHA-256 digests, exit status, and UTC epoch
+start/end times. The independent Thread checks must agree on the selected
+Extended PAN ID and /64 OMR prefix. An operator-declared HAP network on its
+own is not enough.
+
+The preview matches a HAP `_hap._udp.local.` OMR address to a single
+Thread extended address. The OTBR address and IPv6 list must come from the
+same correlated raw diagnostic reply. Both observations must be at most
+24 hours old and no more than five minutes apart. Existing primary and
+previous addresses are excluded. The result keeps the original service
+name and decoded category separate and reports conflicts, ambiguous
+matches, and ineligible evidence. No collector or apply runs in preview
+mode.
+
+`--compare-eve CAPTURE_DIR` reads the native Eve layout from the configured
+data directory and reuses the verified OTBR side of the paired capture.
+Pass `--network` only after confirming the export came from that network.
+Only exact IPv6 matches within the verified OMR prefix are compared; multiple
+Thread addresses are flagged as ambiguous. A unique match is still
+`unverified` because the Eve observation time is unknown. The JSON
+`comparisons` report flags addresses already saved in the map or its history.
+It is not a suggestion preview and cannot be applied.
+
+To save reviewed HA Matter or HAP suggestions, repeat the original preview
+command with the same network and inputs, adding `--apply`, `--from-preview`,
+and one or more `--select ID` flags. For example:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data device-label \
+  --suggest-ha-matter --network "$NET" --apply \
+  --from-preview ha-matter-label-preview.json --select "$ID"
+```
+
+Only `resolved` IDs qualify; `--all-eligible` is not supported. The entire
+saved preview is revalidated under the shared map lock. Changed inputs,
+changed decisions, or expired HAP evidence reject the whole batch. The
+command adds only absent addresses, preserves current labels and their
+history, and updates the map in one atomic replacement after backing up
+an existing map. A successful write invalidates the old preview; generate
+a fresh preview rather than replaying it.
 
 `operation` is `inserted` for a new mapping and `updated` for an existing one.
 It is response metadata and is not persisted. ExtAddresses are normalized to
@@ -729,7 +880,7 @@ These options must be placed after `otbr-restapi` and before its subcommand.
 |---|---|---|
 | `download` | *(none)* | Download OTBR REST API endpoint snapshots to JSON files |
 | `node` | `get`, `state get`, `state set`, `dataset active get`, `dataset active set` | Read/mutate local OTBR node and active dataset |
-| `devices` | `list`, `get`, `fetch`, `clear --yes` | List, read, refresh, or explicitly clear the remote device collection |
+| `devices` | `list`, `get`, `fetch`, `clear (--yes or --apply)` | List, read, refresh, or explicitly clear the remote device collection |
 | `diagnostics` | `list`, `get`, `fetch`, `fetch-all` | Read or fetch network diagnostics |
 | `actions` | `list`, `get`, `enqueue add-thread-device`, `enqueue get-network-diagnostic`, `enqueue reset-network-diag-counter`, `enqueue get-energy-scan`, `enqueue update-device-collection` | Inspect and enqueue OTBR action tasks |
 | `mesh-diagnostics` | `children`, `child-ipv6`, `router-neighbors`, `fetch`, `fetch-all` | Fetch mesh-diagnostic TLV datasets |
@@ -764,7 +915,7 @@ When `TD_DATA_DIR` points at an empty or partially populated directory, command 
 | `otbr-cli` | none | `td-static-extaddr-device-label.json` | Continue with no enrichment and log a warning |
 | `mdns` | none | none | Continue unless the runtime browse/discovery itself fails |
 | `process-eve` | `Eve Thread Network Layout.evethreadlayout` | none | Return `4` when the file is missing |
-| `merge-extaddr` | Bulk merge: static map and merge input. Single read: static map. Single upsert: none. | none | Bulk/read return `4` for a missing required map; upsert creates a missing map atomically. |
+| `device-label` (alias `merge-extaddr`) | Bulk merge: merge input. Single read and EUI sync: static map. Single upsert: none. | none | Missing required input returns `4`. Bulk merge and upsert can create a missing map atomically. |
 | `merge-dataset` | `td-otbr-cli-thread-network-info.json` | `td-static-extaddr-device-label.json` and the merge source files listed in the plan | Return `4` when the seed is missing or no viable optional source loads |
 | `otbr-restapi` | none, unless an explicit file argument is used by a mutating set command | command-dependent | Preserve OTBR REST API exit-code semantics |
 
@@ -870,6 +1021,16 @@ positional arguments:
 ```
 
 ### `otbr-cli networkdiag fetch-all`
+
+Default fast mode runs `175, 170, 155, 150`. Level 175 requests TLVs
+`0 1 2 8 23` (including IPv6 addresses and EUI64); level 155 requests
+`0 1 2 23`. Fast mode still stops at the first successful response, even
+without EUI64, and skips children already covered by multicast.
+Opt-in detail mode (`--children-fetch-detail`) runs
+`150, 155, 160, 170, 170, 180, 190, 200` subject to its existing stop rules.
+Each enabled mode can make one more request per child than before. Returned
+EUIs are saved as `eui` in the diagnostics snapshot; this does not backfill
+the health roster.
 
 ```
 usage: td_cli otbr-cli networkdiag fetch-all [-h] [-c | -cno]
@@ -1086,10 +1247,10 @@ usage: td_cli process-eve [-h]
 usage: td_cli merge-dataset [-h]
 ```
 
-### `merge-extaddr`
+### `device-label` usage (alias `merge-extaddr`)
 
 ```
-usage: td_cli merge-extaddr [-h] [--merge-mdns-br | --merge-topology-all]
+usage: td_cli device-label [-h] [--merge-mdns-br | --merge-topology-all]
                              [--read-extaddr EXTADDR | --update-extaddr EXTADDR]
                              [--device-label DEVICE_LABEL]
                              [--merge-input-file MERGE_INPUT_FILE]

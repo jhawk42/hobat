@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--json", action="store_true", dest="json_output")
     restore = actions.add_parser("restore")
     restore.add_argument("--input", required=True, type=Path, metavar="BACKUP")
-    restore.add_argument("--yes", action="store_true")
+    restore.add_argument("--yes", "--apply", action="store_true")
     restore.add_argument("--json", action="store_true", dest="json_output")
     database = commands.add_parser(
         "database", description="Hobat SQLite database maintenance."

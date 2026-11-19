@@ -56,7 +56,7 @@ These options apply to every command and must be placed **before** the subcomman
 | `devices list` | List all known devices from `/api/devices` |
 | `devices get` | Get a single device by extAddress |
 | `devices fetch` | Trigger updateDeviceCollectionTask, wait, return device list |
-| `devices clear --yes` | Clear the remote device collection with `DELETE /api/devices` |
+| `devices clear (--yes or --apply)` | Clear the remote device collection with `DELETE /api/devices` |
 | `diagnostics list` | List all cached diagnostic records |
 | `diagnostics get` | Get a single diagnostic record by ID |
 | `diagnostics fetch` | Fetch diagnostics for one device (enqueue + wait + return result) |
@@ -304,7 +304,7 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi \
 #### `devices clear`
 
 Clear the OTBR REST device collection with `DELETE /api/devices`.
-The `--yes` confirmation is required; without it the command exits with a usage
+Confirmation with `--yes` or its alias `--apply` is required; without it the command exits with a usage
 error before making any request. No `--lab` flag is required.
 
 ```bash

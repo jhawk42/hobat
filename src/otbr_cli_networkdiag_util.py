@@ -55,7 +55,9 @@ TLV_VALUES_CHILD_DETAILED = "0 1 2 8 9 28 34"
 TLV_VALUES_CHILD_MEDIUM_MAC_MLE = "0 1 2 8 9 34"
 TLV_VALUES_CHILD_MEDIUM_MAC = "0 1 2 8 9"
 TLV_VALUES_CHILD_BASIC_8 = "0 1 2 8"
+TLV_VALUES_CHILD_BASIC_8_23 = "0 1 2 8 23"
 TLV_VALUES_CHILD_BASIC_28 = "0 1 2 28"
+TLV_VALUES_CHILD_BASIC_23 = "0 1 2 23"
 TLV_VALUES_CHILD_BASIC_2 = "0 1 2"
 
 
@@ -150,10 +152,14 @@ def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
             return TLV_VALUES_CHILD_MEDIUM_MAC_MLE
         case 180:
             return TLV_VALUES_CHILD_MEDIUM_MAC
+        case 175:
+            return TLV_VALUES_CHILD_BASIC_8_23
         case 170:
             return TLV_VALUES_CHILD_BASIC_8
         case 160:
             return TLV_VALUES_CHILD_BASIC_28
+        case 155:
+            return TLV_VALUES_CHILD_BASIC_23
         case 150:
             return TLV_VALUES_CHILD_BASIC_2
         case _:

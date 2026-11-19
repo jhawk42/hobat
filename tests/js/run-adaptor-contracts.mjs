@@ -246,13 +246,37 @@ const cachedEve = run(
   ["td-eve-topology.json"],
   [cachedEveRows],
 );
-assert.equal(cachedEve.nodeData.length, 79);
-assert.equal(cachedEve.edgeData.length, 207);
+const cachedEveNodes = Object.values(cachedEveRows);
+const cachedEveIds = new Set(cachedEveNodes.map((row) => row.id));
+const expectedEveIds = new Set(cachedEveIds);
+const expectedEveEdges = new Map();
+for (const node of cachedEveNodes) {
+  for (const [relationships, category] of [
+    [node.routes || [], "eve_route"],
+    [node.children || [], "eve_child"],
+  ]) {
+    for (const relationship of relationships) {
+      const target = category === "eve_route"
+        ? relationship.to
+        : typeof relationship === "string" ? relationship : relationship.id;
+      if (!node.id || !target) continue;
+      expectedEveIds.add(target);
+      if (node.id === target) continue;
+      const key = [node.id, target].sort().join("|");
+      if (!expectedEveEdges.has(key)) expectedEveEdges.set(key, new Set());
+      expectedEveEdges.get(key).add(category);
+    }
+  }
+}
+assert.ok(cachedEveIds.size > 0);
+assert.deepEqual(new Set(cachedEve.nodeData.map((node) => node.id)), expectedEveIds);
+assert.equal(cachedEve.nodeData.length, expectedEveIds.size);
 assert.deepEqual(
-  cachedEve.nodeData.map((node) => node.id),
-  Object.values(cachedEveRows).map((row) => row.id),
+  cachedEve.edgeData.filter((edge) => !edge.baseHidden)
+    .map((edge) => [edge.id, [...edge.linkCategories].sort()]).sort(),
+  [...expectedEveEdges].map(([id, categories]) => [id, [...categories].sort()]).sort(),
 );
-assert.equal(cachedEve.rawByIdForDetails.size, 79);
+assert.deepEqual(new Set(cachedEve.rawByIdForDetails.keys()), cachedEveIds);
 assert.deepEqual(cachedEve.sourceNames, ["eve"]);
 }
 

@@ -109,11 +109,13 @@ from td_const import (
     TD_DATA_DIR_ARG_HELP,
     THREAD_TOOLS_DIAGNOSTICS_FILENAME,
 )
-from merge_extaddr_device_label_map import (
+from device_label import (
+    normalize_valid_eui,
     ExtaddrNotFoundError,
     normalize_valid_device_label,
     normalize_valid_extaddr,
     read_device_label,
+    validate_device_label_comment,
 )
 
 TD_WEB_HOST_ADDR = ""
@@ -856,6 +858,7 @@ async def run_td_cli(
     timeout_s: float | None = None,
     on_process_started: "Callable[[asyncio.subprocess.Process], None] | None" = None,
     on_process_ended: "Callable[[], None] | None" = None,
+    on_stdout: "Callable[[bytes], None] | None" = None,
 ) -> int:
     """Invoke td_cli.py as a subprocess and return its exit code.
 
@@ -927,6 +930,8 @@ async def run_td_cli(
             td_cli_path,
             " ".join(safe_action_args)
         )
+    if on_stdout is not None:
+        on_stdout(stdout)
     if stdout:
         logging.info(
             "td_cli stdout: %s",
@@ -1344,11 +1349,12 @@ def _validate_device_extaddr(raw_extaddr: object) -> str:
         raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
 
 
-def _read_device_label_for_api(data_dir: Path, extaddr: str) -> dict[str, str]:
+def _read_device_label_for_api(data_dir: Path, extaddr: str,
+                               observed_eui: str | None = None) -> dict[str, str]:
     """Read one label and translate map failures into HTTP responses."""
     map_path = data_file_path(EXTADDR_DEVICE_LABEL_MAP_FILENAME, data_dir)
     try:
-        return read_device_label(map_path, extaddr)
+        return read_device_label(map_path, extaddr, observed_eui=observed_eui)
     except (FileNotFoundError, ExtaddrNotFoundError) as exc:
         raise aiohttp.web.HTTPNotFound(reason="device label not found") from exc
     except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
@@ -1370,7 +1376,11 @@ async def handle_device_get_api(request: aiohttp.web.Request) -> aiohttp.web.Res
     """GET /api/device/{extAddress} — return the current static device label."""
     extaddr = _validate_device_extaddr(request.match_info.get("extAddress"))
     data_dir = request.app[TD_DATA_DIR_APP_KEY]
-    return _device_json_response(_read_device_label_for_api(data_dir, extaddr))
+    try:
+        eui = normalize_valid_eui(request.query["eui"]) if "eui" in request.query else None
+    except ValueError as exc:
+        raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
+    return _device_json_response(_read_device_label_for_api(data_dir, extaddr, eui))
 
 
 async def handle_device_patch_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -1384,31 +1394,43 @@ async def handle_device_patch_api(request: aiohttp.web.Request) -> aiohttp.web.R
         raise aiohttp.web.HTTPBadRequest(reason="malformed JSON body") from exc
     if not isinstance(payload, dict):
         raise aiohttp.web.HTTPBadRequest(reason="JSON body must be an object")
-    if set(payload) != {"deviceLabel"}:
+    if "deviceLabel" not in payload or set(payload) - {"deviceLabel", "observedEui", "comment"}:
         raise aiohttp.web.HTTPBadRequest(
-            reason="JSON body must contain only deviceLabel"
+            reason="JSON body requires deviceLabel and accepts optional observedEui and comment"
         )
     try:
         device_label = normalize_valid_device_label(payload["deviceLabel"])
+        if "comment" in payload:
+            validate_device_label_comment(payload["comment"])
     except ValueError as exc:
         raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
+    try:
+        observed_eui = (
+            normalize_valid_eui(payload["observedEui"]) if "observedEui" in payload else None
+        )
+    except ValueError as exc:
+        raise aiohttp.web.HTTPBadRequest(
+            reason=str(exc), content_type="application/json",
+            text=json.dumps({"error": "Device label not saved: the selected record has an invalid EUI."}),
+        ) from exc
 
     async with _get_source_lock("merge-extaddr"):
-        try:
-            _read_device_label_for_api(data_dir, extaddr)
-            inserted = False
-        except aiohttp.web.HTTPNotFound:
-            inserted = True
-
         action_args = [
-            "merge-extaddr",
+            "device-label",
             "--update-extaddr",
             extaddr,
             "--device-label",
             device_label,
         ]
+        if observed_eui is not None:
+            action_args.extend(("--observed-eui", observed_eui))
+        if "comment" in payload:
+            action_args.append(f"--comment={payload['comment']}")
+        output: list[bytes] = []
         try:
-            exit_code = await run_td_cli(action_args, data_dir, timeout_s=30)
+            exit_code = await run_td_cli(
+                action_args, data_dir, timeout_s=30, on_stdout=output.append
+            )
         except asyncio.TimeoutError as exc:
             raise aiohttp.web.HTTPBadGateway(
                 reason="device label update timed out"
@@ -1418,14 +1440,26 @@ async def handle_device_patch_api(request: aiohttp.web.Request) -> aiohttp.web.R
                 reason=f"td_cli device label update failed (exit {exit_code})"
             )
 
-        try:
-            result = _read_device_label_for_api(data_dir, extaddr)
-        except aiohttp.web.HTTPNotFound as exc:
-            raise aiohttp.web.HTTPInternalServerError(
-                reason="updated device label could not be read back"
-            ) from exc
-
-    return _device_json_response(result, status=201 if inserted else 200)
+    try:
+        result = json.loads(b"".join(output))
+        if not isinstance(result, dict):
+            raise ValueError("update result must be an object")
+        operation = result.pop("operation", None)
+        if (
+            operation not in {"inserted", "updated", "unchanged"}
+            or result.get("extAddress") != extaddr
+            or result.get("deviceLabel") != device_label
+            or ("comment" in payload and result.get("comment", "") != payload["comment"])
+            or (observed_eui is not None and result.get("euiOutcome") not in
+                {"set", "unchanged", "skipped-owned-by", "skipped-different"})
+        ):
+            raise ValueError("unexpected label update result")
+    except (ValueError, TypeError) as exc:
+        logging.error("Invalid device-label update result: %s", exc)
+        raise aiohttp.web.HTTPInternalServerError(
+            reason="updated device label result was invalid"
+        ) from exc
+    return _device_json_response(result, status=201 if operation == "inserted" else 200)
 
 
 def _health_json_response(payload: object, *, status: int = 200) -> aiohttp.web.Response:

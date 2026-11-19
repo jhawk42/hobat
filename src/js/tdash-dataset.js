@@ -33,6 +33,7 @@ export function restoreLastKnownGoodDataset() {
 
 // Map<lowercased-extaddr-string, device_label-string> — loaded at startup
 let staticExtaddrLabelMap = new Map();
+let staticEuiOwners = new Map();
 
 // per-file cache-header store (task 3.3)
 // Map<filename, { maxAge: number, fetchedAt: number }>
@@ -429,7 +430,7 @@ function enrichNodeWithStaticLabel(node) {
   if (!extaddr && isPlainObject(node.attributes))
     extaddr = getCanonicalExtaddr(node.attributes);
   if (!extaddr) return node;
-  const label = staticExtaddrLabelMap.get(extaddr);
+  const label = staticExtaddrLabelMap.get(extaddr) ?? lookupStaticEuiLabel(node);
   if (!label) return node;
   return { ...node, deviceLabel: label, device_label: label };
 }
@@ -727,15 +728,60 @@ async function pollJobUntilDone(
 
 // ── Static label map loader ───────────────────────────────────────────────────
 
+export function canonicalLabelEui(value) {
+  const key = typeof value === "string" ? value.trim().replace(/[:-]/g, "").toLowerCase() : "";
+  return /^[0-9a-f]{16}$/.test(key) && key !== "0000000000000000" ? key : "";
+}
+
+function recordLabelEui(record) {
+  const fields = [record?.eui, record?.eui64, record?.attributes?.eui, record?.attributes?.eui64]
+    .filter((value) => value != null);
+  const keys = new Set(fields.map(canonicalLabelEui));
+  return keys.size === 1 ? keys.values().next().value : "";
+}
+
+function indexEuiOwner(owners, eui, address) {
+  if (!eui) return;
+  owners.set(eui, owners.has(eui) && owners.get(eui) !== address ? null : address);
+}
+
+function lookupStaticEuiLabel(record) {
+  return staticExtaddrLabelMap.get(staticEuiOwners.get(recordLabelEui(record)));
+}
+
+export function indexStaticLabelMap(entries, euiOwners = new Map()) {
+  const primary = new Map(), historical = new Map(), ambiguous = new Set();
+  for (const entry of entries) {
+    const key = canonicalIdText(entry?.extAddress || entry?.extaddr || entry?.["Extended MAC"]);
+    const label = toText(entry?.deviceLabel ?? entry?.device_label);
+    if (!key || !label) continue;
+    primary.set(key, label);
+    if (/^[0-9a-f]{16}$/.test(key) && key !== "0000000000000000") {
+      indexEuiOwner(euiOwners, recordLabelEui(entry), key);
+    }
+    if (!Array.isArray(entry.previousExtAddresses)) continue;
+    for (const rawAddress of entry.previousExtAddresses) {
+      if (typeof rawAddress !== "string") continue;
+      const address = canonicalIdText(rawAddress);
+      if (!/^[0-9a-f]{16}$/.test(address)) continue;
+      const previousOwner = historical.get(address);
+      if (previousOwner && previousOwner !== key) ambiguous.add(address);
+      historical.set(address, key);
+    }
+  }
+  for (const [address, key] of historical) {
+    if (!primary.has(address) && !ambiguous.has(address)) primary.set(address, primary.get(key));
+  }
+  return primary;
+}
+
 export async function loadStaticLabelMap() {
   try {
     const { data } = await fetchJson("/api/data/td-static-extaddr-device-label.json");
     if (Array.isArray(data)) {
-      data.forEach((entry) => {
-        const key = canonicalIdText(entry?.extAddress ?? entry?.extaddr);
-        const label = toText(entry?.deviceLabel ?? entry?.device_label);
-        if (key && label) staticExtaddrLabelMap.set(key, label);
-      });
+      const euiOwners = new Map();
+      staticExtaddrLabelMap = indexStaticLabelMap(data, euiOwners);
+      staticEuiOwners = euiOwners;
     }
   } catch (err) {
     console.warn(
@@ -745,11 +791,12 @@ export async function loadStaticLabelMap() {
   }
 }
 
-export function setStaticDeviceLabel(extaddr, deviceLabel) {
+export function setStaticDeviceLabel(extaddr, deviceLabel, eui) {
   const key = canonicalIdText(extaddr);
   const label = toText(deviceLabel);
   if (!key || !label) return false;
   staticExtaddrLabelMap.set(key, label);
+  indexEuiOwner(staticEuiOwners, canonicalLabelEui(eui), key);
   return true;
 }
 

@@ -65,7 +65,7 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
         )
 
         with patch.object(
-            td_cli.merge_extaddr_device_label_map, "main", return_value=0
+            td_cli.device_label, "main", return_value=0
         ) as module_main:
             rc = td_cli.dispatch(args, extras, parser)
 
@@ -97,7 +97,8 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(update_rc, 0)
-            self.assertEqual(json.loads(stdout.getvalue())["operation"], "inserted")
+            updated = json.loads(stdout.getvalue())
+            self.assertEqual(updated["operation"], "inserted")
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -116,6 +117,7 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
                 {
                     "deviceLabel": "Office Sensor",
                     "extAddress": "4e866ce96501b9ed",
+                    "lastUpdated": updated["lastUpdated"],
                 },
             )
 

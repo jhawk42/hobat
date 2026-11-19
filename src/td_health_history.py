@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from extaddr_device_label_map import get_extaddr_from_record
+from device_label import normalize_valid_extaddr
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from td_device_fields import get_canonical_ext_address
 from td_health_manifest import load_health_manifest
@@ -71,3 +73,46 @@ def import_expected_roster_from_label_map(
     return add_expected_devices_from_label_map(
         store, network_id=network_id, devices=devices, skipped=skipped
     )
+
+
+def previous_addresses_from_label_map(data_dir: Path) -> tuple[tuple[str, str], ...]:
+    """Return unambiguous old-to-primary device IDs from the operator map."""
+    path = data_dir / EXTADDR_DEVICE_LABEL_MAP_FILENAME
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HealthProcessingError(f"Cannot reconcile expected roster: {exc}") from exc
+    if not isinstance(records, list):
+        raise HealthProcessingError("Label map must be a JSON array")
+
+    primaries: set[str] = set()
+    histories: dict[str, str] = {}
+    try:
+        for record in records:
+            if not isinstance(record, dict):
+                raise ValueError("Label map entries must be objects")
+            primary = device_id_from_ext_address(
+                normalize_valid_extaddr(get_extaddr_from_record(
+                    record, ("extAddress", "extaddr", "Extended MAC"),
+                ))
+            )
+            if primary in primaries:
+                raise ValueError(f"Duplicate primary address: {primary}")
+            primaries.add(primary)
+            previous = record.get("previousExtAddresses", [])
+            if not isinstance(previous, list):
+                raise ValueError("previousExtAddresses must be a list")
+            label = record.get("deviceLabel") or record.get("device_label")
+            if previous and (not isinstance(label, str) or not label.strip()):
+                raise ValueError(f"Missing history label for {primary}")
+            for value in previous:
+                old = device_id_from_ext_address(normalize_valid_extaddr(value))
+                if old in histories:
+                    raise ValueError(f"Duplicate previous address: {old}")
+                histories[old] = primary
+        overlap = primaries.intersection(histories)
+        if overlap:
+            raise ValueError(f"Previous address is also primary: {sorted(overlap)[0]}")
+    except ValueError as exc:
+        raise HealthProcessingError(f"Cannot reconcile expected roster: {exc}") from exc
+    return tuple(sorted(histories.items()))

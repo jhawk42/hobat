@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Sequence
 
-from merge_extaddr_device_label_map import normalize_valid_device_label
+from device_label import normalize_valid_device_label
 from td_health_observation_model import device_id_from_ext_address
 
 if TYPE_CHECKING:
@@ -332,6 +332,119 @@ def add_expected_devices_from_label_map(
         already_present=len(results) - imported,
         skipped=skipped,
     )
+
+
+def reconcile_previous_addresses(
+    store: SQLiteHealthStore,
+    *,
+    network_id: str,
+    dataset_id: str,
+    addresses: Sequence[tuple[str, str]],
+    dry_run: bool,
+) -> dict:
+    """Retire only still-expected predecessors in one network transaction."""
+    network_id = _validate_network_id(network_id)
+    pairs = [(_validate_device_id(old), _validate_device_id(primary))
+             for old, primary in addresses]
+    if len({old for old, _ in pairs}) != len(pairs) or any(
+        old == primary for old, primary in pairs
+    ):
+        raise ValueError("Ambiguous previous address ownership")
+    connection = store._connect() if dry_run else store._connect_existing_write()
+    items = []
+    try:
+        connection.execute("BEGIN" if dry_run else "BEGIN IMMEDIATE")
+        current_assessment = connection.execute(
+            """SELECT a.observation_id
+               FROM current_assessments c JOIN assessments a USING (assessment_id)
+               WHERE c.network_id=? AND c.dataset_id=?""",
+            (network_id, dataset_id),
+        ).fetchone()
+        observed = set()
+        if current_assessment is not None:
+            observed = {row["device_id"] for row in connection.execute(
+                "SELECT device_id FROM device_samples WHERE observation_id=?",
+                (current_assessment["observation_id"],),
+            )}
+        for device_id, primary in pairs:
+            row = connection.execute(
+                """SELECT label, roster_state, revision, expected_since
+                   FROM expected_devices WHERE network_id=? AND device_id=?""",
+                (network_id, device_id),
+            ).fetchone()
+            state = row["roster_state"] if row else None
+            replacement = connection.execute(
+                "SELECT roster_state FROM expected_devices WHERE network_id=? AND device_id=?",
+                (network_id, primary),
+            ).fetchone()
+            primary_state = replacement["roster_state"] if replacement else None
+            if state != "expected":
+                skip_reason = "predecessor-not-expected"
+            elif primary_state != "expected":
+                skip_reason = "replacement-not-expected"
+            elif current_assessment is None:
+                skip_reason = "no-current-assessment"
+            elif device_id in observed:
+                skip_reason = "predecessor-observed"
+            else:
+                skip_reason = None
+            item = {"deviceId": device_id, "primaryDeviceId": primary,
+                    "rosterState": state, "primaryRosterState": primary_state,
+                    "action": "retire" if skip_reason is None else "skip"}
+            if skip_reason is not None:
+                item["skipReason"] = skip_reason
+            items.append(item)
+            if dry_run or skip_reason is not None:
+                continue
+            now = datetime.now(timezone.utc).isoformat()
+            current = connection.execute(
+                "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+                (network_id,),
+            ).fetchone()
+            network_revision = (int(current["revision"]) if current else 0) + 1
+            device_revision = int(row["revision"]) + 1
+            reason = f"Superseded by {primary}"
+            connection.execute(
+                """INSERT INTO network_roster_revisions(network_id, revision, updated_at)
+                   VALUES (?, ?, ?) ON CONFLICT(network_id) DO UPDATE SET
+                   revision=excluded.revision, updated_at=excluded.updated_at""",
+                (network_id, network_revision, now),
+            )
+            connection.execute(
+                """UPDATE expected_devices SET roster_state='retired', updated_at=?,
+                   revision=?, reason=?, expected_since=NULL, change_source='import'
+                   WHERE network_id=? AND device_id=?""",
+                (now, device_revision, reason, network_id, device_id),
+            )
+            connection.execute(
+                """INSERT INTO roster_lifecycle_events
+                   (event_id, network_id, device_id, action, from_state, to_state,
+                    previous_label, new_label, previous_expected_since, new_expected_since,
+                    reason, occurred_at, origin, actor, evidence_basis, device_revision,
+                    network_revision)
+                   VALUES (?, ?, ?, 'set-state', 'expected', 'retired', ?, ?, ?, NULL,
+                           ?, ?, 'import', 'label-map-reconcile', 'label-map-history', ?, ?)""",
+                (f"roster-event:{uuid.uuid4()}", network_id, device_id, row["label"],
+                 row["label"], row["expected_since"], reason, now,
+                 device_revision, network_revision),
+            )
+        reassessment = []
+        if not dry_run and any(item["action"] == "retire" for item in items):
+            reassessment = store._reassess_network(
+                connection, network_id, dataset_id=dataset_id,
+            )
+        if dry_run:
+            connection.rollback()
+        else:
+            connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return {"networkId": network_id, "dryRun": dry_run, "items": items,
+            "retired": sum(item["action"] == "retire" for item in items),
+            "reassessment": reassessment}
 
 
 def _apply_changes(

@@ -518,6 +518,7 @@ def _extract_matter(
         "compressedFabricId": server_info.get("compressed_fabric_id"),
         "fabricIndex": server_info.get("fabric_index"),
         "deviceLabel": node_label if isinstance(node_label, str) and node_label else fallback_name,
+        **({"rawNodeLabel": node_label} if isinstance(node_label, str) and node_label else {}),
         "vendorName": values.get("VendorName"),
         "vendorModel": values.get("ProductName"),
         "vendorId": values.get("VendorId"),

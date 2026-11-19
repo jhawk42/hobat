@@ -22,6 +22,17 @@ pytestmark = pytest.mark.usefixtures("archived_health_catalog")
 
 import td_cli
 import td_health_cli
+
+
+@pytest.mark.parametrize("argv", [
+    ["purge"], ["purge-all"], ["purge-by-device", "--device", "0011223344556677"],
+    ["purge-retired-results"], ["migrate-history", "--dataset", "all"],
+])
+def test_health_apply_confirmation_alias_preserves_dry_run(argv):
+    parser = td_health_cli.build_parser()
+    assert parser.parse_args([*argv, "--dry-run", "--apply"]) == parser.parse_args(
+        [*argv, "--dry-run", "--yes"]
+    )
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_read import TDHealthReadService
 from td_health_sqlite import SCHEMA_VERSION, SQLiteHealthStore
@@ -63,6 +74,259 @@ def _seed(data_dir) -> None:
         json.dumps([{"extAddress": "8672766ae0578187", "role": "router"}]),
         encoding="utf-8",
     )
+
+
+@pytest.fixture
+def reconciliation_case(tmp_path):
+    _seed(tmp_path)
+    network = "extpan:78b9775b001c1cbe"
+    other_network = "extpan:1111111111111111"
+    old = "extaddr:1111111111111111"
+    offline = "extaddr:2222222222222222"
+    primary = "extaddr:3333333333333333"
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.upsert_expected_device(network, old, "Old operator name", "expected")
+    store.upsert_expected_device(network, offline, "Offline", "intentionally-offline")
+    store.upsert_expected_device(network, primary, "Replacement", "expected")
+    store.upsert_expected_device(other_network, old, "Other network", "expected")
+    with closing(store._connect()) as connection, connection:
+        connection.execute("UPDATE expected_devices SET expected_since='2020-01-01T00:00:00+00:00' "
+                           "WHERE network_id=? AND device_id=?", (network, old))
+    (tmp_path / EXTADDR_DEVICE_LABEL_MAP_FILENAME).write_text(json.dumps([
+        {"extAddress": primary[8:], "deviceLabel": "Current name",
+         "previousExtAddresses": [old[8:], offline[8:], "4444444444444444"]},
+    ]), encoding="utf-8")
+    result = process_health(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
+                            policy=load_health_policy(), store=store)
+    args = ["--datadir", str(tmp_path), "process-dataset", "--dataset",
+            "otbr_cli_diagnostics_fetch", "--reconcile-roster-from-label-map", "--json"]
+    return store, network, other_network, old, offline, primary, result, args
+
+
+def test_reconcile_roster_preview_apply_and_preserve_history(reconciliation_case, tmp_path, capsys):
+    from extaddr_device_label_map import load_extaddr_device_label_map
+    from td_health_processor import build_processing_result
+
+    store, network, other, old, offline, primary, initial, args = reconciliation_case
+    before = _database_dump(store)
+    files = {path.name: path.read_bytes() for path in tmp_path.iterdir() if path.is_file()}
+    assert td_health_cli.main([*args, "--dry-run"]) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["retired"] == 1
+    assert {item["deviceId"]: item["rosterState"] for item in preview["items"]} == {
+        old: "expected", offline: "intentionally-offline", "extaddr:4444444444444444": None,
+    }
+    assert _database_dump(store) == before
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir() if path.is_file()} == files
+    with closing(store._connect()) as connection:
+        retained = {
+            table: [tuple(row) for row in connection.execute(f"SELECT * FROM {table}")]
+            for table in ("observations", "device_samples", "metric_samples", "assessments",
+                          "findings", "comparisons", "roster_lifecycle_events")
+        }
+    assert td_health_cli.main([*args, "--apply"]) == 0
+    assert json.loads(capsys.readouterr().out)["retired"] == 1
+    records = {row["device_id"]: row for row in store.expected_device_records(network)}
+    assert records[old]["roster_state"] == "retired"
+    assert records[old]["label"] == "Old operator name"
+    assert records[offline]["roster_state"] == "intentionally-offline"
+    assert store.expected_device_records(other)[0]["roster_state"] == "expected"
+    with closing(store._connect()) as connection:
+        for table in retained:
+            rows = [tuple(row) for row in connection.execute(f"SELECT * FROM {table}")]
+            if table in ("roster_lifecycle_events", "assessments", "findings"):
+                assert all(row in rows for row in retained[table])
+            else:
+                assert rows == retained[table]
+        event = connection.execute(
+            "SELECT * FROM roster_lifecycle_events WHERE actor='label-map-reconcile'"
+        ).fetchone()
+        assert primary in event["reason"]
+        assert event["from_state"] == "expected" and event["to_state"] == "retired"
+        assert connection.execute(
+            "SELECT COUNT(*) FROM assessments WHERE observation_id != ?",
+            (initial.observation.observation_id,),
+        ).fetchone()[0] == 0
+    labels = load_extaddr_device_label_map(tmp_path / EXTADDR_DEVICE_LABEL_MAP_FILENAME)
+    service = TDHealthReadService(tmp_path)
+    assert labels[old[8:]] == "Current name"
+    assert service._display_name(old, service._labels()) == "Current name"
+    assert service._resolve_comparison_device_labels(
+        network_id=network, device_ids=["extaddr:4444444444444444"],
+    ) == {"extaddr:4444444444444444": "Current name"}
+    historical = service.assessment(assessment_id=initial.assessment.assessment_id, grouped=False)
+    assert any(endpoint == {"deviceId": old, "displayName": "Current name"}
+               for finding in historical["findings"] for endpoint in finding["endpoints"])
+    assert any(f.rule_id == "device.missing" and old in f.device_ids
+               for f in initial.assessment.findings)
+    after = build_processing_result(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
+                                    policy=load_health_policy(), store=store)
+    assert not any(f.rule_id == "device.missing" and old in f.device_ids
+                   for f in after.assessment.findings)
+    current = service.assessment(dataset_id="otbr_cli_diagnostics_fetch", network_id=network,
+                                 grouped=False)
+    assert not any(f["ruleId"] == "device.missing" and old in f["deviceIds"]
+                   for f in current["findings"])
+    before_rerun = _database_dump(store)
+    assert td_health_cli.main([*args, "--yes"]) == 0
+    assert json.loads(capsys.readouterr().out)["retired"] == 0
+    assert _database_dump(store) == before_rerun
+
+
+@pytest.mark.parametrize("extra", [
+    ["--dry-run", "--yes"], ["--dry-run", "--apply"], ["--init-roster-from-label-map"],
+    ["--export-latest"], ["--roster-list"],
+])
+def test_reconcile_roster_rejects_incompatible_options(reconciliation_case, extra):
+    store, *_, args = reconciliation_case
+    before = _database_dump(store)
+    with pytest.raises(SystemExit) as exc:
+        td_health_cli.main([*args, *extra])
+    assert exc.value.code == 2
+    assert _database_dump(store) == before
+
+
+def test_reconcile_roster_confirmation(reconciliation_case, monkeypatch, capsys):
+    store, *_, args = reconciliation_case
+    before = _database_dump(store)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    with pytest.raises(SystemExit) as exc:
+        td_health_cli.main(args)
+    assert exc.value.code == 2 and _database_dump(store) == before
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _: "no")
+    assert td_health_cli.main(args) == 0
+    assert "cancelled" in capsys.readouterr().out
+    assert _database_dump(store) == before
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    assert td_health_cli.main(args) == 0
+    assert json.loads(capsys.readouterr().out)["retired"] == 1
+
+
+def test_reconcile_roster_rechecks_state_after_preview(reconciliation_case, capsys):
+    store, network, _, old, _, _, _, args = reconciliation_case
+    assert td_health_cli.main([*args, "--dry-run"]) == 0
+    assert json.loads(capsys.readouterr().out)["retired"] == 1
+    store.upsert_expected_device(network, old, "Changed", "intermittent")
+    before = _database_dump(store)
+    assert td_health_cli.main([*args, "--apply"]) == 0
+    assert json.loads(capsys.readouterr().out)["retired"] == 0
+    assert _database_dump(store) == before
+
+
+@pytest.mark.parametrize("reason", [
+    "replacement-not-expected", "predecessor-observed", "no-current-assessment",
+])
+def test_reconcile_roster_guards_approved_predecessors(
+    reconciliation_case, tmp_path, capsys, reason,
+):
+    store, network, _, old, _, primary, _, args = reconciliation_case
+    assert td_health_cli.main([*args, "--dry-run"]) == 0
+    assert json.loads(capsys.readouterr().out)["retired"] == 1
+    if reason == "replacement-not-expected":
+        store.upsert_expected_device(network, primary, "Replacement", "intentionally-offline")
+    elif reason == "predecessor-observed":
+        snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
+        snapshot.write_text(json.dumps([
+            {"extAddress": old[8:], "role": "router", "eui": "aaaaaaaaaaaaaaaa"},
+            {"extAddress": primary[8:], "role": "child", "eui": "bbbbbbbbbbbbbbbb"},
+        ]), encoding="utf-8")
+        process_health(data_dir=tmp_path, dataset_id="otbr_cli_diagnostics_fetch",
+                       policy=load_health_policy(), store=store)
+    else:
+        with closing(store._connect()) as connection, connection:
+            connection.execute("DELETE FROM current_assessments WHERE network_id=?", (network,))
+    before = _database_dump(store)
+    assert td_health_cli.main([*args, "--apply"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["retired"] == 0
+    item = next(item for item in report["items"] if item["deviceId"] == old)
+    assert item["skipReason"] == reason
+    assert _database_dump(store) == before
+
+
+def test_reconcile_roster_reloads_map_after_preview(reconciliation_case, tmp_path, capsys):
+    store, _, _, _, _, _, _, args = reconciliation_case
+    assert td_health_cli.main([*args, "--dry-run"]) == 0
+    assert json.loads(capsys.readouterr().out)["retired"] == 1
+    path = tmp_path / EXTADDR_DEVICE_LABEL_MAP_FILENAME
+    records = json.loads(path.read_text())
+    records[0]["previousExtAddresses"].remove("1111111111111111")
+    path.write_text(json.dumps(records))
+    before = _database_dump(store)
+    assert td_health_cli.main([*args, "--yes"]) == 0
+    assert json.loads(capsys.readouterr().out)["retired"] == 0
+    assert _database_dump(store) == before
+
+
+def test_reconcile_roster_requires_network_identity(reconciliation_case, tmp_path):
+    store, *_, args = reconciliation_case
+    (tmp_path / "td-otbr-cli-thread-network-info.json").unlink()
+    before = _database_dump(store)
+    with pytest.raises(SystemExit) as exc:
+        td_health_cli.main([*args, "--apply"])
+    assert exc.value.code == 2 and _database_dump(store) == before
+
+
+@pytest.mark.parametrize("damage", [
+    "duplicate-history", "primary-overlap", "invalid-history", "unsupported-primary-alias",
+])
+def test_reconcile_roster_rejects_ambiguous_map(reconciliation_case, tmp_path, damage):
+    store, *_, args = reconciliation_case
+    path = tmp_path / EXTADDR_DEVICE_LABEL_MAP_FILENAME
+    records = json.loads(path.read_text())
+    if damage == "duplicate-history":
+        records.append({"extAddress": "5555555555555555", "deviceLabel": "Other",
+                        "previousExtAddresses": ["1111111111111111"]})
+    elif damage == "primary-overlap":
+        records.append({"extAddress": "1111111111111111", "deviceLabel": "Other"})
+    elif damage == "unsupported-primary-alias":
+        records[0]["extMacAddr"] = records[0].pop("extAddress")
+    else:
+        records[0]["previousExtAddresses"] = ["bad"]
+    path.write_text(json.dumps(records))
+    before = _database_dump(store)
+    with pytest.raises(SystemExit) as exc:
+        td_health_cli.main([*args, "--apply"])
+    assert exc.value.code == 2 and _database_dump(store) == before
+
+
+def test_reconcile_roster_rolls_back_batch_on_event_failure(reconciliation_case, tmp_path):
+    store, network, _, _, offline, _, _, args = reconciliation_case
+    store.upsert_expected_device(network, offline, "Offline", "expected")
+    with closing(store._connect()) as connection, connection:
+        connection.execute("""CREATE TRIGGER reject_second_reconciliation
+            BEFORE INSERT ON roster_lifecycle_events
+            WHEN NEW.actor='label-map-reconcile' AND NEW.device_id='extaddr:2222222222222222'
+            BEGIN SELECT RAISE(ABORT, 'rejected'); END""")
+    before = _database_dump(store)
+    with pytest.raises(SystemExit) as exc:
+        td_health_cli.main([*args, "--yes"])
+    assert exc.value.code == 2 and _database_dump(store) == before
+
+
+def test_reconcile_roster_does_not_reassess_other_datasets(reconciliation_case, capsys):
+    from dataclasses import replace
+
+    store, _, _, _, _, _, _, args = reconciliation_case
+    observation, assessment = _result("2")
+    store.save_processing_result(replace(observation, dataset_id="otbr_cli_unified"), assessment)
+    with closing(store._connect()) as connection:
+        pointer = tuple(connection.execute(
+            "SELECT * FROM current_assessments WHERE dataset_id='otbr_cli_unified'"
+        ).fetchone())
+        assessments = [tuple(row) for row in connection.execute(
+            "SELECT * FROM assessments WHERE observation_id=?", (observation.observation_id,)
+        )]
+    assert td_health_cli.main([*args, "--yes"]) == 0
+    capsys.readouterr()
+    with closing(store._connect()) as connection:
+        assert tuple(connection.execute(
+            "SELECT * FROM current_assessments WHERE dataset_id='otbr_cli_unified'"
+        ).fetchone()) == pointer
+        assert [tuple(row) for row in connection.execute(
+            "SELECT * FROM assessments WHERE observation_id=?", (observation.observation_id,)
+        )] == assessments
 
 
 def test_preparation_reuse_across_fresh_processing_and_roster_processes(tmp_path):

@@ -344,7 +344,8 @@ not reconstructed historical layouts. See
 [Thread Network Health](doc/thread_network_health.md).
 
 Health purge commands support dry-run previews and require confirmation unless
-`--yes` is supplied. Age-based purge also deletes comparisons with either
+`--yes` (or its alias `--apply`) is supplied. The alias also works for other
+commands that already accept `--yes`. Age-based purge also deletes comparisons with either
 endpoint older than the cutoff and all associated comparison items, including
 expired pairs whose observations were already deleted. Preview counts include
 both comparison tables; physical compaction remains a separate
@@ -411,8 +412,10 @@ record maps a 16-hex-digit `extAddress` to a `deviceLabel`:
 Select a device in the topology or table, open **Device Settings**, edit the
 label, and apply the change. Labels are trimmed, may contain Unicode display
 text, must be 1-128 characters, and cannot contain control characters. The
-server atomically inserts or updates the record. Concurrent writers in separate
-processes remain last-write-wins.
+server atomically inserts or updates the record. When the selected record
+supplies an EUI, the server records it only if the row has no EUI and no other
+row owns it. A skipped EUI does not prevent saving the label. Malformed EUIs
+are rejected.
 
 With **Enhance** enabled, the static label takes precedence over collected
 labels in tables, topology node labels and hover popups, and the **Keys**
@@ -434,9 +437,16 @@ The same operation is available through the CLI:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data \
-  merge-extaddr --update-extaddr eeeaffeaffeaffe1 \
+  device-label --update-extaddr eeeaffeaffeaffe1 \
   --device-label "Office Sensor"
 ```
+
+`merge-extaddr` remains a compatibility alias. Every real edit uses the shared
+map lock and preserves the previous map as `.bak`; a no-op leaves both files
+unchanged. An explicit CLI edit can set `--eui` or `--comment`; replacing a
+different stored EUI requires `--apply` (or `--yes`). Bulk merges accept
+`--dry-run` and strip the declared DNS-SD suffix from new name-derived labels.
+Primary addresses take precedence over previous addresses when looking up labels.
 
 ## Docker
 

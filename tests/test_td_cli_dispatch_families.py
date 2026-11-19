@@ -70,7 +70,7 @@ def test_mdns_without_scope_prints_help_without_browsing(capsys):
         ),
         (
             ["merge-extaddr", "--input", "topology.json"],
-            "merge_extaddr_device_label_map",
+            "device_label",
             ["--input", "topology.json"],
         ),
         (

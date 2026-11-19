@@ -18,9 +18,9 @@ def _target() -> topology.ChildFetchTarget:
 
 
 @pytest.mark.parametrize("responses,expected,kinds", [
-    ([None, {"extaddr": "child"}], "completed", ["initial", "same_set_retry"]),
-    ([None, None, {"extaddr": "child"}], "completed", ["initial", "same_set_retry", "request_fallback"]),
-    ([None, None, None], "failed", ["initial", "same_set_retry", "request_fallback"]),
+    ([None, {"extaddr": "child"}], "completed", ["initial", "request_fallback"]),
+    ([None, None, {"extaddr": "child"}], "completed", ["initial", "request_fallback", "request_fallback"]),
+    ([None, None, None, None], "failed", ["initial", "request_fallback", "request_fallback", "request_fallback"]),
 ])
 def test_common_child_view_keeps_verified_attempts_and_ping_separate(responses, expected, kinds):
     fast, = topology.build_child_fetch_policies(True, False)
@@ -68,10 +68,10 @@ def test_common_child_view_keeps_fast_failures_before_detail_success():
     )
     assert view.initial_status == "failed"
     assert view.effective_status == "completed"
-    assert len(view.attempts) == len(failed_fast.attempted) + len(successful_detail.attempted) == 10
-    assert [attempt.status for attempt in view.attempts[:3]] == ["failed"] * 3
-    assert [attempt.status for attempt in view.attempts[3:]] == ["completed"] * 7
-    assert view.attempts[3].kind == "child_detail"
+    assert len(view.attempts) == len(failed_fast.attempted) + len(successful_detail.attempted) == 12
+    assert [attempt.status for attempt in view.attempts[:4]] == ["failed"] * 4
+    assert [attempt.status for attempt in view.attempts[4:]] == ["completed"] * 8
+    assert view.attempts[4].kind == "child_detail"
     assert (view.recovery_state, view.recovery_kind) == ("recovered", "child_detail")
     assert view.response_evidence == "direct"
 
@@ -93,16 +93,16 @@ def test_child_fetch_policies_preserve_attempts_and_delays() -> None:
     fast, detail = topology.build_child_fetch_policies(True, True)
 
     assert fast.mode == "fast"
-    assert fast.minimum_attempts == 3
-    assert [attempt.detail_level for attempt in fast.attempts] == [170, 170, 150]
-    assert [attempt.delay_after_failure_s for attempt in fast.attempts] == [0.25, 0.5, None]
+    assert fast.minimum_attempts == 4
+    assert [attempt.detail_level for attempt in fast.attempts] == [175, 170, 155, 150]
+    assert [attempt.delay_after_failure_s for attempt in fast.attempts] == [0.25, 0.5, 0.75, None]
     assert fast.stop_after_first_response is True
 
     assert detail.mode == "detail"
-    assert detail.minimum_attempts == 7
-    assert [attempt.detail_level for attempt in detail.attempts] == [150, 160, 170, 170, 180, 190, 200]
+    assert detail.minimum_attempts == 8
+    assert [attempt.detail_level for attempt in detail.attempts] == [150, 155, 160, 170, 170, 180, 190, 200]
     assert [attempt.delay_after_failure_s for attempt in detail.attempts] == [
-        0.25, 0.5, 0.75, 1.0, 1.25, 1.5, None
+        0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, None
     ]
     assert detail.stop_after_first_response is False
     assert all(attempt.tlv_values for attempt in (*fast.attempts, *detail.attempts))
@@ -141,7 +141,7 @@ def test_child_progress_measures_fixed_population(monkeypatch, caplog, response)
     assert 'progress="[1/1]"' in progress[0]
     assert 'elapsed_s=0.75' in progress[0]
     assert f'status="{"responded" if response else "exhausted"}"' in progress[0]
-    assert len(calls) == (1 if response else 3)
+    assert len(calls) == (1 if response else 4)
     summaries = [
         r.message for r in caplog.records if 'event="outcome_summary"' in r.message
         and 'stage="child"' in r.message and 'status_phase="effective"' in r.message
@@ -153,6 +153,56 @@ def test_child_progress_measures_fixed_population(monkeypatch, caplog, response)
     assert sum(statuses.values()) == 1
     assert statuses["completed" if response else "failed"] == 1
     assert sum(attempts.values()) == len(calls)
+
+
+@pytest.mark.parametrize(("reply_to", "with_eui"), [
+    ("0 1 2 8 23", True),
+    ("0 1 2 8 23", False),
+    ("0 1 2 8", False),
+    ("0 1 2 23", True),
+])
+def test_fast_child_persists_returned_ipv6_and_eui(monkeypatch, tmp_path, reply_to, with_eui):
+    child_address = "fd00::1001"
+    commands = []
+
+    def fetch(command):
+        commands.append(command)
+        if command.split(maxsplit=3)[3] != reply_to:
+            return ""
+        payload = "0008001122334455667701021001020100"
+        with_ipv6 = "8" in reply_to.split()
+        if with_ipv6:
+            payload += "0810fd000000000000000000000000000001"
+        if with_eui:
+            payload += "17088899aabbccddeeff"
+        return (
+            f"DIAG_GET.rsp/ans from {child_address}: {payload}\n"
+            "Ext Address: 0011223344556677\nRloc16: 0x1001\n"
+            "Mode:\n    RxOnWhenIdle: 0\n    DeviceType: 0\n    NetworkData: 0\n"
+            + ("IP6 Address List:\n    - fd00::1\n" if with_ipv6 else "")
+            + ("EUI64: 8899aabbccddeeff\n" if with_eui else "")
+        )
+
+    monkeypatch.setattr(topology.util_ot_ctl, "exec_ot_ctl", fetch)
+    monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
+    topology_map = {
+        "0x1000": {"rloc16": "0x1000", "extaddr": "aabbccddeeff0011",
+                   "children": [{"rloc16": "0x1001"}]},
+    }
+    topology.fetch_network_diag_topology_expand_children(
+        True, ["0x1000"], topology_map, {}, {}, {}, None, "fd00::", {}, None,
+    )
+    request_sets = ["0 1 2 8 23", "0 1 2 8", "0 1 2 23"]
+    assert commands == [f"networkdiagnostic get {child_address} {types}"
+                        for types in request_sets[:request_sets.index(reply_to) + 1]]
+    path = tmp_path / "fetch-all.json"
+    topology.save_topology_to_json_file(topology_map, path)
+    child = next(row for row in json.loads(path.read_text())
+                 if row.get("extAddress") == "0011223344556677")
+    assert child["mode"]["device"] == "MTD"
+    assert child["eui"] == ("8899aabbccddeeff" if with_eui else None)
+    if "8" in reply_to.split():
+        assert "fd00::1" in child["ipv6Addresses"]
 
 
 def test_router_progress_reports_multicast_skip_and_empty_stage(monkeypatch, caplog):
@@ -391,7 +441,7 @@ def test_fetch_child_with_retries_is_pure_and_obeys_terminal_states() -> None:
     outcome = topology.fetch_child_with_retries(
         _target(), fast, {}, fetch, delays.append
     )
-    assert calls == [(0, 170), (1, 170)]
+    assert calls == [(0, 175), (1, 170)]
     assert delays == [0.25]
     assert outcome.terminal_reason == "responded"
     assert outcome.observations[0]["last_attempt_responded"] == 1
@@ -435,18 +485,18 @@ def test_fetch_child_with_retries_is_pure_and_obeys_terminal_states() -> None:
         ),
         lambda seconds: pytest.fail(f"unexpected delay: {seconds}"),
     )
-    assert detail_calls == [150, 160, 170, 170, 180, 190, 200]
+    assert detail_calls == [150, 155, 160, 170, 170, 180, 190, 200]
     assert complete.terminal_reason == "responded"
-    assert len(complete.observations) == 7
+    assert len(complete.observations) == 8
 
     failed_delays: list[float] = []
     exhausted = topology.fetch_child_with_retries(
         _target(), detail, {}, lambda _target, _attempt: None, failed_delays.append
     )
     assert [attempt.detail_level for attempt in exhausted.attempted] == [
-        150, 160, 170, 170, 180, 190, 200
+        150, 155, 160, 170, 170, 180, 190, 200
     ]
-    assert failed_delays == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5]
+    assert failed_delays == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
     assert exhausted.terminal_reason == "exhausted"
 
     with pytest.raises(RuntimeError, match="transport"):
@@ -512,9 +562,9 @@ def test_fast_coverage_does_not_skip_opt_in_detailed_child_policy() -> None:
         lambda _seconds: None,
     )
 
-    assert calls == [150, 160, 170, 170, 180, 190, 200]
+    assert calls == [150, 155, 160, 170, 170, 180, 190, 200]
     assert [attempt.detail_level for attempt in outcome.attempted] == [
-        150, 160, 170, 170, 180, 190, 200
+        150, 155, 160, 170, 170, 180, 190, 200
     ]
     assert outcome.terminal_reason == "exhausted"
 
@@ -597,7 +647,7 @@ def test_child_expansion_reconciles_move_and_checkpoints_once(monkeypatch) -> No
         "checkpoint.json",
     )
 
-    assert fetch_calls == [("0x1001", 170)]
+    assert fetch_calls == [("0x1001", 175)]
     assert "0x0001" not in network_topology_map
     assert network_topology_map["0x1001"]["extaddr"] == "child-ext"
     assert extaddr_to_rloc["child-ext"] == "0x1001"
@@ -779,7 +829,7 @@ def test_child_ping_runs_once_after_all_diagnostic_policies_exhaust(monkeypatch)
     )
 
     assert fetch_calls == [
-        170, 170, 150, 150, 160, 170, 170, 180, 190, 200
+        175, 170, 155, 150, 150, 155, 160, 170, 170, 180, 190, 200
     ]
     assert [request.target for request in ping_requests] == [
         "fd3b:a255:4aa6:5483:0:ff:fe00:4c92"

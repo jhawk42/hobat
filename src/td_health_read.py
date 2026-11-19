@@ -424,6 +424,19 @@ class TDHealthReadService:
                   "ageSeconds": min((item["ageSeconds"] for item in fields.values()
                                      if item["ageSeconds"] is not None), default=None),
                   "fieldCounts": counts}
+        alias = data.get("euiAlias")
+        if alias:
+            normal = fields.get("eui")
+            alias_state = ("different-admitted-eui" if normal and normal["value"] != alias["value"]
+                           else "matches-admitted-eui" if normal else "imported")
+            result["euiAlias"] = {**alias, "state": alias_state}
+            if normal is None:
+                fields["eui"] = {
+                    "value": alias["value"], "valueClass": "alias", "freshness": "unknown",
+                    "sourceObservedAt": None, "ageSeconds": None, "confidence": "unknown",
+                    "sourceFile": None, "observationId": None, "conflictState": "none",
+                    "provenance": alias["provenance"],
+                }
         if detailed:
             result["fields"] = {field: fields.get(field, {"value": None, "freshness": "absent",
                                                   "conflictState": "none"}) for field in ROSTER_FIELDS}

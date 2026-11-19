@@ -16,6 +16,7 @@ import {
   loadDataset,
   restoreLastKnownGoodDataset,
   loadStaticLabelMap,
+  canonicalLabelEui,
   setStaticDeviceLabel,
   enrichRows,
   enrichRawFiles,
@@ -2120,6 +2121,7 @@ function projectSelectedDevice(record) {
   return {
     rloc16: getSelectedValue(record, ["rloc16", "attributes.rloc16"]),
     extAddress,
+    observedEui: getColumnValue(record, "eui") ?? getColumnValue(record, "attributes.eui"),
     deviceLabel: getSelectedValue(record, [
       "deviceLabel", "device_label",
       "attributes.deviceLabel", "attributes.device_label",
@@ -2146,6 +2148,16 @@ function setDeviceSettingsStatus(message = "", isError = false) {
   if (!statusEl) return;
   statusEl.textContent = message;
   statusEl.classList.toggle("error", isError);
+}
+
+function showSavedDeviceMetadata(payload) {
+  for (const [id, value] of [["stored-eui", payload?.eui], ["comment", payload?.comment]]) {
+    const text = document.getElementById(`device-${id}`);
+    const row = document.getElementById(`device-${id}-row`);
+    if (!text || !row) continue;
+    text.textContent = toText(value);
+    row.hidden = !text.textContent;
+  }
 }
 
 function updateDeviceSettingsControls() {
@@ -2180,6 +2192,7 @@ function displaySelectedDevice(record, loadedLabel = null) {
   document.getElementById("device-label").value = deviceSettingsState.loadedLabel;
   document.getElementById("device-name").textContent = projection?.name ?? "";
   document.getElementById("device-name-row").hidden = !projection?.name;
+  showSavedDeviceMetadata();
   setDeviceSettingsStatus();
   updateDeviceSettingsControls();
 }
@@ -2197,7 +2210,9 @@ async function loadSelectedDeviceLabel() {
   updateDeviceSettingsControls();
 
   try {
-    const response = await trackedFetch(`/api/device/${encodeURIComponent(extAddress)}`, {
+    const eui = canonicalLabelEui(projection.observedEui);
+    const suffix = eui ? `?eui=${encodeURIComponent(eui)}` : "";
+    const response = await trackedFetch(`/api/device/${encodeURIComponent(extAddress)}${suffix}`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
@@ -2209,6 +2224,7 @@ async function loadSelectedDeviceLabel() {
       const payload = await response.json();
       if (!isCurrent()) return;
       deviceSettingsState.loadedLabel = toText(payload.deviceLabel).trim();
+      showSavedDeviceMetadata(payload);
     } else {
       throw new Error(`Unable to load device label (HTTP ${response.status}).`);
     }
@@ -2249,7 +2265,11 @@ async function saveSelectedDeviceLabel() {
     const response = await trackedFetch(`/api/device/${encodeURIComponent(extAddress)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ deviceLabel }),
+      body: JSON.stringify({
+        deviceLabel,
+        ...(projection.observedEui != null && projection.observedEui !== ""
+          ? { observedEui: projection.observedEui } : {}),
+      }),
     });
     const payload = await response.json().catch(() => ({}));
     if (requestVersion !== deviceSettingsState.requestVersion ||
@@ -2259,10 +2279,19 @@ async function saveSelectedDeviceLabel() {
     }
 
     const savedLabel = toText(payload.deviceLabel).trim() || deviceLabel;
-    setStaticDeviceLabel(extAddress, savedLabel);
+    setStaticDeviceLabel(extAddress, savedLabel, payload.eui);
     renderCurrentView({ force: true });
     displaySelectedDevice(selectedRecord, savedLabel);
-    setDeviceSettingsStatus(response.status === 201 ? "Device label added." : "Device label saved.");
+    showSavedDeviceMetadata(payload);
+    const savedMessage = response.status === 201 ? "Device label added." : "Device label saved.";
+    if (payload.euiOutcome === "skipped-owned-by" && payload.euiOwner) {
+      const { deviceLabel: ownerLabel, extAddress: ownerAddress } = payload.euiOwner;
+      setDeviceSettingsStatus(`${savedMessage} EUI not added: already recorded for ${ownerLabel} (${ownerAddress}). Review both addresses with device-label --sync-eui.`);
+    } else if (payload.euiOutcome === "skipped-different") {
+      setDeviceSettingsStatus(`${savedMessage} Observed EUI differs from the stored EUI; the stored EUI was kept.`);
+    } else {
+      setDeviceSettingsStatus(savedMessage);
+    }
   } catch (error) {
     if (requestVersion !== deviceSettingsState.requestVersion) return;
     setDeviceSettingsStatus(error.message || "Unable to save device label.", true);

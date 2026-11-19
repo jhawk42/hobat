@@ -208,7 +208,8 @@ const cachedProcessedEveBefore = JSON.stringify(cachedProcessedEve);
 const cachedProcessedEveResult = buildDatasetRows(processedEveEntry, [cachedProcessedEve]);
 assert.equal(processedEveEntry.rowExtractor, "eve-processed");
 assert.deepEqual(cachedProcessedEveResult.loadedFiles, ["td-eve-topology.json"]);
-assert.equal(cachedProcessedEveResult.rows.length, 79);
+assert.ok(Object.keys(cachedProcessedEve).length > 0);
+assert.equal(cachedProcessedEveResult.rows.length, Object.keys(cachedProcessedEve).length);
 assert.deepEqual(
   cachedProcessedEveResult.rows.map((row) => row.id),
   Object.values(cachedProcessedEve).map((row) => row.id),

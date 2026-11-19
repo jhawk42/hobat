@@ -6,6 +6,7 @@ and extracts a specific TLV field, returning a structured dict or value.
 import ipaddress
 import logging
 import re
+import time
 import uuid
 from collections.abc import Mapping
 from copy import deepcopy
@@ -1129,6 +1130,16 @@ def build_tlv_response_observation(
         "undecoded_type_ids": list(decoded.get("undecoded_type_ids", [])),
         "parse_status": "no-response" if no_response else parse_status,
     }
+    if (frame and not no_response and parsed.get("status") == "valid"
+            and all(received_type_ids.count(tlv) == 1 for tlv in (0, 8))
+            and not {0, 8}.intersection(decoded.get("malformed_type_ids", []))):
+        values = decoded["values"]
+        if values.get("extaddr") and values.get("ipv6_addrs"):
+            observation["address_list_evidence"] = {
+                "captured_at_epoch": time.time(),
+                "ext_address": values["extaddr"],
+                "ipv6_addresses": values["ipv6_addrs"],
+            }
     _attribute_response_observation(observation, attributed_request, association)
     collection_context["observations"].append(observation)
     logging.debug(

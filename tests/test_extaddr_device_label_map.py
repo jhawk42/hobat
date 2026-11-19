@@ -1,10 +1,38 @@
 """Tests for extaddr_device_label_map module."""
 
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
+
+
+def test_previous_addresses_match_python_and_dashboard(tmp_path):
+    from extaddr_device_label_map import load_extaddr_device_label_map
+
+    entries = [
+        {"extAddress": "1111111111111111", "deviceLabel": "Old",
+         "previousExtAddresses": ["2222222222222222", "3333333333333333", "ABCDEF1234567890"]},
+        {"extaddr": "2222222222222222", "device_label": "Exact",
+         "previousExtAddresses": ["3333333333333333", "invalid"]},
+    ]
+    path = tmp_path / "labels.json"
+    path.write_text(json.dumps(entries), encoding="utf-8")
+    expected = {"1111111111111111": "Old", "2222222222222222": "Exact",
+                "abcdef1234567890": "Old"}
+    assert load_extaddr_device_label_map(path) == expected
+    assert load_extaddr_device_label_map_flexible(path) == expected
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", """
+import {readFileSync} from "node:fs";
+import {indexStaticLabelMap} from "./src/js/tdash-dataset.js";
+console.log(JSON.stringify(Object.fromEntries(indexStaticLabelMap(JSON.parse(readFileSync(0))))));
+"""],
+        cwd=Path(__file__).resolve().parents[1], input=json.dumps(entries),
+        text=True, capture_output=True, check=True, timeout=15,
+    )
+    assert json.loads(result.stdout) == expected
 
 from extaddr_device_label_map import (
     EXTADDR_FIELD_ALIASES,

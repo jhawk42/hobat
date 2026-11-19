@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import json
+import fcntl
+import subprocess
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
-from merge_extaddr_device_label_map import (
+import device_label as label_map
+import td_cli
+real_timestamp = label_map._timestamp
+from device_label import (
     ExtaddrNotFoundError,
     main,
     merge_extaddr_files,
@@ -20,6 +27,11 @@ from merge_extaddr_device_label_map import (
 
 
 class MergeExtaddrFilesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        timestamp = patch.object(label_map, "_timestamp", return_value="2026-11-18T05:19:45Z")
+        timestamp.start()
+        self.addCleanup(timestamp.stop)
+
     def _write_json(self, path: Path, payload: object) -> None:
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -37,7 +49,7 @@ class MergeExtaddrFilesTests(unittest.TestCase):
             )
 
             self.assertEqual(
-                result,
+                {key: value for key, value in result.items() if key != "lastUpdated"},
                 {
                     "extAddress": "4e866ce96501b9ed",
                     "deviceLabel": "Office Sensor",
@@ -48,8 +60,9 @@ class MergeExtaddrFilesTests(unittest.TestCase):
                 self._read_json(static_path),
                 [
                     {
-                        "extaddr": "4e866ce96501b9ed",
-                        "device_label": "Office Sensor",
+                        "extAddress": "4e866ce96501b9ed",
+                        "deviceLabel": "Office Sensor",
+                        "lastUpdated": "2026-11-18T05:19:45Z",
                     }
                 ],
             )
@@ -115,6 +128,7 @@ class MergeExtaddrFilesTests(unittest.TestCase):
                         "extaddr": "4e866ce96501b9ed",
                         "device_label": "Office Sensor",
                         "source": "manual",
+                        "lastUpdated": "2026-11-18T05:19:45Z",
                     },
                     {
                         "extaddr": "ffffffffffffffff",
@@ -180,8 +194,10 @@ class MergeExtaddrFilesTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(read_rc, 0)
+            read_result = json.loads(stdout.getvalue())
+            self.assertIn("lastUpdated", read_result)
             self.assertEqual(
-                json.loads(stdout.getvalue()),
+                {key: value for key, value in read_result.items() if key != "lastUpdated"},
                 {
                     "deviceLabel": "Office Sensor",
                     "extAddress": "4e866ce96501b9ed",
@@ -295,8 +311,9 @@ class MergeExtaddrFilesTests(unittest.TestCase):
             updated_static = self._read_json(static_path)
             self.assertIn(
                 {
-                    "extaddr": "2000000000000000",
-                    "device_label": "Dining Room HomePod._meshcop._udp.local.",
+                    "extAddress": "2000000000000000",
+                    "deviceLabel": "Dining Room HomePod._meshcop._udp.local.",
+                    "lastUpdated": "2026-11-18T05:19:45Z",
                 },
                 updated_static,
             )
@@ -317,6 +334,14 @@ class MergeExtaddrFilesTests(unittest.TestCase):
 
             stdout = StringIO()
             with redirect_stdout(stdout):
+                rc = main(["--datadir", temp_dir, "--merge-mdns-br", "--dry-run"])
+            self.assertEqual(rc, 0)
+            self.assertIn("8ae5e52d91217aec: Dining Room HomePod", stdout.getvalue())
+            self.assertNotIn("._meshcop.", stdout.getvalue())
+            self.assertEqual(sorted(path.name for path in data_dir.iterdir()), ["td-mdns-scopes-br.json"])
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
                 rc = main(["--datadir", temp_dir, "--merge-mdns-br"])
 
             self.assertEqual(rc, 0)
@@ -325,8 +350,9 @@ class MergeExtaddrFilesTests(unittest.TestCase):
                 self._read_json(data_dir / "td-static-extaddr-device-label.json"),
                 [
                     {
-                        "extaddr": "8ae5e52d91217aec",
-                        "device_label": "Dining Room HomePod._meshcop._udp.local.",
+                        "extAddress": "8ae5e52d91217aec",
+                        "deviceLabel": "Dining Room HomePod",
+                        "lastUpdated": "2026-11-18T05:19:45Z",
                     }
                 ],
             )
@@ -380,8 +406,9 @@ class MergeExtaddrFilesTests(unittest.TestCase):
                 self._read_json(data_dir / "td-static-extaddr-device-label.json"),
                 [
                     {
-                        "extaddr": "2000000000000000",
-                        "device_label": "found-2000000000000000",
+                        "extAddress": "2000000000000000",
+                        "deviceLabel": "found-2000000000000000",
+                        "lastUpdated": "2026-11-18T05:19:45Z",
                     }
                 ],
             )
@@ -463,7 +490,7 @@ class MergeExtaddrFilesTests(unittest.TestCase):
                     {
                         "extAddress": "4000000000000000",
                         "deviceLabel": "Unknown Device",
-                        "eui": "eui-1",
+                        "eui": "1234567890abcdef",
                         "rloc16": "0x4000",
                         "notes": {"source": "manual"},
                     }
@@ -491,13 +518,15 @@ class MergeExtaddrFilesTests(unittest.TestCase):
                     {
                         "extAddress": "4000000000000000",
                         "deviceLabel": "Garage HomePod",
-                        "eui": "eui-1",
+                        "eui": "1234567890abcdef",
                         "rloc16": "0x4000",
                         "notes": {"source": "manual"},
+                        "lastUpdated": "2026-11-18T05:19:45Z",
                     },
                     {
-                        "extaddr": "5000000000000000",
-                        "device_label": "Kitchen Sensor",
+                        "extAddress": "5000000000000000",
+                        "deviceLabel": "Kitchen Sensor",
+                        "lastUpdated": "2026-11-18T05:19:45Z",
                     },
                 ],
             )
@@ -579,6 +608,188 @@ class MergeExtaddrFilesTests(unittest.TestCase):
             self.assertEqual(len(updated_static), 1)
             self.assertEqual(updated_static[0]["extaddr"], "6000000000000000")
             self.assertEqual(updated_static[0]["device_label"], "Unknown-0x9999")
+
+    def test_optional_field_validation_and_final_ownership(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "map.json"
+            base = {"extaddr": "0000000000000000", "device_label": "One"}
+            invalid = (
+                {"eui": "00:00:00:00:00:00:00:00"},
+                {"eui64": "bad"},
+                {"lastUpdated": "2026-02-30T00:00:00Z"},
+                {"lastUpdated": "2026-01-01T00:00:00+00:00"},
+                {"comment": "x" * 513},
+                {"comment": "bad\ncomment"},
+                {"previousExtAddresses": "1234567890abcdef"},
+                {"previousExtAddresses": ["invalid"]},
+            )
+            for fields in invalid:
+                with self.subTest(fields=fields):
+                    self._write_json(path, [{**base, **fields}])
+                    with self.assertRaises(ValueError):
+                        read_device_label(path, base["extaddr"])
+
+            for duplicate_fields in (
+                {"eui": "AA:BB:CC:DD:EE:FF:00:11"},
+                {"previousExtAddresses": ["1111111111111111"]},
+            ):
+                rows = [
+                    {**base, **duplicate_fields},
+                    {"extaddr": "2222222222222222", "device_label": "Two", **duplicate_fields},
+                ]
+                self._write_json(path, rows)
+                self.assertEqual(read_device_label(path, base["extaddr"])["deviceLabel"], "One")
+                original = path.read_bytes()
+                with self.assertRaises(ValueError):
+                    upsert_device_label(path, base["extaddr"], "Changed")
+                self.assertEqual(path.read_bytes(), original)
+                self.assertFalse(path.with_name("map.json.bak").exists())
+
+            self._write_json(path, [{**base, "previousExtAddresses": [base["extaddr"]]}])
+            with self.assertRaises(ValueError):
+                upsert_device_label(path, base["extaddr"], "Changed")
+
+    def test_noop_preserves_unsorted_bytes_mtime_and_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "map.json"
+            path.write_text('[{"extAddress":"ffffffffffffffff","deviceLabel":"Other"},'
+                            '{"extaddr":"0000000000000000","device_label":"Label",'
+                            '"lastUpdated":"2020-01-01T00:00:00Z"}]\n', encoding="utf-8")
+            backup = path.with_name("map.json.bak")
+            backup.write_bytes(b"old backup")
+            before, mtime = path.read_bytes(), path.stat().st_mtime_ns
+            result = upsert_device_label(path, "0000000000000000", " Label ", comment="")
+            self.assertEqual(result["operation"], "updated")
+            self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), (before, mtime))
+            self.assertEqual(backup.read_bytes(), b"old backup")
+            source = Path(temp_dir) / "source.json"
+            self._write_json(source, [{"extaddr": "0000000000000000", "name": "Other"}])
+            self.assertEqual(merge_extaddr_files(path, source), (0, [], 0, []))
+            self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), (before, mtime))
+            self.assertEqual(backup.read_bytes(), b"old backup")
+
+    def test_eui_comment_and_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "td-static-extaddr-device-label.json"
+            upsert_device_label(path, "1111111111111111", "One", eui="AA-BB-CC-DD-EE-FF-00-11", comment="note")
+            row = self._read_json(path)[0]
+            self.assertEqual((row["eui"], row["comment"]), ("aabbccddeeff0011", "note"))
+            before = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "requires --yes"):
+                upsert_device_label(path, "1111111111111111", "New", eui="1234567890abcdef")
+            self.assertEqual(path.read_bytes(), before)
+            upsert_device_label(path, "1111111111111111", "New", eui="1234567890abcdef", comment="", yes=True)
+            row = self._read_json(path)[0]
+            self.assertEqual(row["eui"], "1234567890abcdef")
+            self.assertNotIn("comment", row)
+            self.assertEqual(path.with_name(path.name + ".bak").read_bytes(), before)
+
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                rc = main(["--datadir", temp_dir, "--update-extaddr", "2222222222222222",
+                           "--device-label", "Two", "--eui", "1234567890abcdef"])
+            self.assertEqual(rc, 5)
+            self.assertIn("device-label --sync-eui", stderr.getvalue())
+
+            self._write_json(path, [
+                {"extaddr": "1111111111111111", "device_label": "One", "eui": "1234567890abcdef"},
+                {"extaddr": "2222222222222222", "device_label": "Two", "eui": "1234567890abcdef"},
+            ])
+            with self.assertRaisesRegex(ValueError, "duplicate eui"):
+                upsert_device_label(path, "1111111111111111", "One", eui="1234567890abcdef")
+
+    def test_backups_for_upsert_and_bulk_and_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "map.json"
+            source = Path(temp_dir) / "source.json"
+            backup = path.with_name("map.json.bak")
+            upsert_device_label(path, "1111111111111111", "One")
+            self.assertFalse(backup.exists())
+            original = path.read_bytes()
+            upsert_device_label(path, "1111111111111111", "Two")
+            self.assertEqual(backup.read_bytes(), original)
+            before_merge = path.read_bytes()
+            self._write_json(source, [{"extaddr": "2222222222222222", "name": "Three"}])
+            merge_extaddr_files(path, source)
+            self.assertEqual(backup.read_bytes(), before_merge)
+            before_failure = path.read_bytes()
+            backup_before_failure = backup.read_bytes()
+            self._write_json(source, [{"extaddr": "3333333333333333", "name": "Four"}])
+            with patch.object(label_map.shutil, "copyfileobj", side_effect=OSError("backup failed")):
+                with self.assertRaisesRegex(OSError, "backup failed"):
+                    upsert_device_label(path, "1111111111111111", "Four")
+                with self.assertRaisesRegex(OSError, "backup failed"):
+                    merge_extaddr_files(path, source, merge_name_override=True)
+            self.assertEqual(path.read_bytes(), before_failure)
+            self.assertEqual(backup.read_bytes(), backup_before_failure)
+
+    def test_injected_clock(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "map.json"
+            with patch.object(label_map, "_timestamp", wraps=real_timestamp):
+                clock = lambda: datetime(2020, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+                upsert_device_label(path, "1111111111111111", "One", clock=clock)
+            self.assertEqual(self._read_json(path)[0]["lastUpdated"], "2020-01-02T03:04:05Z")
+
+    def test_bulk_validates_proposed_labels_before_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "map.json"
+            source = Path(temp_dir) / "source.json"
+            self._write_json(path, [{"extaddr": "1111111111111111", "device_label": "One"}])
+            self._write_json(source, [{"extaddr": "2222222222222222", "name": "x" * 129}])
+            before = path.read_bytes()
+            with self.assertRaises(ValueError):
+                merge_extaddr_files(path, source)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertFalse(path.with_name("map.json.bak").exists())
+
+    def test_cli_eui_replacement_requires_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            args = ["--datadir", temp_dir, "--update-extaddr", "1111111111111111",
+                    "--device-label", "One", "--eui"]
+            with redirect_stdout(StringIO()):
+                self.assertEqual(main(args + ["1234567890abcdef"]), 0)
+            for flag, eui in (("--yes", "1234567890abcde0"), ("--apply", "1234567890abcde1")):
+                with redirect_stderr(StringIO()):
+                    self.assertEqual(main(args + [eui]), 5)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(args + [eui, flag]), 0)
+
+    def test_cli_alias_and_json_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for command, address in (("device-label", "1111111111111111"),
+                                     ("merge-extaddr", "2222222222222222")):
+                stdout = StringIO()
+                with redirect_stdout(stdout):
+                    rc = td_cli.main(["--datadir", temp_dir, command, "--update-extaddr",
+                                      address, "--device-label", "Name", "--eui64", "1234567890abcde" + address[0]])
+                self.assertEqual(rc, 0)
+                self.assertEqual(json.loads(stdout.getvalue())["extAddress"], address)
+            self.assertIn("device-label", td_cli.build_parser().format_help())
+
+    def test_process_writers_and_lock_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            script = Path(label_map.__file__).resolve()
+            def command(address):
+                return [sys.executable, str(script), "--datadir", temp_dir,
+                        "--update-extaddr", address, "--device-label", "Name"]
+            path = Path(temp_dir) / "td-static-extaddr-device-label.json"
+            with path.with_name(path.name + ".lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                processes = [subprocess.Popen(command(addr), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                             for addr in ("1111111111111111", "2222222222222222")]
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=20)
+                self.assertEqual(process.returncode, 0, (stdout, stderr))
+            self.assertEqual(len(self._read_json(path)), 2)
+            self.assertEqual(len(self._read_json(path.with_name(path.name + ".bak"))), 1)
+            before = path.read_bytes()
+            with path.with_name(path.name + ".lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                result = subprocess.run(command("3333333333333333"), capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 7)
+            self.assertIn("map busy", result.stderr)
+            self.assertEqual(path.read_bytes(), before)
 
 
 if __name__ == "__main__":

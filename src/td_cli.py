@@ -44,7 +44,7 @@ import otbr_restapi_cli
 import ha_matter_ws_cli
 
 import merge_dataset
-import merge_extaddr_device_label_map
+import device_label
 from td_logging import configure_logging, log_event, redact_sensitive_text
 
 class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -411,6 +411,9 @@ def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     health_commands.add_parser("compare", help="Compare stored health assessments", add_help=False)
     health_commands.add_parser(
+        "backfill-roster-eui", help="Review or apply captured roster EUI aliases", add_help=False,
+    )
+    health_commands.add_parser(
         "prepare-history", help="Prepare bounded cache-only health history", add_help=False,
     )
     health_commands.add_parser(
@@ -545,8 +548,9 @@ def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:
         add_help=False,
     )
     subparsers.add_parser(
-        "merge-extaddr",
-        help="Merge missing extaddr entries from a topology or mdns input file into the static extaddr map",
+        "device-label",
+        aliases=["merge-extaddr"],
+        help="Maintain the device label map (merge-extaddr is a compatibility alias)",
         add_help=False,
     )
 
@@ -633,8 +637,8 @@ def build_parser() -> argparse.ArgumentParser:
     merge-dataset
         usage: td_cli merge-dataset [-h] ...
 
-    merge-extaddr
-        usage: td_cli merge-extaddr [-h] ...
+    device-label (alias: merge-extaddr)
+        usage: td_cli device-label [-h] ...
 
 """
 
@@ -647,6 +651,7 @@ def build_parser() -> argparse.ArgumentParser:
         "health": subparsers._name_parser_map["health"],
         "system": subparsers._name_parser_map["system"],
         "merge-dataset": subparsers._name_parser_map["merge-dataset"],
+        "device-label": subparsers._name_parser_map["device-label"],
         "merge-extaddr": subparsers._name_parser_map["merge-extaddr"]
     }
 
@@ -1244,8 +1249,8 @@ def _dispatch_merge(
         command_main = merge_dataset.main
         module_name = "merge_dataset.main"
     else:
-        command_main = merge_extaddr_device_label_map.main
-        module_name = "merge_extaddr_device_label_map.main"
+        command_main = device_label.main
+        module_name = "device_label.main"
     return _normalize_module_rc(
         command_main(_forward_with_datadir(args, extra_args)), module_name
     )
@@ -1281,6 +1286,7 @@ _FAMILY_DISPATCHERS = {
     "system": _dispatch_system,
     "merge-dataset": _dispatch_merge,
     "merge-data": _dispatch_merge,
+    "device-label": _dispatch_merge,
     "merge-extaddr": _dispatch_merge,
 }
 
@@ -1323,8 +1329,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args, parser)
 
     single_record_json_output = (
-        args.command == "merge-extaddr"
-        and any(option in extras for option in ("--read-extaddr", "--update-extaddr"))
+        args.command in ("device-label", "merge-extaddr")
+        and any(option.partition("=")[0] in (
+            "--read-extaddr", "--update-extaddr", "--sync-eui", "--suggest-ha-matter", "--suggest-hap",
+            "--compare-eve",
+        ) for option in extras)
     ) or (
         args.command == "otbr-cli"
         and args.cli_command == "device"
@@ -1333,7 +1342,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.command == "ha-matter-ws"
         and args.ha_matter_command == "device"
         and args.ha_matter_device_command == "ping"
-    ) or (args.command in {"health", "system", "unify-dataset", "source-probe"} and "--json" in extras) or (
+    ) or (args.command == "health" and args.health_command == "backfill-roster-eui") or (
+        args.command in {"health", "system", "unify-dataset", "source-probe"} and "--json" in extras
+    ) or (
         args.command == "system"
         and args.system_command == "device"
         and args.device_action == "ping"

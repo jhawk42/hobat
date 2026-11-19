@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from td_health_unified import _PreparedContract
 
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 _PURGE_TABLES = (
     "health_observation_preparation",
     "health_pair_preparation",
@@ -2169,7 +2169,22 @@ class SQLiteHealthStore:
                 if row["device_id"] in candidates:
                     candidates[row["device_id"]]["lastEndpointPresenceAt"] = row["last_seen"]
                     candidates[row["device_id"]]["observed"] = bool(row["observed"])
+            self._attach_roster_eui_aliases(connection, network_id, candidates)
             return dict(assessment), list(candidates.values()), findings
+
+    @staticmethod
+    def _attach_roster_eui_aliases(connection: sqlite3.Connection, network_id: str,
+                                   records: dict[str, dict]) -> None:
+        if not records or not _table_exists(connection, "roster_eui_aliases"):
+            return
+        for row in connection.execute(
+            "SELECT device_id, eui, provenance_json FROM roster_eui_aliases WHERE network_id=?",
+            (network_id,),
+        ):
+            if row["device_id"] in records:
+                records[row["device_id"]]["euiAlias"] = {
+                    "value": row["eui"], "provenance": json.loads(row["provenance_json"]),
+                }
 
     @staticmethod
     def _roster_device_rows(connection: sqlite3.Connection, network_id: str,
@@ -2234,7 +2249,7 @@ class SQLiteHealthStore:
                USING (observation_id) WHERE o.network_id=? AND ds.device_id=?""",
             (network_id, device_id),
         ).fetchone()[0]
-        return {"deviceId": device_id, "fields": [dict(row) for row in rows],
+        result = {"deviceId": device_id, "fields": [dict(row) for row in rows],
                 "expectedLabel": expected["label"] if expected else None,
             "rosterState": expected["roster_state"] if expected else "untracked",
             "designated": expected is not None,
@@ -2248,6 +2263,8 @@ class SQLiteHealthStore:
                 "changeSource": expected["change_source"] if expected else None,
                 "lastLifecycleEvent": dict(last_event) if last_event else None,
                 "conflicts": [dict(row) for row in conflicts], "lastEndpointPresenceAt": presence}
+        SQLiteHealthStore._attach_roster_eui_aliases(connection, network_id, {device_id: result})
+        return result
 
     def roster_device_row(
         self, *, network_id: str, device_id: str, assessment_id: str | None = None
@@ -2358,6 +2375,7 @@ class SQLiteHealthStore:
                 parameters,
             ):
                 records[row["device_id"]]["lastEndpointPresenceAt"] = row["last_seen"]
+            self._attach_roster_eui_aliases(connection, network_id, records)
             return records
 
     def comparison_row(
@@ -3239,7 +3257,7 @@ class SQLiteHealthStore:
         return observation, original, policy, profile, context, evaluation_inputs
 
     def _reassess_network(
-        self, connection: sqlite3.Connection, network_id: str
+        self, connection: sqlite3.Connection, network_id: str, *, dataset_id: str | None = None,
     ) -> list[dict]:
         from td_health_evaluator import (
             ROSTER_REASSESSMENT_RULE_IDS,
@@ -3255,7 +3273,11 @@ class SQLiteHealthStore:
             )
         ]
         active_datasets = load_health_manifest().datasets
-        pointers = [pointer for pointer in pointers if pointer["dataset_id"] in active_datasets]
+        pointers = [
+            pointer for pointer in pointers
+            if pointer["dataset_id"] in active_datasets
+            and (dataset_id is None or pointer["dataset_id"] == dataset_id)
+        ]
         current_revision_row = connection.execute(
             "SELECT revision FROM network_roster_revisions WHERE network_id=?",
             (network_id,),
@@ -3727,6 +3749,13 @@ class SQLiteHealthStore:
                WHERE e.network_id=device_last_known.network_id
                AND e.device_id=device_last_known.device_id)"""
         )
+        if _table_exists(connection, "roster_eui_aliases"):
+            connection.execute(
+                """DELETE FROM roster_eui_aliases AS a WHERE NOT EXISTS (
+                   SELECT 1 FROM device_last_known AS d
+                   WHERE d.network_id=a.network_id AND d.device_id=a.device_id
+                   AND d.field_key='extAddress')"""
+            )
         connection.execute(
             """DELETE FROM device_identity_conflicts WHERE NOT EXISTS (
                SELECT 1 FROM device_last_known d WHERE d.network_id=device_identity_conflicts.network_id
@@ -4899,6 +4928,13 @@ def _validate_schema_structure(connection: sqlite3.Connection, version: int) -> 
             )
 
 
+    if version >= 11:
+        _require_columns(connection, "roster_eui_aliases",
+                         {"network_id", "device_id", "eui", "provenance_json"}, version)
+        if ("network_id", "eui") not in _index_columns(connection, "roster_eui_aliases"):
+            raise HealthStoreMigrationError("schema-invalid", "Roster EUI alias ownership key is missing")
+
+
 def _migration_v2(connection: sqlite3.Connection) -> None:
     connection.execute(
         "UPDATE assessments SET status=CASE status "
@@ -5098,6 +5134,19 @@ def _migration_v9(connection: sqlite3.Connection) -> None:
         )
 
 
+def _migration_v11(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """CREATE TABLE roster_eui_aliases (
+            network_id TEXT NOT NULL,
+            device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+            eui TEXT NOT NULL,
+            provenance_json TEXT NOT NULL,
+            PRIMARY KEY (network_id, device_id),
+            UNIQUE (network_id, eui)
+        )"""
+    )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration("health-schema-v2-status-vocabulary", 1, 2, "online-additive", _migration_v2),
     SchemaMigration("health-schema-v3-assessment-provenance", 2, 3, "online-additive", _migration_v3),
@@ -5108,6 +5157,7 @@ SCHEMA_MIGRATIONS = (
     SchemaMigration("health-schema-v8-assessment-preferences", 7, 8, "online-additive", _migration_v8),
     SchemaMigration("health-schema-v9-comparison-relationship-type", 8, 9, "online-additive", _migration_v9),
     SchemaMigration("health-schema-v10-derived-preparation", 9, 10, "online-additive", _migration_v10),
+    SchemaMigration("health-schema-v11-roster-eui-aliases", 10, 11, "online-additive", _migration_v11),
 )
 
 
@@ -5430,6 +5480,7 @@ def initialize_health_store(store: SQLiteHealthStore) -> None:
                 _migration_v8(connection)
                 _migration_v9(connection)
                 _migration_v10(connection)
+                _migration_v11(connection)
                 connection.executemany(
                     "INSERT INTO schema_migrations(version, applied_at) "
                     "VALUES (?, CURRENT_TIMESTAMP)",

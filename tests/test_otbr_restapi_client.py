@@ -12,6 +12,12 @@ import otbr_restapi_cli as cli_module
 import td_cli
 
 
+def test_clear_apply_confirmation_alias():
+    parser = cli_module.build_parser()
+    argv = ["devices", "clear"]
+    assert parser.parse_args([*argv, "--apply"]) == parser.parse_args([*argv, "--yes"])
+
+
 class FakeHeaders(dict):
     def __init__(self, content_type: str) -> None:
         super().__init__()

@@ -15,6 +15,12 @@ pytestmark = pytest.mark.usefixtures("archived_health_catalog")
 import td_cli
 import td_system_cli
 import td_system_ping
+
+
+def test_restore_apply_confirmation_alias():
+    parser = td_system_cli.build_parser()
+    argv = ["backups", "restore", "--input", "backup"]
+    assert parser.parse_args([*argv, "--apply"]) == parser.parse_args([*argv, "--yes"])
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result

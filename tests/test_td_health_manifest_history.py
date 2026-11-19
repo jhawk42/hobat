@@ -641,6 +641,56 @@ def test_changed_file_bytes_refuse_stale_snapshot(tmp_path, which):
     resolver.verify_snapshot()
 
 
+def test_archive_reuse_is_immutable_and_does_not_cache_paths_or_current_admission(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_bytes(MANIFEST_PATH.read_bytes())
+    first_path, second_path = tmp_path / "first.json", tmp_path / "second.json"
+    content = HISTORY_PATH.read_bytes()
+    for path in (first_path, second_path):
+        path.write_bytes(content)
+    first = load_manifest_history(manifest, first_path)
+    second = load_manifest_history(manifest, second_path)
+    assert first.revisions is second.revisions
+    revision = next(rev for rev in first.revisions if any(d.unified_recipe for d in rev.datasets.values()))
+    dataset = next(d for d in revision.datasets.values() if d.unified_recipe)
+    original = dataset.unified_recipe["rawInputs"][0]["file"]
+    with pytest.raises(TypeError):
+        dataset.unified_recipe["rawInputs"][0]["file"] = "changed"
+    declaration = history.dataset_declaration(dataset)
+    declaration["unifiedRecipe"]["rawInputs"][0]["file"] = "changed"
+    assert dataset.unified_recipe["rawInputs"][0]["file"] == original
+    with pytest.raises(TypeError):
+        dataset.health_profile.coverage["availability"] = "changed"
+
+    second_path.write_bytes(b'{"schemaVersion": 1,' + content.lstrip()[1:])
+    with pytest.raises(ManifestHistoryError, match="Duplicate JSON key"):
+        load_manifest_history(manifest, second_path)
+    with pytest.raises(ManifestHistoryError, match="snapshot changed"):
+        second.verify_snapshot()
+    first.verify_snapshot()
+    manifest.write_bytes(canonical_json(revision.manifest))
+    with pytest.raises(ManifestHistoryError):
+        load_manifest_history(manifest, first_path)
+
+
+def test_archive_reuse_evicts_old_entries_and_does_not_retain_oversize_bytes(tmp_path, monkeypatch):
+    archive_path = tmp_path / "history.json"
+    content = HISTORY_PATH.read_bytes()
+    archive_path.write_bytes(content)
+    first = load_manifest_history(history_path=archive_path)
+    for extra in range(1, 5):
+        archive_path.write_bytes(content + b" " * extra)
+        changed = load_manifest_history(history_path=archive_path)
+        assert changed.snapshot_digest != first.snapshot_digest
+        assert changed.revisions == first.revisions
+    archive_path.write_bytes(content)
+    assert load_manifest_history(history_path=archive_path).revisions is not first.revisions
+    monkeypatch.setattr(history, "_MAX_CACHED_ARCHIVE_BYTES", len(content) - 1)
+    one = load_manifest_history(history_path=archive_path)
+    two = load_manifest_history(history_path=archive_path)
+    assert one.revisions == two.revisions and one.revisions is not two.revisions
+
+
 @pytest.mark.parametrize("which", ["manifest", "history"])
 def test_missing_required_file_has_no_current_only_fallback(tmp_path, which):
     with pytest.raises(ManifestHistoryError, match="Cannot read required"):

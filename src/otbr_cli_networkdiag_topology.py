@@ -1648,7 +1648,7 @@ class ChildFetchAttempt:
     def __post_init__(self) -> None:
         if self.index < 0:
             raise ValueError("Child fetch attempt index cannot be negative")
-        if self.detail_level not in (150, 160, 170, 180, 190, 200):
+        if self.detail_level not in (150, 155, 160, 170, 175, 180, 190, 200):
             raise ValueError("Child fetch attempt has an invalid detail level")
         if self.tlv_values != get_tlv_values_for_detail_level(self.detail_level):
             raise ValueError("Child fetch attempt TLVs do not match its detail level")
@@ -1795,8 +1795,8 @@ def build_child_fetch_policies(
 ) -> tuple[ChildFetchPolicy, ...]:
     policies = []
     schedules = (
-        ("fast", 3, (170, 170, 150), True),
-        ("detail", 7, (150, 160, 170, 170, 180, 190, 200), False),
+        ("fast", 4, (175, 170, 155, 150), True),
+        ("detail", 8, (150, 155, 160, 170, 170, 180, 190, 200), False),
     )
     for mode, minimum_attempts, levels, stop_after_first in schedules:
         if (mode == "fast" and not fast_enabled) or (mode == "detail" and not detail_enabled):

@@ -36,18 +36,33 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { getColumnValue, toText } from "./src/js/tdash-utils.js";
 import { canonicalizeExtAddress } from "./src/js/tdash-device-fields.js";
+import { canonicalLabelEui, enrichRows, loadStaticLabelMap } from "./src/js/tdash-dataset.js";
 
 const source = readFileSync("./src/js/tdash-ui.js", "utf8");
 const settings = source.slice(source.indexOf("const DEVICE_EXTADDRESS_PATTERN"),
-  source.indexOf("async function saveSelectedDeviceLabel()"));
+  source.indexOf("function initDeviceSettings()"));
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 };
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
-const A = { extAddress: "aaaaaaaaaaaaaaaa", deviceLabel: "Raw A" };
+const A = { extAddress: "aaaaaaaaaaaaaaaa", deviceLabel: "Raw A",
+  attributes: { eui: "0123456789abcdef" } };
 const B = { extAddress: "bbbbbbbbbbbbbbbb", deviceLabel: "Raw B" };
+globalThis.fetch = async () => new Response(JSON.stringify([
+  { extAddress: A.extAddress, deviceLabel: "Saved A", eui: A.attributes.eui },
+  { extAddress: B.extAddress, deviceLabel: "Saved B", previousExtAddresses: ["cccccccccccccccc"] },
+  { extAddress: "dddddddddddddddd", deviceLabel: "Duplicate 1", eui: "fedcba9876543210" },
+  { extAddress: "eeeeeeeeeeeeeeee", deviceLabel: "Duplicate 2", eui: "fedcba9876543210" },
+]));
+await loadStaticLabelMap();
+assert.deepEqual(enrichRows([
+  { ...B, eui: A.attributes.eui },
+  { extAddress: "cccccccccccccccc", eui: A.attributes.eui },
+  { extAddress: "1212121212121212", attributes: { eui: A.attributes.eui } },
+  { extAddress: "1313131313131313", eui: "fedcba9876543210" },
+]).map((row) => row.deviceLabel), ["Saved B", "Saved B", "Saved A", undefined]);
 function harness() {
   const elements = new Map(), reads = [];
   const element = (id) => {
@@ -58,25 +73,30 @@ function harness() {
     return elements.get(id);
   };
   const context = vm.createContext({
-    getColumnValue, toText, canonicalizeExtAddress,
+    getColumnValue, toText, canonicalizeExtAddress, canonicalLabelEui,
     document: { getElementById: element },
-    trackedFetch: async () => {
+    setStaticDeviceLabel() {},
+    renderCurrentView() {},
+    trackedFetch: async (_url, options) => {
       const body = deferred();
-      const read = { body, status: 200, parsed: false };
+      const read = { body, status: 200, parsed: false, options };
       reads.push(read);
       return {
         get status() { return read.status; },
-        get ok() { return read.status === 200; },
+        get ok() { return [200, 201].includes(read.status); },
         json() { read.parsed = true; return body.promise; },
       };
     },
   });
   vm.runInContext(`${settings}
     globalThis.api = { state: deviceSettingsState, select: displaySelectedDevice,
-      load: loadSelectedDeviceLabel };
+      load: loadSelectedDeviceLabel, save: saveSelectedDeviceLabel };
   `, context);
   const snapshot = () => JSON.stringify({
     label: element("device-label").value,
+    metadata: ["stored-eui", "comment"].map((id) => [
+      element(`device-${id}`).textContent, element(`device-${id}-row`).hidden,
+    ]),
     loaded: context.api.state.loadedLabel,
     loading: context.api.state.loading,
     status: element("device-settings-status").textContent,
@@ -84,6 +104,20 @@ function harness() {
       .map((id) => element(id).disabled),
   });
   return { ...context.api, reads, element, snapshot };
+}
+{
+  const h = harness();
+  h.select(A);
+  const loading = h.load();
+  await flush();
+  h.reads[0].body.resolve({deviceLabel: "Saved A", eui: A.attributes.eui, comment: "<note>"});
+  await loading;
+  assert.equal(h.element("device-stored-eui").textContent, A.attributes.eui);
+  assert.equal(h.element("device-comment").textContent, "<note>");
+  assert.equal(h.element("device-comment-row").hidden, false);
+  h.select(B);
+  assert.equal(h.element("device-stored-eui-row").hidden, true);
+  assert.equal(h.element("device-comment").textContent, "");
 }
 for (const disposition of ["other-device", "cleared", "same-address", "stale-error"]) {
   const h = harness();
@@ -133,6 +167,35 @@ for (const outcome of ["success", "missing", "parse-error"]) {
   assert.equal(h.element("device-label").value, outcome === "success" ? "Saved A" : "Raw A");
   assert.equal(h.element("device-settings-status").textContent,
     outcome === "parse-error" ? "Invalid JSON" : "");
+}
+for (const [device, stale] of [[A, false], [B, false], [A, true]]) {
+  const h = harness();
+  h.select(device);
+  h.element("device-label").value = "Edited";
+  const saving = h.save();
+  await flush();
+  const { options, body } = h.reads[0];
+  assert.equal(options.method, "PATCH");
+  assert.deepEqual(JSON.parse(options.body), device === A
+    ? { deviceLabel: "Edited", observedEui: "0123456789abcdef" }
+    : { deviceLabel: "Edited" });
+  if (stale) h.select(B);
+  const before = h.snapshot();
+  body.resolve({
+    deviceLabel: "Edited",
+    ...(device === A ? {
+      euiOutcome: "skipped-owned-by",
+      euiOwner: { deviceLabel: "Router", extAddress: "cccccccccccccccc" },
+    } : {}),
+  });
+  await saving;
+  if (stale) assert.equal(h.snapshot(), before);
+  else {
+    assert.equal(h.element("device-label").value, "Edited");
+    const status = h.element("device-settings-status").textContent;
+    assert.ok(status.startsWith("Device label saved."));
+    assert.equal(status.includes("Router (cccccccccccccccc)"), device === A);
+  }
 }
 """],
         cwd=REPO_ROOT, capture_output=True, text=True, timeout=15, check=False,
@@ -208,7 +271,7 @@ def test_static_label_cache_can_override_stale_raw_labels() -> None:
     enrichment_end = dataset_text.index("export function enrichRows(rows)", enrichment_start)
     enrichment = dataset_text[enrichment_start:enrichment_end]
 
-    assert "export function setStaticDeviceLabel(extaddr, deviceLabel)" in dataset_text
+    assert "export function setStaticDeviceLabel(extaddr, deviceLabel, eui)" in dataset_text
     assert "staticExtaddrLabelMap.set(key, label);" in dataset_text
     assert "if (toText(node.deviceLabel)" not in enrichment
     assert "return { ...node, deviceLabel: label, device_label: label };" in enrichment
@@ -221,8 +284,7 @@ def test_settings_uses_authoritative_get_and_exact_patch_body() -> None:
     assert "if (response.status === 404)" in ui_text
     assert "async function saveSelectedDeviceLabel()" in ui_text
     assert 'method: "PATCH"' in ui_text
-    assert "body: JSON.stringify({ deviceLabel })" in ui_text
-    assert "setStaticDeviceLabel(extAddress, savedLabel);" in ui_text
+    assert "setStaticDeviceLabel(extAddress, savedLabel, payload.eui);" in ui_text
     assert "renderCurrentView();" in ui_text
     assert 'response.status === 201 ? "Device label added." : "Device label saved."' in ui_text
 

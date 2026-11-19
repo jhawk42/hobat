@@ -666,6 +666,23 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_unified --init-roster-from-label-map
 ```
 
+For an existing roster, preview retirement of addresses the operator map
+lists under `previousExtAddresses`:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
+  --dataset otbr_cli_unified --reconcile-roster-from-label-map --dry-run --json
+```
+
+Omit `--dry-run` to confirm interactively, or replace it with `--apply`
+(alias `--yes`) to apply without prompting. This affects only addresses
+still `expected` in the selected dataset's network whose replacement is
+also `expected`. The selected dataset must have a current assessment;
+addresses observed in that assessment are skipped. The preview reports
+skip reasons. Review all proposed retirements: absence from the current
+assessment is not proof of succession or of complete coverage. Reconciliation
+keeps historical observations and records the new primary in the retirement event.
+
 An expected device absent from one complete observation is missing with Moderate
 status when absence history is available and no same-collection positive evidence
 contradicts the absence; incomplete or conflicting evidence remains Unknown.
@@ -1075,7 +1092,7 @@ observation. Automatic count pruning still leaves comparison headers available
 with a pruned-baseline read state; explicit age purge removes expired pairs.
 
 All purge commands support `--dry-run` and `--json`. Mutation requires an
-interactive confirmation or `--yes`. Preview counts include `comparisons` and
+interactive confirmation or `--yes` (also accepted as `--apply`). Preview counts include `comparisons` and
 `comparison_items` and match apply counts for the same database state and
 cutoff. Active writers or the later cutoff of a subsequent command can change
 the counts.

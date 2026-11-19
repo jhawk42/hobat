@@ -29,6 +29,7 @@ from td_health_comparison import Compatibility
 from td_health_policy import load_health_policy
 from td_health_read import HealthCorruptStoreError, ROSTER_TABLE_FIELDS, TDHealthReadService
 from td_health_roster import RosterFact
+from td_health_roster_mutation import _apply_changes
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
 
@@ -1182,8 +1183,14 @@ def test_roster_page_sizes_cover_large_filtered_population_without_gaps(tmp_path
     expected_ids = [
         f"extaddr:{0x2000000000000000 + index:016x}" for index in range(125)
     ]
-    for index, device_id in enumerate(expected_ids):
-        store.upsert_expected_device(observation.network_id, device_id, f"Room {index:03d}")
+    # Seed the same rows and lifecycle events before any assessments exist.
+    seeded = _apply_changes(
+        store, network_id=observation.network_id, origin="cli", actor="cli", insert_only=False,
+        changes=[(device_id, f"Room {index:03d}", True, None)
+                 for index, device_id in enumerate(expected_ids)],
+    )
+    assert [row.network_roster_revision for row in seeded] == list(range(1, 126))
+    assert all(row.roster_state == "expected" and row.event_id for row in seeded)
     store.save_processing_result(observation, assessment)
     (tmp_path / "td-static-extaddr-device-label.json").write_text("[]", encoding="utf-8")
     service = TDHealthReadService(tmp_path)
