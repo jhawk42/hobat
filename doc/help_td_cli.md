@@ -611,6 +611,26 @@ shared observations but invalidates assessments derived from affected
 observations. Purge does not remove identities from collector snapshots,
 exports, or existing backups.
 
+### `system scheduler`
+
+```text
+td_cli system scheduler status --server-url URL [--json]
+td_cli system scheduler list --server-url URL [--json]
+td_cli system scheduler run-now --server-url URL --apply [--quick] [--json]
+td_cli system scheduler pause --server-url URL [--json]
+td_cli system scheduler resume --server-url URL [--json]
+td_cli system scheduler cancel JOB_ID --server-url URL [--json]
+```
+
+Use the running server's URL, including any deployment prefix. `--datadir`
+is not accepted: the server owns that choice. `status` and `list` do not
+start collection. Pause is runtime-only and does not cancel active work.
+Run-now performs live collection and a gated purge (default 10 days, unless
+overridden on the server); a timed run can still follow that day. `--quick`
+skips the CLI mesh tables and two REST fetch-all commands and disables CLI
+child expansion; scheduled runs always use the full workflow. Run-now never
+does monthly repack. A printed job ID means accepted, not completed.
+
 ### `system database repack`
 
 ```text

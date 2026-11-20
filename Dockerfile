@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 FROM alpine:3.24
 
 # Install runtime Python, Bash for /init, and the Docker CLI
-RUN apk add --no-cache python3 bash docker-cli
+RUN apk add --no-cache python3 bash docker-cli tzdata
 
 # Copy the pre-compiled virtual environment from the builder
 COPY --from=builder /opt/venv /opt/venv

@@ -1,4 +1,4 @@
-import { trackedFetch } from "./tdash-activity.js";
+import { trackedFetch, trackedJsonRequest } from "./tdash-activity.js";
 
 const PILLAR_LABELS = Object.freeze({
   availability: "Availability",
@@ -82,7 +82,7 @@ function appendReadableValue(parent, text, className = "") {
 }
 
 async function healthRequest(path, signal) {
-  const response = await trackedFetch(path, { headers: { Accept: "application/json" }, signal });
+  const { response, payload } = await trackedJsonRequest(path, { headers: { Accept: "application/json" }, signal });
   if (!response.ok) {
     const error = new Error(response.status === 404
       ? "No processed health assessment is available for this dataset."
@@ -90,7 +90,7 @@ async function healthRequest(path, signal) {
     error.status = response.status;
     throw error;
   }
-  return response.json();
+  return payload;
 }
 
 export function fetchHealthAssessment(datasetId, signal, options = {}) {
@@ -101,32 +101,44 @@ export function fetchHealthAssessment(datasetId, signal, options = {}) {
 }
 
 export async function startHealthProcessing(datasetId, signal) {
-  const response = await trackedFetch("api/health/process-dataset", {
+  const { response, payload } = await trackedJsonRequest("api/health/process-dataset", {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ dataset: datasetId }),
     signal,
   });
-  if (!response.ok) throw new Error(`Health processing unavailable (${response.status}).`);
-  return response.json();
+  if (!response.ok) {
+    const error = new Error(`Health processing unavailable (HTTP ${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
+  if (typeof payload?.job_id !== "string" || !payload.job_id
+      || !["running", "cancelling", "done", "error", "cancelled"].includes(payload.status)) {
+    throw new Error("Health processing protocol error: invalid job response.");
+  }
+  return payload;
 }
 
 export async function fetchHealthJob(jobId, signal) {
-  const response = await trackedFetch(`api/job/${encodeURIComponent(jobId)}`, {
+  const { response, payload } = await trackedJsonRequest(`api/job/${encodeURIComponent(jobId)}`, {
     headers: { Accept: "application/json" }, signal,
   }, "silent");
   if (!response.ok) throw new Error(`Health task unavailable (${response.status}).`);
-  return response.json();
+  if ((payload?.job_id !== undefined && payload.job_id !== jobId)
+      || !["running", "cancelling", "done", "error", "cancelled"].includes(payload.status)) {
+    throw new Error("Health task protocol error: invalid job response.");
+  }
+  return payload;
 }
 
 export async function cancelHealthJob(jobId, signal) {
-  const response = await trackedFetch(`api/job/${encodeURIComponent(jobId)}`, {
+  const { response, payload } = await trackedJsonRequest(`api/job/${encodeURIComponent(jobId)}`, {
     method: "DELETE", headers: { Accept: "application/json" }, signal,
   });
   if (!response.ok && response.status !== 409) {
     throw new Error(`Health task cancellation unavailable (${response.status}).`);
   }
-  return response.json();
+  return payload;
 }
 
 export function fetchHealthDevice(assessmentId, deviceId, signal) {
@@ -1028,7 +1040,8 @@ export function formatHealthAssessmentObservation(timestamp, now = Date.now()) {
 export function buildHealthInsightsStatus({ dataset = null, assessment = null, loading = false,
   error = "", mode = "latest", pinnedAssessmentId = null, refreshStatus = "", refreshDetail = "",
   now = Date.now() } = {}) {
-  const processing = refreshStatus === "error" ? "Health refresh failed"
+  const processing = refreshStatus === "unconfirmed" ? "Health processing outcome unconfirmed"
+    : refreshStatus === "error" ? "Health refresh failed"
     : refreshStatus === "cancelled" ? "Health processing cancelled"
       : refreshStatus === "completed" ? "Health processing completed"
         : refreshStatus ? `Health processing: ${refreshStatus}` : "";
@@ -2021,6 +2034,11 @@ export function renderHealthStatus(container, model) {
   }
   if (model.refreshStatus === "cancelled") {
     appendText(container, "span", "Health: cancelled", "health-status-state");
+    return;
+  }
+  if (model.refreshStatus === "unconfirmed") {
+    appendText(container, "span", "Health: unconfirmed", "health-status-state");
+    appendText(container, "span", model.refreshDetail, "health-status-detail");
     return;
   }
   if (model.refreshStatus === "error") {

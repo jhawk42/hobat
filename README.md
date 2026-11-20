@@ -295,9 +295,60 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health migrate-history \
 PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset
 
 # Health maintenance and complete data-directory backups
-PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 30 --dry-run
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --dry-run
 PYTHONPATH=src python3 -m td_cli --datadir ./data system backups create --output ./hobat-backup
 ```
+
+Age-based health purge now defaults to 10 days instead of 30. Preview before
+applying; pass `--keep-days 30` to keep the previous retention.
+
+### Replace nightly cron with the optional scheduler
+
+The web server is the only scheduler host. Before opting in, disable the old
+cron entry and verify that one writing server owns the selected data directory.
+Keep [the fetch script](script/td-fetch.sh) for explicit manual use only; don't
+overlap scheduled work with manual collection, backup, or migration. No new
+network or Docker-socket privileges are needed.
+
+Set these variables for `td_webserver` directly or in the Compose service's
+`environment`; for Home Assistant use the [add-on options](addon_hobat/DOCS.md).
+
+| Variable | Meaning |
+|---|---|
+| `TD_SCHEDULER_ENABLED` | Off by default; set `1` to enable. |
+| `TD_SCHEDULER_START_TIME` | Local 24-hour `HH:MM`; defaults to `04:20`. |
+| `TD_SCHEDULER_KEEP_DAYS` | Optional positive override for nightly and Operations purge; otherwise 10. |
+| `TD_EXT_PAN_ID` | Required when enabled; the target network's Extended PAN ID. |
+| `TZ` | Normal process timezone, e.g. `America/New_York`; verify the status zone, offset and next local/UTC slot before relying on the schedule. Restart after changing it. |
+
+The timer runs the full source workflow, then cache-only Unified and health
+processing, then permanently purges expired health records if health succeeds.
+On the second Sunday of the month it repacks only after successful purge.
+It skips missed or busy slots, does not retry failures, runs a repeated DST
+wall time once, and skips nonexistent wall times. Pause is runtime-only and
+does not cancel active work. Operations → Jobs can monitor or cancel the job.
+While the chain is active the dashboard serves cached files, rejects explicit
+refreshes, and does not queue them. Cache Only does not stop the timer.
+
+Use [`system scheduler`](doc/help_td_cli.md) to inspect the running server or
+request an extra run. `run-now --apply` performs live collection and purge,
+even if another timed run will follow that day. `--quick` is manual-only; it
+skips some CLI and REST diagnostics and never changes the timed workflow.
+Run-now does not do monthly repack. Recover explicitly after inspecting Jobs
+and logs; cancellation cannot undo committed writes or establish that a
+started repack did not complete.
+On POSIX, collector subprocesses run in separate process groups so timeout and
+cancellation can signal descendants. Cleanup is bounded; a cleanup-unconfirmed
+log means pipe closure or child termination could not be established.
+
+Keep complete INFO-level service/container logs and an export path that retains
+at least five distinct selected run dates. Use correlated run, command and
+collector evidence for an offline Run Summary; terminal Job metadata is not
+a full capture, and the legacy updater cannot ingest structured scheduler
+records without separate parser work. Verify collection budgets against
+retained timings before migration. Stop the enabled server before restoring
+its directory; pause is insufficient. Backups exclude scheduler runtime state
+and restore preserves the target's local slot claims.
 
 `system device ping` accepts only literal unicast IPv4 or IPv6 addresses. IPv6
 link-local targets and zone identifiers require a later interface-aware design;

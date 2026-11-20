@@ -1066,7 +1066,8 @@ are not implemented.
 
 ## Purge and Backup
 
-Preview or apply age-based health retention; the default is 30 days:
+Preview or apply age-based health retention; the default is now 10 days.
+Deletion is permanent. Pass `--keep-days 30` to retain the previous default:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --dry-run
@@ -1080,6 +1081,23 @@ expired comparisons whose original observations were deleted by an earlier
 purge. Endpoints exactly at the cutoff are retained unless the other endpoint
 is older. Cascading health rows and stale current pointers are removed in the
 same transaction; roster records are preserved.
+
+Dashboard Operations → Health Purge is an explicit manual action, even with
+the nightly scheduler disabled or paused. It displays the server's retention
+and lets you turn off the default-on Repack option before pressing Proceed.
+Repack starts only if purge succeeds. Free disk space should be at least the
+database file's current size; SQLite may need additional temporary space.
+If repack fails, already completed deletion is not rolled back. Cancellation
+does not undo a commit and an interrupted maintenance step may be unconfirmed.
+Dashboard job, purge, and health-processing requests use a local 15-second
+request/body deadline. A local timeout does not establish that server work
+failed or was cancelled. Check Pending Jobs and server logs before retrying an
+unconfirmed submission; purge blocks another submission until acknowledged.
+
+The [optional nightly scheduler](../README.md#replace-nightly-cron-with-the-optional-scheduler)
+purges only after successful health processing and repacks on the second
+Sunday only after successful purge. Stop the scheduler host before restore;
+backups do not contain the scheduler's claims and restore does not reset them.
 
 `purge-all` removes all health-domain records, including roster records,
 while preserving `hobat_v1.db`, schema migrations,

@@ -21,6 +21,7 @@ options:
   ha_matter_ws_port: 5580
   device_actions_enabled: true
   device_reset_enabled: true
+  scheduler_enabled: false
 schema:
   ot_rest_listen_addr: str
   ot_rest_listen_port: port
@@ -28,6 +29,10 @@ schema:
   ha_matter_ws_port: port
   device_actions_enabled: bool
   device_reset_enabled: bool
+  scheduler_enabled: bool
+  scheduler_start_time: "str?"
+  scheduler_keep_days: "int?"
+  ext_pan_id: "str?"
   TD_DEBUG_LEVEL: "list(DEBUG|INFO|WARNING|ERROR)?"
 webui: "http://[HOST]:[PORT:9165]/"
 watchdog: "tcp://[HOST]:[PORT:9165]"

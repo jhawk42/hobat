@@ -585,6 +585,22 @@
               <p>No pending jobs.</p>
             </div>
           </section>
+          <section class="health-purge" aria-labelledby="health-purge-heading">
+            <h3 id="health-purge-heading">Health Purge</h3>
+            <p id="health-purge-retention">Loading effective retention…</p>
+            <label><input id="health-purge-repack" type="checkbox" checked> Repack</label>
+            <p><strong>Disk Space Note.</strong> Repacking rewrites the entire database file, so ensure
+              you have free disk space at least equal to the current size of hobat sqlite3
+              database file before running it. SQLite temporary and journal files can require additional space.</p>
+            <p>Older health records are permanently deleted. If selected, Repack compacts the database only after purge succeeds.</p>
+            <div class="health-purge-actions">
+              <button id="btn-health-purge" type="button" disabled>Proceed</button>
+              <button id="btn-health-purge-cancel" type="button" hidden>Cancel purge job</button>
+              <button id="btn-health-purge-refresh" type="button" hidden>Refresh job status</button>
+              <button id="btn-health-purge-acknowledge" type="button" hidden>I verified the prior request</button>
+            </div>
+            <div id="health-purge-status" role="status" aria-live="polite"></div>
+          </section>
         </div>
       </div>
     </main>

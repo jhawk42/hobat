@@ -1893,7 +1893,51 @@ def test_top_level_age_purge_dry_run_is_json_and_does_not_mutate(tmp_path) -> No
 def test_age_purge_defaults_to_configured_retention() -> None:
     args = td_health_cli.build_parser().parse_args(["purge"])
 
-    assert args.keep_days == td_health_cli.DEFAULT_HEALTH_PURGE_KEEP_DAYS == 30
+    assert args.keep_days == td_health_cli.DEFAULT_HEALTH_PURGE_KEEP_DAYS == 10
+
+
+def test_default_purge_and_repack_preserve_cutoff_and_weekly_baseline(tmp_path, capsys) -> None:
+    from dataclasses import replace
+
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.upsert_expected_device("extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", "Router", "expected")
+    timestamps = (
+        "2026-09-01T04:19:59+00:00",
+        "2026-09-01T04:20:00+00:00",  # Exactly at the exclusive cutoff.
+        "2026-09-03T04:20:00+00:00",  # Eight days before the latest.
+        "2026-09-11T04:20:00+00:00",
+    )
+    for index, timestamp in enumerate(timestamps, start=1):
+        observation, assessment = _result(str(index))
+        store.save_processing_result(
+            replace(observation, observed_at=timestamp, ingested_at=timestamp),
+            replace(assessment, assessed_at=timestamp),
+        )
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text('{"untouched":true}')
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "marker").write_text("unchanged")
+    with patch.object(td_health_cli, "datetime") as clock:
+        clock.now.return_value = datetime.fromisoformat(timestamps[-1])
+        assert td_cli.main(["--datadir", str(tmp_path), "health", "purge", "--apply", "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["cutoff"] == timestamps[1]
+    assert result["deleted"]["observations"] == 1
+    assert td_cli.main(["--datadir", str(tmp_path), "system", "database", "repack"]) == 0
+    with closing(store._connect()) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert [row[0] for row in connection.execute(
+            "SELECT observed_at FROM observations ORDER BY observed_at"
+        )] == list(timestamps[1:])
+        assert connection.execute("SELECT COUNT(*) FROM expected_devices").fetchone()[0] == 1
+    endpoints = TDHealthReadService(tmp_path).comparison_endpoints(
+        network_id="extpan:78b9775b001c1cbe", dataset_id="otbr_cli_diagnostics_fetch",
+        side="before", limit=10, offset=0, after_assessment_id="assessment-4",
+    )
+    assert "assessment-3" in {item["assessmentId"] for item in endpoints["items"]}
+    assert snapshot.read_text() == '{"untouched":true}'
+    assert (backup / "marker").read_text() == "unchanged"
 
 
 @pytest.fixture

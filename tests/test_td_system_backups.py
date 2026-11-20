@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 from contextlib import closing
 from datetime import datetime, timezone
@@ -22,6 +24,12 @@ from td_system_backups import (
     BackupError,
     create_backup,
     restore_backup,
+)
+from td_scheduler_lock import (
+    SCHEDULER_LOCK_FILENAME,
+    SCHEDULER_STATE_FILENAME,
+    SchedulerLockError,
+    acquire_scheduler_lock,
 )
 from test_td_health_sqlite import _result
 
@@ -268,7 +276,9 @@ def test_restore_on_real_second_filesystem(tmp_path, monkeypatch):
         monkeypatch.setattr(td_system_backups.os, "replace", guarded_replace)
         assert restore_backup(data_dir, backup_dir) == manifest
         assert data_dir.stat().st_ino == identity
-        assert td_system_backups._manifest_files(data_dir) == manifest["files"]
+        actual = td_system_backups._manifest_files(data_dir)
+        actual.pop(SCHEDULER_LOCK_FILENAME)
+        assert actual == manifest["files"]
         assert not list(data_dir.glob(".hobat-restore-*"))
 
 
@@ -300,7 +310,9 @@ def test_mounted_restore_rolls_back_partial_moves(tmp_path, monkeypatch, stage):
     monkeypatch.setattr(td_system_backups.os, "replace", fail_after_one_move)
     with pytest.raises(OSError, match="partial move"):
         restore_backup(data_dir, backup_dir)
-    assert td_system_backups._manifest_files(data_dir) == before
+    after = td_system_backups._manifest_files(data_dir)
+    after.pop(SCHEDULER_LOCK_FILENAME)
+    assert after == before
     assert (data_dir / "dangling").is_symlink()
     assert os.readlink(data_dir / "dangling") == "missing-target"
     assert not list(data_dir.glob(".hobat-restore-*"))
@@ -343,3 +355,146 @@ def test_mounted_restore_retains_unresolved_recovery(tmp_path, monkeypatch, fail
         restore_backup(data_dir, backup_dir)
     with pytest.raises(BackupError, match="Unfinished restore workspace"):
         create_backup(data_dir, tmp_path / "another-backup")
+
+
+@pytest.mark.parametrize("mounted", [False, True])
+def test_backup_excludes_scheduler_runtime_files(tmp_path, monkeypatch, mounted):
+    data_dir = _data_dir(tmp_path)
+    monkeypatch.setattr(td_system_backups.td_scheduler_lock, "is_mount_root", lambda _: mounted)
+    (data_dir / SCHEDULER_STATE_FILENAME).write_text("local claim")
+    (data_dir / SCHEDULER_LOCK_FILENAME).write_text("runtime lock")
+    backup_dir = tmp_path / "backup"
+
+    manifest = create_backup(data_dir, backup_dir)
+
+    assert SCHEDULER_STATE_FILENAME not in manifest["files"]
+    assert SCHEDULER_LOCK_FILENAME not in manifest["files"]
+    assert not (backup_dir / SCHEDULER_STATE_FILENAME).exists()
+    assert not (backup_dir / SCHEDULER_LOCK_FILENAME).exists()
+
+
+def _add_legacy_scheduler_files(backup_dir):
+    manifest_path = backup_dir / BACKUP_MANIFEST_FILENAME
+    manifest = json.loads(manifest_path.read_text())
+    for name in (SCHEDULER_STATE_FILENAME, SCHEDULER_LOCK_FILENAME):
+        path = backup_dir / name
+        path.write_text("legacy runtime")
+        manifest["files"][name] = td_system_backups._sha256(path)
+    manifest_path.write_text(json.dumps(manifest))
+
+
+@pytest.mark.parametrize("mounted", [False, True])
+@pytest.mark.parametrize("local_state", [None, "local claim"])
+def test_restore_ignores_legacy_runtime_and_preserves_local_state(
+    tmp_path, monkeypatch, mounted, local_state
+):
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    _add_legacy_scheduler_files(backup_dir)
+    state = data_dir / SCHEDULER_STATE_FILENAME
+    if local_state is not None:
+        state.write_text(local_state)
+    monkeypatch.setattr(td_system_backups.td_scheduler_lock, "is_mount_root", lambda _: mounted)
+
+    restore_backup(data_dir, backup_dir)
+
+    if local_state is None:
+        assert not state.exists()
+    else:
+        assert state.read_text() == local_state
+    if mounted:
+        assert (data_dir / SCHEDULER_LOCK_FILENAME).read_text() == ""
+    else:
+        assert not (data_dir / SCHEDULER_LOCK_FILENAME).exists()
+
+
+@pytest.mark.parametrize("mounted", [False, True])
+def test_restore_rejects_scheduler_owner_and_releases_lock_afterwards(
+    tmp_path, monkeypatch, mounted
+):
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    monkeypatch.setattr(td_system_backups.td_scheduler_lock, "is_mount_root", lambda _: mounted)
+    with acquire_scheduler_lock(data_dir):
+        with pytest.raises(BackupError, match="stop the scheduler-enabled server"):
+            restore_backup(data_dir, backup_dir)
+    restore_backup(data_dir, backup_dir)
+    with acquire_scheduler_lock(data_dir):
+        pass
+
+
+def test_legacy_scheduler_state_is_validated_before_discard(tmp_path):
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    _add_legacy_scheduler_files(backup_dir)
+    (backup_dir / SCHEDULER_STATE_FILENAME).write_text("corrupted")
+    (data_dir / SCHEDULER_STATE_FILENAME).write_text("local claim")
+
+    with pytest.raises(BackupError, match="checksum"):
+        restore_backup(data_dir, backup_dir)
+    assert (data_dir / SCHEDULER_STATE_FILENAME).read_text() == "local claim"
+
+
+def test_scheduler_lock_is_shared_across_processes(tmp_path):
+    data_dir = _data_dir(tmp_path)
+    code = (
+        "import sys; from pathlib import Path; "
+        "from td_scheduler_lock import acquire_scheduler_lock; "
+        "lock = acquire_scheduler_lock(Path(sys.argv[1])); lock.__enter__()"
+    )
+    env = dict(os.environ, PYTHONPATH=str(Path("src").resolve()), PYTHONDONTWRITEBYTECODE="1")
+    with acquire_scheduler_lock(data_dir):
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(data_dir)],
+            capture_output=True, text=True, env=env, check=False,
+        )
+    assert result.returncode != 0
+    assert "SchedulerLockError" in result.stderr
+    assert "stop the scheduler-enabled server" in result.stderr
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(data_dir)],
+        capture_output=True, text=True, env=env, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("mounted", [False, True])
+def test_restore_holds_owner_lock_during_activation_and_rollback(
+    tmp_path, monkeypatch, mounted
+):
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    state = data_dir / SCHEDULER_STATE_FILENAME
+    state.write_text("local claim")
+    monkeypatch.setattr(td_system_backups.td_scheduler_lock, "is_mount_root", lambda _: mounted)
+    real_replace = os.replace
+    checked = []
+
+    def fail_activation(source, destination):
+        is_activation = (
+            Path(source).parent.name == "incoming"
+            if mounted else ".restore-" in Path(source).name
+        )
+        if is_activation:
+            with pytest.raises(SchedulerLockError, match="stop the scheduler-enabled server"):
+                with acquire_scheduler_lock(data_dir):
+                    pass
+            checked.append(True)
+            raise OSError("injected activation failure")
+        if checked:
+            with pytest.raises(SchedulerLockError):
+                with acquire_scheduler_lock(data_dir):
+                    pass
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(td_system_backups.os, "replace", fail_activation)
+    with pytest.raises(OSError, match="injected activation failure"):
+        restore_backup(data_dir, backup_dir)
+    assert checked
+    assert state.read_text() == "local claim"
+    with acquire_scheduler_lock(data_dir):
+        pass

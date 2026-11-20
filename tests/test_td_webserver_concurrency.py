@@ -22,6 +22,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from aiohttp import web
 
 from webserver_test_support import (
     make_data_request as _make_request,
@@ -53,6 +54,55 @@ class ConcurrencyTestBase(unittest.IsolatedAsyncioTestCase):
         p = self.data_dir / filename
         p.write_text(content)
         return p
+
+
+class TestNightlyAdmission(ConcurrencyTestBase):
+    async def test_waiting_workflow_serves_stale_cache_and_rejects_refresh(self):
+        short = "td-otbr-cli-router-table.json"
+        long = "td-ha-matter-ws-dashboard.json"
+        path = self._write_file(short)
+        os.utime(path, (1, 1))
+        scheduler = td_webserver.Scheduler(self.data_dir, td_webserver.SchedulerSettings())
+        app = _make_app(self.data_dir)
+        app[td_webserver.TD_SCHEDULER_APP_KEY] = scheduler
+        job = td_webserver._start_workflow(scheduler)
+        try:
+            with patch.object(td_webserver, "run_td_cli", new_callable=AsyncMock) as runner:
+                cached = await td_webserver.handle_data_api(_make_request(short, app))
+                self.assertEqual(cached.status, 200)
+                with self.assertRaises(web.HTTPNotFound):
+                    await td_webserver.handle_data_api(_make_request(long, app))
+                for filename in (short, long):
+                    reply = await td_webserver.handle_data_api(_make_request(filename, app, no_cache=True))
+                    self.assertEqual(reply.status, 409)
+                    self.assertIn("Nightly", reply.text)
+                runner.assert_not_awaited()
+        finally:
+            task = td_webserver._job_runtime_registry[job.job_id].task
+            td_webserver._cancel_generic_job(job.job_id)
+            await asyncio.gather(task, return_exceptions=True)
+        self.assertEqual(job.status, "cancelled")
+        with patch.object(td_webserver, "run_td_cli", new_callable=AsyncMock, return_value=0) as runner:
+            reply = await td_webserver.handle_data_api(_make_request(short, app, no_cache=True))
+            self.assertEqual(reply.status, 200)
+            runner.assert_awaited_once()
+
+    async def test_queued_refresh_never_spawns_after_workflow_admission_even_after_cancel(self):
+        filename = "td-otbr-cli-router-table.json"
+        scheduler = td_webserver.Scheduler(self.data_dir, td_webserver.SchedulerSettings())
+        app = _make_app(self.data_dir)
+        app[td_webserver.TD_SCHEDULER_APP_KEY] = scheduler
+        lock = td_webserver._get_source_lock("otbr-cli")
+        with patch.object(td_webserver, "run_td_cli", new_callable=AsyncMock) as runner:
+            async with lock:
+                refresh = asyncio.create_task(td_webserver.handle_data_api(_make_request(filename, app, no_cache=True)))
+                await asyncio.sleep(0)
+                job = td_webserver._start_workflow(scheduler)
+                task = td_webserver._job_runtime_registry[job.job_id].task
+                td_webserver._cancel_generic_job(job.job_id)
+                await asyncio.gather(task, return_exceptions=True)
+            self.assertEqual((await refresh).status, 409)
+            runner.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

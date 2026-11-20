@@ -57,6 +57,13 @@ from td_device_actions import (
     validate_request_against_record,
 )
 from td_source_capabilities import SourceCapabilityService
+from td_scheduler import (
+    ENABLED_ENV as TD_SCHEDULER_ENABLED_ENV_NAME,
+    Scheduler,
+    SchedulerSettings,
+    SchedulerStateError,
+)
+from td_scheduler_lock import SchedulerLockError
 from td_unified_dataset import UnifiedDatasetError, read_generation, read_generation_artifact
 from td_logging import (
     configure_logging,
@@ -65,6 +72,7 @@ from td_logging import (
     redact_sensitive_text,
 )
 
+from util_subprocess import close_subprocess_pipes, signal_subprocess
 from util_data import (
     create_checkpoint_filename,
     data_file_path,
@@ -134,6 +142,7 @@ TD_DEVICE_RESET_ENABLED_APP_KEY = aiohttp.web.AppKey(
     "td_device_reset_enabled", bool
 )
 TD_LOG_THREAD_SECRETS_APP_KEY = aiohttp.web.AppKey("log_thread_secrets", bool)
+TD_SCHEDULER_APP_KEY = aiohttp.web.AppKey("td_scheduler", Scheduler)
 
 # Default max-age for data files in seconds; can be overridden per-file in FILE_ACTION_MAP.
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT_DEV = 3600  # 1 hour in seconds
@@ -538,7 +547,7 @@ mimetypes.add_type("text/html", ".html")
 #      the in-flight task instead of spawning a second subprocess.
 # Note: source-level serialization (preventing two different files of the same source
 # from running concurrently) is handled separately via _source_locks / _get_source_lock.
-_active_processes: dict[str, "asyncio.Task[int]"] = {}
+_active_processes: dict[str, "asyncio.Task[int | None]"] = {}
 
 # Keyed by source name (action[0], e.g. "otbr-cli", "mdns", "otbr-restapi").
 # Each lock serializes all td_cli subprocesses for that source so that only one
@@ -588,6 +597,9 @@ class JobStatus:
     dataset: str | None = None
     result: dict[str, object] | None = None
     created_at: float = dataclasses.field(default_factory=time.time)
+    progress: dict[str, object] | None = None
+    mode: str | None = None
+    workflow_owner: Scheduler | None = None
 
 
 @dataclasses.dataclass
@@ -638,6 +650,10 @@ def _build_job_poll_body(job: JobStatus) -> dict[str, object]:
             "dataset": job.dataset,
         }.items() if value is not None
     }
+    if job.progress is not None:
+        metadata.update(progress=job.progress, mode=job.mode, kind=job.kind)
+        if job.result is not None:
+            metadata["result"] = job.result
     if job.status == JOB_STATUS_RUNNING:
         return {"status": JOB_STATUS_RUNNING, **metadata}
     if job.status == JOB_STATUS_CANCELLING:
@@ -752,6 +768,36 @@ _CLEANUP_INTERVAL_S = 60  # run eviction sweep every 60 seconds
 _JOB_CANCEL_GRACE_DETAIL = "Cancellation requested by client."
 _PROCESS_TERMINATE_GRACE_S = 2.0
 _JOB_LIST_LIMIT = 500
+_NIGHTLY_REFRESH_CONFLICT = "Nightly collection is active or began while this refresh was queued. Retry manually after the nightly run."
+_NIGHTLY_LOCKS = (
+    "ha-matter-ws", "health", "mdns", "merge-dataset", "otbr-cli",
+    "otbr-restapi", "process-eve", "unify-dataset",
+)
+
+
+def _active_workflow(scheduler: Scheduler | None, *, nightly_only: bool = False) -> JobStatus | None:
+    if scheduler is None:
+        return None
+    return next((
+        job for job in _job_registry.values()
+        if job.workflow_owner is scheduler
+        and (not nightly_only or job.kind == "scheduler")
+        and not _is_terminal_job_status(job.status)
+    ), None)
+
+
+def _refresh_blocked(scheduler: Scheduler | None, epoch: int | None = None) -> bool:
+    return scheduler is not None and (
+        (epoch is not None and epoch != scheduler.admission_epoch)
+        or _active_workflow(scheduler, nightly_only=True) is not None
+    )
+
+
+def _nightly_conflict() -> aiohttp.web.Response:
+    return aiohttp.web.json_response(
+        {"error": _NIGHTLY_REFRESH_CONFLICT}, status=409,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _mark_job_cancelled(job: JobStatus) -> None:
@@ -880,6 +926,7 @@ async def run_td_cli(
         *action_args,                # top-level parser captures it before subcommand delegation
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=os.name == "posix",
     )
     if on_process_started is not None:
         on_process_started(process)
@@ -897,17 +944,17 @@ async def run_td_cli(
             " ".join(safe_action_args),
         )
         try:
-            if process.returncode is None:
-                process.terminate()
+            signal_subprocess(process, force=False)
+            try:
+                await asyncio.wait_for(process.communicate(), timeout=_PROCESS_TERMINATE_GRACE_S)
+            except asyncio.TimeoutError:
+                logging.warning("Subprocess did not terminate gracefully; killing process group")
+                signal_subprocess(process, force=True)
                 try:
-                    logging.debug("Waiting up to %.1f s for subprocess to terminate gracefully", _PROCESS_TERMINATE_GRACE_S)
-                    await asyncio.wait_for(
-                        process.communicate(), timeout=_PROCESS_TERMINATE_GRACE_S
-                    )
+                    await asyncio.wait_for(process.communicate(), timeout=_PROCESS_TERMINATE_GRACE_S)
                 except asyncio.TimeoutError:
-                    logging.warning("Subprocess did not terminate gracefully; killing process")
-                    process.kill()
-                    await process.communicate()
+                    logging.error("Subprocess cleanup unconfirmed after cancellation")
+                    close_subprocess_pipes(process)
         finally:
             raise
     except asyncio.TimeoutError:
@@ -916,9 +963,12 @@ async def run_td_cli(
             timeout_s,
             f"{sys.executable} {td_cli_path} {' '.join(safe_action_args)}",
             )
-        process.kill()
-        # reap the child to avoid zombie
-        await process.communicate()  
+        signal_subprocess(process, force=True)
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=_PROCESS_TERMINATE_GRACE_S)
+        except asyncio.TimeoutError:
+            logging.error("Subprocess cleanup unconfirmed after timeout")
+            close_subprocess_pipes(process)
         raise
     finally:
         if on_process_ended is not None:
@@ -986,6 +1036,7 @@ async def run_device_action_cli(
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=os.name == "posix",
     )
     if on_process_started is not None:
         on_process_started(process)
@@ -999,19 +1050,34 @@ async def run_device_action_cli(
         )
         try:
             await asyncio.wait_for(process.wait(), timeout=timeout_s)
+            remaining = max(0, timeout_s - (time.monotonic() - started))
+            _, pending = await asyncio.wait((stdout_task, stderr_task), timeout=remaining)
+            if pending:
+                raise asyncio.TimeoutError
+            stdout, stderr = stdout_task.result(), stderr_task.result()
         except (asyncio.CancelledError, asyncio.TimeoutError):
-            if process.returncode is None:
-                process.terminate()
+            signal_subprocess(process, force=False)
+            try:
+                await asyncio.wait_for(
+                    process.wait(), timeout=_PROCESS_TERMINATE_GRACE_S
+                )
+            except asyncio.TimeoutError:
+                signal_subprocess(process, force=True)
                 try:
-                    await asyncio.wait_for(
-                        process.wait(), timeout=_PROCESS_TERMINATE_GRACE_S
-                    )
+                    await asyncio.wait_for(process.wait(), timeout=_PROCESS_TERMINATE_GRACE_S)
                 except asyncio.TimeoutError:
-                    process.kill()
-                    await process.wait()
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+                    logging.error("Subprocess cleanup unconfirmed: child wait timed out")
+                    close_subprocess_pipes(process)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(stdout_task, stderr_task, return_exceptions=True),
+                    timeout=_PROCESS_TERMINATE_GRACE_S,
+                )
+            except asyncio.TimeoutError:
+                logging.error("Subprocess cleanup unconfirmed: output pipes did not close")
+                signal_subprocess(process, force=True)
+                close_subprocess_pipes(process)
             raise
-        stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
         return (
             int(process.returncode or 0),
             stdout,
@@ -1084,6 +1150,7 @@ async def _dispatch_long_cost(
     action_args: list[str],
     data_dir: Path,
     file_action: "FileAction",
+    scheduler: Scheduler | None = None,
 ) -> aiohttp.web.Response:
     """Dispatch a long-cost or force_async action via 202 + polling.
 
@@ -1093,6 +1160,7 @@ async def _dispatch_long_cost(
     Touches: ``_job_registry``, ``_background_tasks``,
     ``_job_runtime_registry``.
     """
+    epoch = scheduler.admission_epoch if scheduler else None
     # Re-use an existing job for the same filename if already running.
     existing_job = next(
         (
@@ -1132,6 +1200,10 @@ async def _dispatch_long_cost(
                         return
                     if j.status == JOB_STATUS_CANCELLING:
                         _mark_job_cancelled(j)
+                        return
+                    if _refresh_blocked(scheduler, epoch):
+                        j.status = JOB_STATUS_ERROR
+                        j.detail = _NIGHTLY_REFRESH_CONFLICT
                         return
 
                     try:
@@ -1225,7 +1297,8 @@ async def _dispatch_short_cost(
     no_cache: bool,
     *,
     request_max_age_s: int | None = None,
-) -> None:
+    scheduler: Scheduler | None = None,
+) -> bool:
     """Run a short-cost action synchronously, blocking until td_cli exits.
 
     Joins an in-flight task for the same filename when one exists.
@@ -1234,6 +1307,7 @@ async def _dispatch_short_cost(
     Touches: ``_active_processes``, ``_source_locks``.
     """
     file_path = data_dir / filename
+    epoch = scheduler.admission_epoch if scheduler else None
 
     if filename in _active_processes:
         # Same file already in flight — join the existing task rather than
@@ -1248,6 +1322,8 @@ async def _dispatch_short_cost(
                 redact_sensitive_text(str(exc)),
             )
             raise
+        if exit_code is None:
+            return False
         if exit_code != 0:
             raise aiohttp.web.HTTPBadGateway(
                 reason=f"td_cli failed for {filename} (exit {exit_code})"
@@ -1261,25 +1337,33 @@ async def _dispatch_short_cost(
         source = action_args[0]
         lock = _get_source_lock(source)
         async with lock:
+            if _refresh_blocked(scheduler, epoch):
+                return False
             # Re-check freshness: another coroutine may have generated this
             # file while we waited for the source lock.
             if _should_regenerate(file_path, file_action, no_cache, request_max_age_s):
-                task: asyncio.Task[int] = asyncio.create_task(
-                    run_td_cli(
+                async def run_if_admitted() -> int | None:
+                    if _refresh_blocked(scheduler, epoch):
+                        return None
+                    return await run_td_cli(
                         action_args,
                         data_dir,
                         timeout_s=file_action.action_cost_s * 1.5,
                     )
-                )
+
+                task = asyncio.create_task(run_if_admitted())
                 _active_processes[filename] = task
                 try:
                     exit_code = await task
                 finally:
                     _active_processes.pop(filename, None)
+                if exit_code is None:
+                    return False
                 if exit_code != 0:
                     raise aiohttp.web.HTTPBadGateway(
                         reason=f"td_cli failed for {filename} (exit {exit_code})"
                     )
+    return True
 
 
 async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -1310,11 +1394,20 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     logging.debug(">>>>>>>>>")
     logging.debug("Request for %s (no_cache=%s); file action: %s; file path: %s",
                   filename, no_cache, file_action, file_path)
+    scheduler = request.app.get(TD_SCHEDULER_APP_KEY)
+    explicit_refresh = not only_if_cached and (no_cache or request_max_age_s == 0)
 
     if file_action.action == "STATIC":
         if not file_path.is_file():
             raise aiohttp.web.HTTPNotFound(
                 reason=f"Static file not found: {filename}")
+    elif _refresh_blocked(scheduler):
+        if explicit_refresh:
+            return _nightly_conflict()
+        if not file_path.is_file():
+            raise aiohttp.web.HTTPNotFound(
+                reason=f"Cache-only data file not available: {filename}"
+            )
     elif only_if_cached and _should_regenerate(
         file_path, file_action, no_cache, request_max_age_s
     ):
@@ -1329,16 +1422,215 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
         ):
             action_args.insert(1, "--log-thread-secrets")
         if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
-            return await _dispatch_long_cost(filename, action_args, data_dir, file_action)
-        await _dispatch_short_cost(
+            return await _dispatch_long_cost(filename, action_args, data_dir, file_action, scheduler)
+        admitted = await _dispatch_short_cost(
             filename, action_args, data_dir, file_action, no_cache,
-            request_max_age_s=request_max_age_s,
+            request_max_age_s=request_max_age_s, scheduler=scheduler,
         )
+        if not admitted:
+            if explicit_refresh:
+                return _nightly_conflict()
+            if not file_path.is_file():
+                raise aiohttp.web.HTTPNotFound(
+                    reason=f"Cache-only data file not available: {filename}"
+                )
 
     logging.debug("Serving file %s for request (no_cache=%s)", file_path, no_cache)
     logging.debug("<<<<<<<<<")
 
     return _build_file_response(file_path, file_action, request)
+
+
+def _start_workflow(
+    scheduler: Scheduler,
+    *,
+    slot: datetime.date | None = None,
+    quick: bool = False,
+    maintenance_repack: bool | None = None,
+) -> JobStatus | None:
+    if _active_workflow(scheduler):
+        return None
+
+    maintenance = maintenance_repack is not None
+    job = JobStatus(
+        job_id=str(uuid.uuid4()), filename="", status=JOB_STATUS_RUNNING,
+        kind="health" if maintenance else "scheduler",
+        source="health" if maintenance else "scheduler",
+        task=(
+            ("health-purge-repack" if maintenance_repack else "health-purge")
+            if maintenance else "scheduler-nightly"
+        ),
+        progress={"phase": "waiting"},
+        mode=("quick" if quick else "full") if not maintenance else "maintenance",
+        workflow_owner=scheduler,
+    )
+    jid = job.job_id
+
+    async def worker() -> None:
+        from td_scheduler_process import run_scheduler_cli
+        from td_scheduler_workflow import run_workflow
+
+        async def runner(args, *, timeout_s, run_cmd, on_line):
+            return await run_scheduler_cli(
+                args, scheduler.data_dir, timeout_s=timeout_s, run_cmd=run_cmd,
+                on_line=on_line,
+                on_process_started=lambda process: _set_job_runtime_process(jid, process),
+                on_process_ended=lambda: _set_job_runtime_process(jid, None),
+            )
+
+        def progress(update: dict[str, object]) -> None:
+            if update.get("phase") in {JOB_STATUS_DONE, JOB_STATUS_ERROR, JOB_STATUS_CANCELLED}:
+                job.result = update
+            job.progress = {
+                key: value for key, value in update.items()
+                if key in {"phase", "step_id", "source", "completed_steps", "total_steps", "steps"}
+            }
+
+        terminal = JOB_STATUS_ERROR
+        try:
+            if not maintenance and not await scheduler.begin(jid, quick=quick, slot=slot):
+                job.detail = "Scheduler run or scheduled date already claimed."
+                return
+            job.result = await run_workflow(
+                job_id=jid, settings=scheduler.settings, data_dir=scheduler.data_dir,
+                slot=slot, quick=quick, runner=runner, progress=progress,
+                locks=[_get_source_lock(key) for key in (("health",) if maintenance else _NIGHTLY_LOCKS)],
+                clock=scheduler.clock, maintenance_repack=maintenance_repack,
+            )
+            terminal = JOB_STATUS_DONE if job.result.get("status") == "done" else JOB_STATUS_ERROR
+            if terminal == JOB_STATUS_ERROR:
+                job.detail = "One or more workflow steps failed; see step results."
+        except asyncio.CancelledError:
+            terminal = JOB_STATUS_CANCELLED
+            raise
+        except (SchedulerStateError, OSError, ValueError) as exc:
+            job.detail = redact_sensitive_text(str(exc))[:512]
+        finally:
+            try:
+                if not maintenance and not scheduler.error:
+                    await scheduler.finish(jid, terminal, job.result)
+            except SchedulerStateError as exc:
+                if terminal != JOB_STATUS_CANCELLED:
+                    terminal = JOB_STATUS_ERROR
+                job.detail = str(exc)[:512]
+            finally:
+                if terminal == JOB_STATUS_CANCELLED or job.status == JOB_STATUS_CANCELLING:
+                    _mark_job_cancelled(job)
+                else:
+                    job.status = terminal
+
+    _job_registry[jid] = job
+    if not maintenance:
+        scheduler.admission_epoch += 1
+    task = asyncio.create_task(worker())
+    _job_runtime_registry[jid] = JobRuntime(jid, "", job.source, task)
+    _job_id_by_task[task] = jid
+    _background_tasks.add(task)
+    task.add_done_callback(_on_background_task_done)
+    return job
+
+
+async def _scheduler_lifetime(app: aiohttp.web.Application):
+    scheduler = app[TD_SCHEDULER_APP_KEY]
+
+    async def dispatch(slot: datetime.datetime) -> None:
+        if _start_workflow(scheduler, slot=slot.date()) is None:
+            await scheduler.record_skip(slot.date(), "skipped-busy")
+
+    async for _ in scheduler.lifetime(dispatch):
+        yield
+
+
+def _scheduler_json(
+    payload: dict, status: int = 200, *, job: JobStatus | None = None,
+) -> aiohttp.web.Response:
+    headers = {"Cache-Control": "no-store"}
+    if job is not None:
+        headers["Location"] = f"/api/job/{job.job_id}"
+    return aiohttp.web.json_response(payload, status=status, headers=headers)
+
+
+async def _scheduler_boolean(
+    request: aiohttp.web.Request, key: str, *, optional: bool = False,
+) -> bool:
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Malformed JSON body.") from exc
+    if optional and payload == {}:
+        return False
+    if not isinstance(payload, dict) or set(payload) != {key} or type(payload[key]) is not bool:
+        raise ValueError(f"JSON body must contain only a boolean {key} field.")
+    return payload[key]
+
+
+def _scheduler_status(scheduler: Scheduler) -> aiohttp.web.Response:
+    local = scheduler.clock().astimezone(scheduler.zone)
+    active = _active_workflow(scheduler, nightly_only=True)
+    slot = scheduler.next_run
+    reason = (
+        "disabled" if not scheduler.settings.enabled else scheduler.error
+        or ("paused" if scheduler.paused else None)
+    )
+    return _scheduler_json({
+        "enabled": scheduler.settings.enabled,
+        "paused": scheduler.paused,
+        "timezone": getattr(local.tzinfo, "key", None) or os.environ.get("TZ") or local.tzname(),
+        "utc_offset": local.strftime("%z"),
+        "start_time": scheduler.settings.start_time.strftime("%H:%M"),
+        "keep_days": scheduler.settings.keep_days,
+        "next_run": slot.isoformat() if slot else None,
+        "next_run_utc": slot.astimezone(datetime.timezone.utc).isoformat() if slot else None,
+        "active_job_id": active.job_id if active else None,
+        "mode": active.mode if active else None,
+        "last_run": scheduler.state.last.to_json() if scheduler.state.last else None,
+        "last_skip": scheduler.state.last_skip,
+        "last_claimed_date": scheduler.state.claimed.isoformat() if scheduler.state.claimed else None,
+        "reason": reason,
+    })
+
+
+async def handle_scheduler_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    scheduler = request.app[TD_SCHEDULER_APP_KEY]
+    if request.method == "PATCH":
+        try:
+            paused = await _scheduler_boolean(request, "paused")
+        except ValueError as exc:
+            return _scheduler_json({"error": str(exc)}, 400)
+        if not scheduler.settings.enabled or scheduler.error:
+            return _scheduler_json({"error": scheduler.error or "Scheduler is disabled."}, 409)
+        scheduler.set_paused(paused)
+    return _scheduler_status(scheduler)
+
+
+def _accept_workflow(job: JobStatus | None) -> aiohttp.web.Response:
+    if job is None:
+        return _scheduler_json({"error": "A scheduler or maintenance job is already active."}, 409)
+    return _scheduler_json(
+        {"job_id": job.job_id, "status": job.status, "mode": job.mode}, 202, job=job,
+    )
+
+
+async def handle_scheduler_run_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    try:
+        quick = await _scheduler_boolean(request, "quick", optional=True)
+    except ValueError as exc:
+        return _scheduler_json({"error": str(exc)}, 400)
+    scheduler = request.app[TD_SCHEDULER_APP_KEY]
+    if not scheduler.settings.enabled or scheduler.error or scheduler.paused:
+        reason = scheduler.error or ("Scheduler is paused." if scheduler.paused else "Scheduler is disabled.")
+        return _scheduler_json({"error": reason}, 409)
+    return _accept_workflow(_start_workflow(scheduler, quick=quick))
+
+
+async def handle_health_purge_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    try:
+        repack = await _scheduler_boolean(request, "repack")
+    except ValueError as exc:
+        return _scheduler_json({"error": str(exc)}, 400)
+    return _accept_workflow(_start_workflow(
+        request.app[TD_SCHEDULER_APP_KEY], maintenance_repack=repack,
+    ))
 
 
 def _validate_device_extaddr(raw_extaddr: object) -> str:
@@ -1900,6 +2192,10 @@ async def handle_health_process_dataset_api(
         raise aiohttp.web.HTTPBadRequest(reason="dataset must be a non-empty string")
     if dataset_id not in load_health_manifest().datasets:
         raise aiohttp.web.HTTPBadRequest(reason="dataset is not health eligible")
+    scheduler = request.app.get(TD_SCHEDULER_APP_KEY)
+    if _refresh_blocked(scheduler):
+        return _nightly_conflict()
+    epoch = scheduler.admission_epoch if scheduler else None
 
     existing_job_id = _health_job_id_by_dataset.get(dataset_id)
     existing_job = _job_registry.get(existing_job_id) if existing_job_id else None
@@ -1933,6 +2229,10 @@ async def handle_health_process_dataset_api(
                         return
                     if current_job.status == JOB_STATUS_CANCELLING:
                         _mark_job_cancelled(current_job)
+                        return
+                    if _refresh_blocked(scheduler, epoch):
+                        current_job.status = JOB_STATUS_ERROR
+                        current_job.detail = _NIGHTLY_REFRESH_CONFLICT
                         return
                     exit_code, stdout, _stderr, _elapsed = await run_device_action_cli(
                         ["health", "process-dataset", "--dataset", dataset, "--allow-partial", "--json"],
@@ -1992,9 +2292,13 @@ async def handle_capabilities_api(request: aiohttp.web.Request) -> aiohttp.web.R
     if service is None:
         service = SourceCapabilityService()
         request.app[TD_SOURCE_CAPABILITIES_APP_KEY] = service
-    return _health_json_response(
-        await service.capabilities(request.app[TD_DATA_DIR_APP_KEY])
-    )
+    scheduler = request.app.get(TD_SCHEDULER_APP_KEY)
+    if scheduler is None:
+        return _health_json_response(await service.capabilities(request.app[TD_DATA_DIR_APP_KEY]))
+    epoch = scheduler.admission_epoch
+    return _health_json_response(await service.capabilities(
+        request.app[TD_DATA_DIR_APP_KEY], can_probe=lambda: not _refresh_blocked(scheduler, epoch),
+    ))
 
 
 async def handle_catalog_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -2221,6 +2525,8 @@ def _project_pending_jobs(now: float | None = None) -> list[dict[str, object]]:
         }.items():
             if value is not None:
                 item[key] = value
+        if job.progress is not None:
+            item.update(progress=job.progress, mode=job.mode)
         projected.append((job.created_at, job.job_id, item))
 
     for job in _device_action_job_registry.values():
@@ -2426,6 +2732,9 @@ async def handle_device_actions_capabilities_api(
 async def handle_device_actions_api(
     request: aiohttp.web.Request,
 ) -> aiohttp.web.Response:
+    scheduler = request.app.get(TD_SCHEDULER_APP_KEY)
+    if _refresh_blocked(scheduler):
+        return _nightly_conflict()
     if not request.app.get(TD_DEVICE_ACTIONS_ENABLED_APP_KEY, False):
         return _device_action_response(
             {"error": "Active device diagnostics are disabled."}, 403
@@ -2445,6 +2754,9 @@ async def handle_device_actions_api(
         _validate_action_records(action_request, records)
     except (json.JSONDecodeError, DeviceActionError) as exc:
         return _device_action_response({"error": str(exc)}, 400)
+    if _refresh_blocked(scheduler):
+        return _nightly_conflict()
+    epoch = scheduler.admission_epoch if scheduler else None
 
     job_id = str(uuid.uuid4())
     invocation_id_value = payload.get("invocationId")
@@ -2470,6 +2782,10 @@ async def handle_device_actions_api(
                     return
                 if current.status == JOB_STATUS_CANCELLING:
                     _mark_device_action_job_cancelled(current)
+                    return
+                if _refresh_blocked(scheduler, epoch):
+                    current.status = JOB_STATUS_ERROR
+                    current.detail = _NIGHTLY_REFRESH_CONFLICT
                     return
                 try:
                     exit_code, stdout, stderr, duration = await run_device_action_cli(
@@ -2804,6 +3120,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     td_data_dir_resolution = resolve_data_dir_with_source(
         data_dir=args.datadir)
     td_data_dir = td_data_dir_resolution.path
+    try:
+        scheduler_settings = SchedulerSettings.from_env(
+            _parse_optional_env_bool(TD_SCHEDULER_ENABLED_ENV_NAME, parser) is True,
+            os.environ,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     logging.info(format_data_dir_log_message(td_data_dir_resolution))
     logging.info(
@@ -2819,12 +3142,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     app[TD_DEVICE_ACTIONS_ENABLED_APP_KEY] = device_actions_enabled
     app[TD_DEVICE_RESET_ENABLED_APP_KEY] = device_reset_enabled
     app[TD_LOG_THREAD_SECRETS_APP_KEY] = args.log_thread_secrets
+    app[TD_SCHEDULER_APP_KEY] = Scheduler(td_data_dir, scheduler_settings)
 
     async def _start_cleanup(app: aiohttp.web.Application) -> None:
         app[_CLEANUP_TASK_APP_KEY] = asyncio.create_task(
             _cleanup_job_registry_loop())
 
     async def _on_shutdown(app: aiohttp.web.Application) -> None:
+        await app[TD_SCHEDULER_APP_KEY].stop_timer()
         # Cancel the periodic cleanup task.
         cleanup_task = app.get(_CLEANUP_TASK_APP_KEY)
         if cleanup_task is not None:
@@ -2838,7 +3163,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Cancel all in-flight background job tasks and wait for them to finish.
         tasks = list(_background_tasks)
         for t in tasks:
-            t.cancel()
+            job_id = _job_id_by_task.get(t)
+            job = _job_registry.get(job_id) if job_id else None
+            if job and job.workflow_owner:
+                _cancel_generic_job(job.job_id)
+            else:
+                t.cancel()
 
         action_tasks = list(_device_action_background_tasks)
         for t in action_tasks:
@@ -2854,6 +3184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _device_action_runtime_registry.clear()
         _device_action_job_id_by_task.clear()
 
+    app.cleanup_ctx.append(_scheduler_lifetime)
     app.on_startup.append(_start_cleanup)
     app.on_shutdown.append(_on_shutdown)
     app.on_response_prepare.append(_set_static_cache_headers)
@@ -2867,6 +3198,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_delete("/api/jobs", handle_jobs_cancel_api)
     app.router.add_get("/api/job/{job_id}", handle_job_api)
     app.router.add_delete("/api/job/{job_id}", handle_job_cancel_api)
+    app.router.add_get("/api/scheduler", handle_scheduler_api)
+    app.router.add_patch("/api/scheduler", handle_scheduler_api)
+    app.router.add_post("/api/scheduler/run", handle_scheduler_run_api)
     app.router.add_get(
         "/api/device-actions", handle_device_actions_capabilities_api
     )
@@ -2897,6 +3231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_get("/api/health/latest", handle_health_latest_api)
     app.router.add_get("/api/health/capabilities", handle_health_capabilities_api)
     app.router.add_post("/api/health/process-dataset", handle_health_process_dataset_api)
+    app.router.add_post("/api/health/purge", handle_health_purge_api)
     # Serve all static assets (HTML, JS, CSS, …) from the src/ directory.
     app.router.add_static(
         "/", static_root, show_index=False, follow_symlinks=False)
@@ -2927,6 +3262,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             port=args.port,
             access_log=logging.getLogger("aiohttp.access"),
         )
+    except SchedulerLockError as exc:
+        logging.error("%s", exc)
+        return 1
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
             raise

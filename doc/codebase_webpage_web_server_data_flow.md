@@ -644,6 +644,16 @@ Health-processing requests reuse the active job for their dataset. Completion,
 cancellation, and expiry release a dataset's deduplication index only when it
 still belongs to that job, so an older job cannot remove a newer job's entry.
 
+The server-hosted scheduler creates one generic `scheduler` job per chain.
+It reserves the existing source locks in sorted order. From admission through
+cleanup, ordinary data reads use cache irrespective of age and explicit
+refreshes return JSON 409; a queued pre-admission refresh also cannot start
+afterward. The generic cancel path reaps the active child before the owner guard
+is released on shutdown. Scheduler status and last-run state are independent of
+generic job retention. The manual Health Purge action uses a generic `health`
+job and the same health lock for purge and optional repack; it does not start
+collection or alter the schedule.
+
 The unified `/api/jobs` resource projects only `running` and `cancelling`
 records from the generic and device-action registries. Stable kind and source
 metadata lives on status records rather than transient runtime handles. The

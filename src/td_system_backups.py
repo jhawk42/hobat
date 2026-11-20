@@ -12,8 +12,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import td_scheduler_lock
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_sqlite import SCHEMA_VERSION
+from td_scheduler_lock import (
+    SCHEDULER_LOCK_FILENAME,
+    SCHEDULER_STATE_FILENAME,
+    SchedulerLockError,
+    acquire_scheduler_lock,
+)
 
 
 BACKUP_FORMAT_VERSION = 1
@@ -114,6 +121,8 @@ def _copy_data_files(data_dir: Path, destination: Path) -> None:
             if source.is_symlink():
                 raise BackupError(f"Data directory contains unsupported symlink: {relative}")
             if relative == Path(HOBAT_DATABASE_FILENAME):
+                continue
+            if relative == Path(SCHEDULER_STATE_FILENAME):
                 continue
             if source.name.endswith(_EXCLUDED_SUFFIXES) or source.name.endswith(".tmp"):
                 continue
@@ -230,7 +239,9 @@ def _restore_mount_contents(data_dir: Path, staging: Path, previous: Path) -> No
     activated: list[Path] = []
     try:
         for child in sorted(data_dir.iterdir()):
-            if child == staging.parent:
+            if child == staging.parent or child.name in (
+                SCHEDULER_LOCK_FILENAME, SCHEDULER_STATE_FILENAME
+            ):
                 continue
             os.replace(child, previous / child.name)
             moved_previous.append(child)
@@ -293,6 +304,21 @@ def _preserve_migration_recovery_files(data_dir: Path, staging: Path) -> None:
     shutil.copytree(source, destination, dirs_exist_ok=True)
 
 
+def _discard_scheduler_files(staging: Path) -> None:
+    for name in (SCHEDULER_LOCK_FILENAME, SCHEDULER_STATE_FILENAME):
+        path = staging / name
+        if path.exists() or path.is_symlink():
+            _remove_path(path)
+
+
+def _preserve_scheduler_state(data_dir: Path, staging: Path) -> None:
+    source = data_dir / SCHEDULER_STATE_FILENAME
+    if source.is_symlink() or (source.exists() and not source.is_file()):
+        raise BackupError("Scheduler state must be a regular file")
+    if source.is_file():
+        shutil.copy2(source, staging / SCHEDULER_STATE_FILENAME)
+
+
 def _restore_mounted_backup(
     data_dir: Path, input_dir: Path, manifest: dict[str, Any]
 ) -> dict[str, Any]:
@@ -305,6 +331,7 @@ def _restore_mounted_backup(
         if validate_backup(staging) != manifest:
             raise BackupError("Staged backup manifest changed during restore")
         (staging / BACKUP_MANIFEST_FILENAME).unlink()
+        _discard_scheduler_files(staging)
         _preserve_migration_recovery_files(data_dir, staging)
         _assert_database_available_for_restore(data_dir)
         _restore_mount_contents(data_dir, staging, previous)
@@ -334,21 +361,30 @@ def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
         raise BackupError(f"Backup directory does not exist: {input_dir}")
     if _is_within(input_dir, data_dir):
         raise BackupError("Backup input must be outside the data directory")
+    try:
+        with acquire_scheduler_lock(data_dir):
+            return _restore_backup_locked(data_dir, input_dir)
+    except SchedulerLockError as exc:
+        raise BackupError(str(exc)) from exc
+
+
+def _restore_backup_locked(data_dir: Path, input_dir: Path) -> dict[str, Any]:
     _assert_no_restore_workspace(data_dir)
     manifest = validate_backup(input_dir)
-    if data_dir.exists() and os.path.ismount(data_dir):
+    if td_scheduler_lock.is_mount_root(data_dir):
         return _restore_mounted_backup(data_dir, input_dir, manifest)
     data_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = data_dir.parent / f".{data_dir.name}.restore-{uuid.uuid4().hex}"
     previous = data_dir.parent / f".{data_dir.name}.previous-{uuid.uuid4().hex}"
     try:
-        shutil.copytree(
-            input_dir,
-            staging,
-            ignore=shutil.ignore_patterns(BACKUP_MANIFEST_FILENAME),
-        )
+        shutil.copytree(input_dir, staging)
+        if validate_backup(staging) != manifest:
+            raise BackupError("Staged backup manifest changed during restore")
+        (staging / BACKUP_MANIFEST_FILENAME).unlink()
+        _discard_scheduler_files(staging)
         if data_dir.is_dir():
             _preserve_migration_recovery_files(data_dir, staging)
+            _preserve_scheduler_state(data_dir, staging)
         _database_schema_version(staging / HOBAT_DATABASE_FILENAME)
         _assert_database_available_for_restore(data_dir)
         had_existing = data_dir.exists()
@@ -365,6 +401,6 @@ def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
         return manifest
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
-        if not os.path.ismount(data_dir) and previous.exists() and not data_dir.exists():
+        if previous.exists() and not data_dir.exists():
             os.replace(previous, data_dir)
         raise

@@ -22,6 +22,23 @@ Only nodes commissioned to that Matter controller are visible. Unavailable or
 sleeping nodes may omit diagnostics, Wi-Fi Matter nodes do not expose Thread
 diagnostics, and Matter collection does not replace OTBR network-wide data.
 
+## Optional nightly scheduler
+
+To enable the nightly scheduler set `scheduler_enabled: true` in the
+add-on Configuration tab. Set `ext_pan_id` to the intended Thread network.
+Optionally set `scheduler_start_time` (strict `HH:MM`, default `04:20`) and
+`scheduler_keep_days` (positive integer, default `10`). Restart the add-on
+after changes. The scheduler uses the add-on process timezone; check the
+offset and next local/UTC start in `td_cli system scheduler status --server-url URL`
+before relying on it. Both container builds install timezone data. There is
+no catch-up or automatic retry.
+
+Automatic collection is full, followed by health processing and gated purge;
+second-Sunday repack runs only after a successful nightly purge. Stop the
+add-on before restoring its data directory. Retain/export complete INFO logs
+for at least five selected run dates. See the [migration checklist](../README.md#replace-nightly-cron-with-the-optional-scheduler)
+before enabling the timer.
+
 ## Web Interface
 
 Start Hobat, then select **Open Web UI**. Dashboard data is persisted in the

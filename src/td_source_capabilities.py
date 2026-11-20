@@ -397,7 +397,9 @@ class SourceCapabilityService:
                     data_dir, entry, catalog=catalog, inspections=inspections))
         return files
 
-    async def capabilities(self, data_dir: Path) -> dict[str, object]:
+    async def capabilities(
+        self, data_dir: Path, *, can_probe: Callable[[], bool] | None = None,
+    ) -> dict[str, object]:
         data_dir = data_dir.resolve()
         task = self._inspection_inflight.get(data_dir)
         if task is None:
@@ -418,6 +420,9 @@ class SourceCapabilityService:
             probe = self._probes.get(source)
             if probe is None:
                 sources[source] = self._source_result(source, "unavailable", False, "not-applicable")
+                continue
+            if can_probe is not None and not can_probe():
+                sources[source] = self._source_result(source, "unavailable", False, "not-run")
                 continue
             error = await self._run_probe(source, probe)
             state = "live" if error is None else "probe-failed"

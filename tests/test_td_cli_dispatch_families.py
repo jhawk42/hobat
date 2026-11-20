@@ -22,6 +22,7 @@ def _dispatch(argv: list[str]) -> int:
         (["system", "backups"], "usage: td_cli system backups"),
         (["system", "database"], "usage: td_cli system database"),
         (["system", "device"], "usage: td_cli system device"),
+        (["system", "scheduler"], "usage: td_cli system scheduler"),
     ],
 )
 def test_command_without_subcommand_prints_help(argv, usage, capsys):
@@ -40,6 +41,17 @@ def test_system_database_repack_is_forwarded_to_system_cli():
         "--datadir", "/tmp/td", "database", "repack",
     ])
     assert rc == 7
+
+
+@pytest.mark.parametrize("action", ["status", "list", "run-now", "pause", "resume", "cancel"])
+def test_system_scheduler_dispatch(action):
+    extras = ["job1"] if action == "cancel" else []
+    extras += ["--server-url", "http://hobat.test", "--json"]
+    if action == "run-now":
+        extras += ["--apply", "--quick"]
+    with patch.object(td_cli.td_system_cli, "main", return_value=7) as system_main:
+        assert _dispatch(["system", "scheduler", action, *extras]) == 7
+    system_main.assert_called_once_with(["scheduler", action, *extras])
 
 
 def test_mdns_without_scope_prints_help_without_browsing(capsys):

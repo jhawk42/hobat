@@ -57,6 +57,7 @@ uses vendored vis-network; dashboard table sorting is application-owned.
 | `td_cli.py` | Dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `unify-dataset`, `source-probe`, `health`, `system`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
 | `td_unified_dataset.py` | Cache-only Unified source-primary assembly and catalog-owned four-primary composition with original raw authority/lineage, one outer lock, report-last publication/recovery, verified generation reads, and CLI |
 | `td_webserver.py` | aiohttp application, dataset catalog, source capabilities, file action registry, HTTP caching, background jobs, health APIs, device actions, and device-label API |
+| `td_scheduler*.py` | Opt-in local-calendar ownership, durable claims, exact CLI workflow, and bounded subprocess streaming; server keeps job and HTTP ownership |
 | `td_logging.py` | Shared logging configuration, structured collector events, and redaction of Thread secrets in sensitive output |
 | [td_collection_outcomes.py](../src/td_collection_outcomes.py) | Immutable, versioned collection facts, explicit attempt histories, bounded reason vocabulary, and shared outcome summaries; no evidence qualification or inferred attempts |
 | `td_dataset_catalog.py` | Dataset manifest validation and runtime catalog loading, including health roster policy projections |

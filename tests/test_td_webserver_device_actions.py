@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -389,6 +390,7 @@ class DeviceActionRunnerTests(unittest.IsolatedAsyncioTestCase):
             "--datadir", str(self.data_dir), *self.args,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            start_new_session=os.name == "posix",
         )
 
     async def test_real_runner_exit_status_prefixes_and_complete_stream_draining(self):
@@ -413,6 +415,21 @@ class DeviceActionRunnerTests(unittest.IsolatedAsyncioTestCase):
                 ended.assert_called_once_with()
                 self.assertFalse(asyncio.all_tasks() - before)
         self.assertEqual(await td_webserver._read_bounded_stream(None), b"")
+
+    async def test_timeout_covers_readers_after_child_exit(self):
+        process = _RunnerProcess("success")
+
+        async def exit_without_eof():
+            process.returncode = 0
+            return 0
+
+        process.wait = exit_without_eof
+        with patch.object(asyncio, "create_subprocess_exec", AsyncMock(return_value=process)), \
+                patch.object(td_webserver, "_PROCESS_TERMINATE_GRACE_S", 0.01):
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(td_webserver.run_device_action_cli(
+                    self.args, self.data_dir, timeout_s=0.01,
+                ), 0.5)
 
     async def test_timeout_and_cancellation_reap_before_callback_and_propagate(self):
         for mode in ("timeout", "kill", "cancel"):
@@ -503,6 +520,39 @@ class DeviceActionRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(children[0].returncode, 0)
         self.assertTrue(children[0].stdout.at_eof())
         self.assertTrue(children[0].stderr.at_eof())
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX process groups")
+    async def test_real_descendant_inheriting_pipes_is_stopped_on_timeout(self):
+        real_spawn = asyncio.create_subprocess_exec
+        children = []
+
+        async def spawn(*args, **kwargs):
+            process = await real_spawn(
+                sys.executable, "-c",
+                "import subprocess, sys; "
+                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])",
+                **kwargs,
+            )
+            children.append(process)
+            return process
+
+        try:
+            with patch.object(asyncio, "create_subprocess_exec", side_effect=spawn), \
+                    patch.object(td_webserver, "_PROCESS_TERMINATE_GRACE_S", 0.1):
+                with self.assertRaises(TimeoutError):
+                    await asyncio.wait_for(td_webserver.run_device_action_cli(
+                        self.args, self.data_dir, timeout_s=0.2,
+                    ), 2)
+            self.assertEqual(len(children), 1)
+            self.assertIsNotNone(children[0].returncode)
+            self.assertTrue(children[0].stdout.at_eof())
+            self.assertTrue(children[0].stderr.at_eof())
+        finally:
+            for process in children:
+                try:
+                    os.killpg(process.pid, 9)
+                except ProcessLookupError:
+                    pass
 
 
 class StartupDeviceActionCapabilityTests(unittest.IsolatedAsyncioTestCase):

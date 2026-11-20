@@ -458,6 +458,13 @@ def _add_system_commands(subparsers: argparse._SubParsersAction) -> None:
     database_actions.add_parser(
         "repack", help="Repack the Hobat SQLite database", add_help=False
     )
+    scheduler = system_commands.add_parser(
+        "scheduler", help="Manage a remote Hobat scheduler"
+    )
+    scheduler.add_argument("--datadir", default=argparse.SUPPRESS)
+    scheduler_actions = scheduler.add_subparsers(dest="scheduler_action", required=False)
+    for action in ("status", "list", "run-now", "pause", "resume", "cancel"):
+        scheduler_actions.add_parser(action, add_help=False)
 
 
 # type: ignore[type-arg]
@@ -1152,10 +1159,21 @@ def _dispatch_system(
         if system_parser is not None:
             _print_child_subparser_help(system_parser, "database")
         return 0
+    if args.system_command == "scheduler" and args.scheduler_action is None:
+        if system_parser is not None:
+            _print_child_subparser_help(system_parser, "scheduler")
+        return 0
     if args.system_command == "device":
         action = [args.system_command, args.device_action]
     elif args.system_command == "database":
         action = [args.system_command, args.database_action]
+    elif args.system_command == "scheduler":
+        action = [args.system_command, args.scheduler_action]
+        if args.datadir is not None:
+            action = ["--datadir", str(args.datadir)] + action
+        return _normalize_module_rc(
+            td_system_cli.main(action + extra_args), "td_system_cli.main"
+        )
     else:
         action = [args.system_command, args.backup_action]
     return _normalize_module_rc(
@@ -1369,6 +1387,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "system_command",
         "backup_action",
         "device_action",
+        "scheduler_action",
     ):
         value = getattr(args, attr, None)
         if value:

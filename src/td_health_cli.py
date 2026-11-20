@@ -41,7 +41,7 @@ from util_data import resolve_data_dir, save_json_atomic
 
 
 LATEST_REPORT_FILENAME = "td-health-latest.json"
-DEFAULT_HEALTH_PURGE_KEEP_DAYS = 30
+DEFAULT_HEALTH_PURGE_KEEP_DAYS = 10
 
 
 def build_parser() -> argparse.ArgumentParser:

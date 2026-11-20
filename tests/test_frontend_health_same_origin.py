@@ -2131,7 +2131,7 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
       const requested = [];
       globalThis.fetch = async (path) => {
         requested.push(path);
-        return { ok: true, json: async () => ({}) };
+        return { ok: true, json: async () => ({job_id: "job-id", status: "running"}) };
       };
 
       await fetchHealthAssessment("dataset-id");

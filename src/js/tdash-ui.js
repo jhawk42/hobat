@@ -108,6 +108,7 @@ import {
   recordActivity,
   subscribeActivity,
   trackedFetch,
+  trackedJsonRequest,
 } from "./tdash-activity.js";
 import { createTopologyViewModel, resolveTopologyNodeId } from "./tdash-topology-view-model.js";
 import {
@@ -457,6 +458,12 @@ const jobsViewState = {
   pollTimer: null,
   cancellingJobIds: new Set(),
 };
+const healthPurgeState = {
+  keepDays: null, submitting: false, jobId: null, active: false,
+  uncertain: false, cancelling: false, status: "", progress: null,
+  jobStatus: null, timer: null, controller: null, version: 0, retentionController: null,
+};
+const HEALTH_PURGE_PENDING_KEY = "tdash.healthPurgePending";
 const healthInsightsState = {
   assessment: null,
   datasetId: null,
@@ -748,7 +755,7 @@ subscribeActivity(() => {
 });
 
 function jobsPanelIsVisible() {
-  return currentView === "operations" && operationsSubview === "jobs";
+  return currentView === "operations" && operationsSubview === "jobs" && !document.hidden;
 }
 
 function stopJobsPolling() {
@@ -794,7 +801,9 @@ function renderWorkspaceJobs() {
     const values = [
       job.kind,
       job.source,
-      job.task || job.action || "",
+      [job.task || job.action || "", job.progress?.step_id,
+        Number.isInteger(job.progress?.completed_steps) && Number.isInteger(job.progress?.total_steps)
+          ? `${job.progress.completed_steps}/${job.progress.total_steps}` : ""].filter(Boolean).join(" · "),
       job.dataset || job.filename || "",
       job.status,
       `${Math.max(0, Number(job.elapsedSeconds) || 0)}s`,
@@ -861,12 +870,11 @@ async function refreshWorkspaceJobs() {
   let pollDelayMs = JOBS_POLL_MIN_DELAY_MS;
   renderWorkspaceJobs();
   try {
-    const response = await trackedFetch("/api/jobs", {
+    const { response, payload } = await trackedJsonRequest("/api/jobs", {
       headers: { Accept: "application/json" },
       cache: "no-store",
       signal: abortController.signal,
     }, "silent");
-    const payload = await response.json().catch(() => ({}));
     if (requestVersion !== jobsViewState.requestVersion || !jobsPanelIsVisible()) return;
     if (!response.ok || !Array.isArray(payload.jobs)) {
       throw new Error(`Pending jobs unavailable (HTTP ${response.status}).`);
@@ -880,7 +888,9 @@ async function refreshWorkspaceJobs() {
     );
   } catch (error) {
     if (error?.name !== "AbortError" && requestVersion === jobsViewState.requestVersion) {
-      jobsViewState.error = "Pending jobs are unavailable.";
+      jobsViewState.error = error?.name === "TimeoutError"
+        ? "Pending jobs request timed out locally; job outcomes are unconfirmed."
+        : "Pending jobs are unavailable.";
     }
   } finally {
     if (requestVersion === jobsViewState.requestVersion) {
@@ -899,15 +909,261 @@ async function cancelWorkspaceJob(job) {
   jobsViewState.cancellingJobIds.add(job.jobId);
   renderWorkspaceJobs();
   try {
-    const response = await trackedFetch(job.cancelUrl, { method: "DELETE", cache: "no-store" });
+    const { response } = await trackedJsonRequest(job.cancelUrl, { method: "DELETE", cache: "no-store" });
     if (!response.ok && response.status !== 409) throw new Error("cancel failed");
   } catch {
-    jobsViewState.error = "The job could not be cancelled.";
+    jobsViewState.error = "Cancellation request was not confirmed; check the job status.";
   } finally {
     jobsViewState.cancellingJobIds.delete(job.jobId);
     if (jobsPanelIsVisible()) void refreshWorkspaceJobs();
   }
 }
+
+function healthPurgeVisible() {
+  return currentView === "operations" && !document.hidden;
+}
+
+function renderHealthPurge() {
+  const state = healthPurgeState;
+  document.getElementById("health-purge-retention").textContent = state.keepDays === null
+    ? "Effective retention unavailable. Return to Operations to retry."
+    : `Effective retention: ${state.keepDays} days.`;
+  document.getElementById("btn-health-purge").disabled =
+    state.keepDays === null || state.submitting || state.active || state.uncertain;
+  document.getElementById("health-purge-repack").disabled = state.submitting || state.active || state.uncertain;
+  const acknowledge = document.getElementById("btn-health-purge-acknowledge");
+  if (acknowledge) acknowledge.hidden = !state.uncertain;
+  const cancel = document.getElementById("btn-health-purge-cancel");
+  cancel.hidden = !state.active || !state.jobId;
+  cancel.disabled = state.cancelling || state.jobStatus === "cancelling";
+  document.getElementById("btn-health-purge-refresh").hidden = !state.jobId || !state.active;
+  const status = document.getElementById("health-purge-status");
+  const lines = [state.status];
+  if (state.jobId) lines.push(`Job: ${state.jobId}`);
+  if (state.active && state.progress) {
+    const progress = state.progress;
+    const counts = Number.isInteger(progress.completed_steps) && Number.isInteger(progress.total_steps)
+      ? ` (${progress.completed_steps}/${progress.total_steps} steps completed)` : "";
+    lines.push(`Current step: ${progress.step_id || progress.phase || "waiting"}${counts}`);
+  }
+  const steps = state.progress?.steps || {};
+  for (const [id, label] of [["health:purge", "Purge"], ["system:repack", "Repack"]]) {
+    const step = steps[id];
+    if (!step) continue;
+    let text = `${label}: ${step.status || "unknown"}`;
+    if (step.reason) text += ` — ${step.reason}`;
+    if (id === "health:purge" && step.deleted && typeof step.deleted === "object") {
+      text += `; deleted: ${Object.entries(step.deleted).map(([name, count]) => `${name}: ${count}`).join(", ")}`;
+    } else if (id === "health:purge" && step.status === "completed") {
+      text += "; deletion counts unavailable";
+    }
+    if (step.maintenance_unconfirmed) {
+      text += "; interrupted maintenance may have committed; outcome is unconfirmed.";
+    }
+    lines.push(text);
+  }
+  if (steps["health:purge"]?.status === "completed" &&
+      ["failed", "cancelled"].includes(steps["system:repack"]?.status)) {
+    lines.push("Purge was not rolled back.");
+  }
+  const visibleLines = lines.filter(Boolean);
+  const signature = JSON.stringify(visibleLines);
+  if (state.renderedStatus === signature) return;
+  state.renderedStatus = signature;
+  status.replaceChildren();
+  visibleLines.forEach((line) => {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = line;
+    status.appendChild(paragraph);
+  });
+}
+
+function rememberPurgePending(value) {
+  try {
+    if (value) window.sessionStorage.setItem(HEALTH_PURGE_PENDING_KEY, value);
+    else window.sessionStorage.removeItem(HEALTH_PURGE_PENDING_KEY);
+  } catch {
+    // The current page still blocks another submission when storage is unavailable.
+  }
+}
+
+function stopHealthPurgePolling() {
+  const state = healthPurgeState;
+  state.version += 1;
+  state.controller?.abort();
+  state.controller = null;
+  state.retentionController?.abort();
+  state.retentionController = null;
+  if (state.timer !== null) clearTimeout(state.timer);
+  state.timer = null;
+}
+
+async function loadHealthPurgeRetention() {
+  if (!healthPurgeVisible() || healthPurgeState.retentionController) return;
+  const controller = new AbortController();
+  healthPurgeState.retentionController = controller;
+  try {
+    const { response, payload } = await trackedJsonRequest("/api/scheduler", {
+      headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal,
+    }, "silent");
+    if (!response.ok || !Number.isInteger(payload.keep_days) || payload.keep_days < 0) throw new Error();
+    if (!controller.signal.aborted) healthPurgeState.keepDays = payload.keep_days;
+  } catch (error) {
+    if (error?.name !== "AbortError") healthPurgeState.keepDays = null;
+  } finally {
+    if (healthPurgeState.retentionController === controller) healthPurgeState.retentionController = null;
+    renderHealthPurge();
+  }
+}
+
+async function pollHealthPurge() {
+  const state = healthPurgeState;
+  if (!healthPurgeVisible() || !state.active || !state.jobId) return;
+  if (state.timer !== null) clearTimeout(state.timer);
+  state.timer = null;
+  const version = ++state.version;
+  state.controller?.abort();
+  const controller = new AbortController();
+  state.controller = controller;
+  try {
+    const { response, payload } = await trackedJsonRequest(`/api/job/${encodeURIComponent(state.jobId)}`, {
+      headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal,
+    }, "silent");
+    if (version !== state.version || !healthPurgeVisible()) return;
+    if (!response.ok) {
+      if (response.status === 404) {
+        state.active = false;
+        state.uncertain = true;
+        rememberPurgePending("uncertain");
+        state.status = "Job expired or is unknown. Verify the outcome in server logs before proceeding again; Jobs only lists pending work.";
+      } else {
+        state.status = `Job status unavailable (HTTP ${response.status}); outcome is unconfirmed.`;
+      }
+    } else if (["running", "cancelling", "done", "error", "cancelled"].includes(payload.status)) {
+      state.progress = payload.progress || payload.result || state.progress;
+      state.jobStatus = payload.status;
+      state.active = ["running", "cancelling"].includes(payload.status);
+      if (!state.active) rememberPurgePending(null);
+      state.status = `Job status: ${payload.status}${payload.detail ? ` — ${payload.detail}` : ""}`;
+      if (["cancelling", "cancelled"].includes(payload.status)) {
+        state.status += " Cancellation cannot undo committed work; interrupted maintenance may have committed.";
+      }
+    } else {
+      state.status = "Job status is unrecognized; outcome is unconfirmed.";
+    }
+  } catch (error) {
+    if (error?.name !== "AbortError" && version === state.version) {
+      state.status = error?.name === "TimeoutError"
+        ? "Job status request timed out locally; outcome is unconfirmed."
+        : "Job status unavailable; outcome is unconfirmed.";
+    }
+  } finally {
+    if (version === state.version) {
+      state.controller = null;
+      renderHealthPurge();
+      if (healthPurgeVisible() && state.active) state.timer = setTimeout(() => void pollHealthPurge(), JOBS_POLL_MIN_DELAY_MS);
+    }
+  }
+}
+
+async function submitHealthPurge() {
+  const state = healthPurgeState;
+  if (!healthPurgeVisible() || state.keepDays === null || state.submitting || state.active || state.uncertain) return;
+  state.submitting = true;
+  state.status = "Submitting maintenance request…";
+  state.progress = null;
+  state.jobStatus = null;
+  state.jobId = null;
+  const repack = document.getElementById("health-purge-repack").checked;
+  rememberPurgePending("uncertain");
+  renderHealthPurge();
+  try {
+    const { response, payload } = await trackedJsonRequest("/api/health/purge", {
+      method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+      cache: "no-store", body: JSON.stringify({ repack }),
+    });
+    if (response.status === 202 && typeof payload.job_id === "string" && payload.job_id) {
+      state.jobId = payload.job_id;
+      state.active = true;
+      state.jobStatus = payload.status;
+      state.status = "Maintenance accepted.";
+      rememberPurgePending(payload.job_id);
+    } else if (response.status === 400 || response.status === 409) {
+      rememberPurgePending(null);
+      state.status = `Maintenance rejected (HTTP ${response.status})${payload.error ? `: ${payload.error}` : "."}`;
+    } else {
+      state.uncertain = true;
+      state.status = "Submission outcome is unconfirmed. Verify it in server logs before proceeding again; Jobs only lists pending work.";
+    }
+  } catch {
+    state.uncertain = true;
+    state.status = "Submission outcome is unconfirmed. Verify it in server logs before proceeding again; Jobs only lists pending work.";
+  } finally {
+    state.submitting = false;
+    renderHealthPurge();
+    if (state.active && healthPurgeVisible()) void pollHealthPurge();
+  }
+}
+
+async function cancelHealthPurge() {
+  const state = healthPurgeState;
+  if (!state.active || !state.jobId || state.cancelling || state.jobStatus === "cancelling") return;
+  state.cancelling = true;
+  renderHealthPurge();
+  try {
+    const { response } = await trackedJsonRequest(`/api/job/${encodeURIComponent(state.jobId)}`, {
+      method: "DELETE", cache: "no-store",
+    });
+    state.status = response.ok || response.status === 409
+      ? "Cancellation requested; committed work cannot be undone and interrupted maintenance may have committed."
+      : `Cancellation request failed (HTTP ${response.status}); outcome is unconfirmed.`;
+  } catch {
+    state.status = "Cancellation request failed; outcome is unconfirmed.";
+  } finally {
+    state.cancelling = false;
+    renderHealthPurge();
+    if (healthPurgeVisible()) void pollHealthPurge();
+  }
+}
+
+function activateHealthPurge() {
+  if (!healthPurgeVisible()) return;
+  if (!healthPurgeState.restored) {
+    healthPurgeState.restored = true;
+    let pending = null;
+    try { pending = window.sessionStorage.getItem(HEALTH_PURGE_PENDING_KEY); } catch { /* optional storage */ }
+    if (pending === "uncertain") {
+      healthPurgeState.uncertain = true;
+      healthPurgeState.status = "Prior submission is unconfirmed. Verify it in server logs before proceeding again; Jobs only lists pending work.";
+    } else if (pending) {
+      healthPurgeState.jobId = pending;
+      healthPurgeState.active = true;
+    }
+  }
+  renderHealthPurge();
+  void loadHealthPurgeRetention();
+  if (healthPurgeState.active) void pollHealthPurge();
+}
+
+document.getElementById("btn-health-purge")?.addEventListener("click", () => void submitHealthPurge());
+document.getElementById("btn-health-purge-cancel")?.addEventListener("click", () => void cancelHealthPurge());
+document.getElementById("btn-health-purge-refresh")?.addEventListener("click", () => void pollHealthPurge());
+document.getElementById("btn-health-purge-acknowledge")?.addEventListener("click", () => {
+  if (!healthPurgeState.uncertain) return;
+  rememberPurgePending(null);
+  healthPurgeState.uncertain = false;
+  healthPurgeState.status = "Prior request acknowledged. No new maintenance was started.";
+  renderHealthPurge();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    stopJobsPolling();
+    stopHealthPurgePolling();
+  } else if (currentView === "operations") {
+    activateHealthPurge();
+    if (operationsSubview === "jobs") void refreshWorkspaceJobs();
+  }
+});
 
 function getCurrentThreadNetworkViewData(includeAdaptor = false) {
   if (!currentDataset) {
@@ -1900,7 +2156,7 @@ const WORKSPACE_VIEWS = Object.freeze([
     view: "operations",
     buttonId: "btn-operations",
     panelId: "view-operations",
-    onActivate: renderOperationsSubview,
+    onActivate: () => { renderOperationsSubview(); activateHealthPurge(); },
   },
   { view: "settings", buttonId: "btn-settings", panelId: "view-settings" },
 ]);
@@ -1912,7 +2168,10 @@ function switchView(newView) {
   statusDisclosure.close();
   clearInterval(healthStatusTimer);
   healthStatusTimer = null;
-  if (currentView === "operations") stopJobsPolling();
+  if (currentView === "operations") {
+    stopJobsPolling();
+    stopHealthPurgePolling();
+  }
   if (currentView === "insights" && newView !== "insights") {
     healthInsightsViewState.detailsOpen = false;
     findingDeviceReturnContext = null;
@@ -3459,7 +3718,7 @@ function renderHealthRefreshStatus() {
   if (!contentEl || currentView !== "insights" || !healthInsightsState.refreshStatus) return;
   const message = document.createElement("p");
   const status = healthInsightsState.refreshStatus;
-  message.className = status === "error" ? "network-insights-empty error" : "network-insights-empty";
+  message.className = ["error", "unconfirmed"].includes(status) ? "network-insights-empty error" : "network-insights-empty";
   message.textContent = {
     running: "Processing cached dataset...",
     cancelling: "Cancelling health processing...",
@@ -3467,6 +3726,7 @@ function renderHealthRefreshStatus() {
     completed: healthInsightsState.refreshOutcome === true
       ? "Completed: processed cached dataset."
       : "Already current: cached dataset assessment is unchanged.",
+    unconfirmed: healthInsightsState.refreshDetail,
     error: healthInsightsState.refreshDetail || "Health processing failed.",
   }[status] || "";
   if (message.textContent) contentEl.prepend(message);
@@ -5809,6 +6069,7 @@ async function runHealthRefresh() {
   renderHealthStatusSummary();
   renderNetworkInsights();
   updateHealthRefreshControls();
+  let processingCompleted = false;
   try {
     const started = await startHealthProcessing(datasetId);
     if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
@@ -5841,11 +6102,12 @@ async function runHealthRefresh() {
       updateHealthRefreshControls();
     }
     if (status.status === "done") {
+      processingCompleted = true;
       await refreshHealthAssessment();
       if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
       if (healthInsightsState.error) {
         healthInsightsState.refreshStatus = "error";
-        healthInsightsState.refreshDetail = healthInsightsState.error;
+        healthInsightsState.refreshDetail = `Health processing completed, but assessment refresh failed: ${healthInsightsState.error}`;
       } else {
         healthInsightsState.refreshStatus = "completed";
         healthInsightsState.refreshOutcome = status.result?.assessmentCreated === true;
@@ -5857,8 +6119,15 @@ async function runHealthRefresh() {
     }
   } catch (error) {
     if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
-    healthInsightsState.refreshStatus = "error";
-    healthInsightsState.refreshDetail = error.message;
+    healthInsightsState.refreshStatus = processingCompleted || (!healthInsightsState.refreshJobId && [400, 409].includes(error.status))
+      ? "error" : "unconfirmed";
+    healthInsightsState.refreshDetail = processingCompleted
+      ? `Health processing completed, but assessment refresh failed: ${error.message}`
+      : healthInsightsState.refreshJobId
+        ? `Health job status is unconfirmed; check Pending Jobs. ${error.message}`
+        : [400, 409].includes(error.status)
+          ? `Health submission rejected. ${error.message}`
+          : `Health submission outcome is unconfirmed; check Pending Jobs before retrying. ${error.message}`;
   } finally {
     if (version === healthInsightsState.refreshVersion && currentDataset?.entry?.value === datasetId) {
       applyHealthAssessmentPresentation(getCurrentHealthAssessment());
@@ -5878,8 +6147,8 @@ async function cancelHealthRefresh() {
   try {
     await cancelHealthJob(healthInsightsState.refreshJobId);
   } catch (error) {
-    healthInsightsState.refreshStatus = "error";
-    healthInsightsState.refreshDetail = error.message;
+    healthInsightsState.refreshStatus = "unconfirmed";
+    healthInsightsState.refreshDetail = `Cancellation request unconfirmed; check Pending Jobs. ${error.message}`;
     renderNetworkInsights();
     updateHealthRefreshControls();
   }

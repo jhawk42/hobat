@@ -11,6 +11,16 @@ export TD_HA_MATTER_WS_HOST="$(bashio::config 'ha_matter_ws_host')"
 export TD_HA_MATTER_WS_PORT="$(bashio::config 'ha_matter_ws_port')"
 export TD_DEVICE_ACTIONS_ENABLED="$(bashio::config 'device_actions_enabled')"
 export TD_DEVICE_RESET_ENABLED="$(bashio::config 'device_reset_enabled')"
+export TD_SCHEDULER_ENABLED="$(bashio::config 'scheduler_enabled')"
+if bashio::config.has_value 'scheduler_start_time'; then
+    export TD_SCHEDULER_START_TIME="$(bashio::config 'scheduler_start_time')"
+fi
+if bashio::config.has_value 'scheduler_keep_days'; then
+    export TD_SCHEDULER_KEEP_DAYS="$(bashio::config 'scheduler_keep_days')"
+fi
+if bashio::config.has_value 'ext_pan_id'; then
+    export TD_EXT_PAN_ID="$(bashio::config 'ext_pan_id')"
+fi
 if bashio::config.has_value 'TD_DEBUG_LEVEL'; then
     export TD_DEBUG_LEVEL="$(bashio::config 'TD_DEBUG_LEVEL')"
 fi

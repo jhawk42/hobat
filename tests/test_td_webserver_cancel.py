@@ -188,6 +188,23 @@ class TestRunTdCliCancellation(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(fake_process.terminate_called)
 
+    async def test_run_td_cli_timeout_bounds_inherited_pipe_drain(self) -> None:
+        fake_process = _FakeProcess()
+        fake_process.returncode = 0
+
+        async def stalled_communicate():
+            await asyncio.Event().wait()
+
+        fake_process.communicate = stalled_communicate
+        with patch.object(td_webserver.asyncio, "create_subprocess_exec", return_value=fake_process), \
+                patch.object(td_webserver, "_PROCESS_TERMINATE_GRACE_S", 0.01), \
+                self.assertLogs(level="ERROR") as captured:
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(td_webserver.run_td_cli(
+                    ["otbr-cli", "router-table"], Path("/tmp"), timeout_s=0.01,
+                ), 0.5)
+        self.assertIn("cleanup unconfirmed", "\n".join(captured.output))
+
     async def test_run_td_cli_redacts_captured_secret_output(self) -> None:
         fake_process = MagicMock()
         fake_process.returncode = 0

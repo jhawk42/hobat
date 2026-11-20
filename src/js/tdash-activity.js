@@ -132,6 +132,7 @@ export async function trackedFetch(input, options = {}, activityMode = "full") {
   if (!TRACKING_MODES.has(activityMode)) {
     throw new TypeError(`Unknown activity mode: ${activityMode}`);
   }
+
   const method = String(options.method ?? "GET").toUpperCase();
   const route = normalizeActivityRoute(input);
   const requestId = globalThis.crypto?.randomUUID?.()
@@ -177,5 +178,52 @@ export async function trackedFetch(input, options = {}, activityMode = "full") {
       });
     }
     throw error;
+  }
+}
+
+export async function trackedJsonRequest(input, options = {}, activityMode = "full",
+    timeoutMs = 15000, fetcher = trackedFetch) {
+  const controller = new AbortController();
+  const signal = options.signal;
+  if (signal?.aborted) throw new DOMException("Request stopped locally.", "AbortError");
+  const startedAt = performance.now();
+  let onAbort;
+  let timer;
+  const stopped = new Promise((_, reject) => {
+    onAbort = () => {
+      reject(new DOMException("Request stopped locally.", "AbortError"));
+      controller.abort();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    timer = setTimeout(() => {
+      const error = new Error("Local request deadline exceeded; server outcome is unconfirmed.");
+      error.name = "TimeoutError";
+      reject(error);
+      controller.abort();
+    }, timeoutMs);
+  });
+  const request = (async () => {
+    const response = await fetcher(input, { ...options, signal: controller.signal }, activityMode);
+    let payload;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      if (response.ok) throw new Error("Invalid JSON response (protocol error).", { cause: error });
+      payload = {};
+    }
+    return { response, payload };
+  })();
+  try {
+    const result = await Promise.race([request, stopped]);
+    if (performance.now() - startedAt >= timeoutMs) {
+      controller.abort();
+      const error = new Error("Local request deadline exceeded; server outcome is unconfirmed.");
+      error.name = "TimeoutError";
+      throw error;
+    }
+    return result;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
   }
 }

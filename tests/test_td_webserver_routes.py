@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import asyncio
 import os
 import socket
 import subprocess
@@ -103,7 +104,10 @@ class WebServerRouteTests(unittest.IsolatedAsyncioTestCase):
             self.data_content
         )
 
-        with patch.object(td_webserver.aiohttp.web, "run_app") as run_app:
+        with (
+            patch.object(td_webserver.aiohttp.web, "run_app") as run_app,
+            patch.dict(os.environ, {"TD_SCHEDULER_ENABLED": "0", "TD_SCHEDULER_KEEP_DAYS": "10"}),
+        ):
             td_webserver.main(["--datadir", str(self.data_dir), "--port", "0"])
 
         app = run_app.call_args.args[0]
@@ -116,6 +120,44 @@ class WebServerRouteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status, 302)
         self.assertEqual(response.headers["Location"], "/tdash.html")
+
+    async def test_scheduler_status_is_read_only_and_disabled_mutations_conflict(self) -> None:
+        response = await self.client.get("/api/scheduler")
+        status = await response.json()
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertFalse(status["enabled"])
+        self.assertEqual(status["keep_days"], 10)
+        self.assertIsNone(status["next_run"])
+        for path, method, payload, expected in (
+            ("/api/scheduler", "PATCH", {"paused": True}, 409),
+            ("/api/scheduler", "PATCH", {"paused": 1}, 400),
+            ("/api/scheduler/run", "POST", {"quick": "true"}, 400),
+            ("/api/scheduler/run", "POST", {"quick": True, "datadir": "."}, 400),
+            ("/api/scheduler/run", "POST", {}, 409),
+            ("/api/health/purge", "POST", {}, 400),
+        ):
+            reply = await self.client.request(method, path, json=payload)
+            self.assertEqual(reply.status, expected)
+            self.assertEqual(reply.headers["Cache-Control"], "no-store")
+            self.assertIn("error", await reply.json())
+        self.assertEqual((await (await self.client.get("/api/jobs")).json())["jobs"], [])
+
+    async def test_manual_purge_uses_generic_cancellable_jobs_while_scheduler_disabled(self):
+        async with td_webserver._get_source_lock("health"):
+            reply = await self.client.post("/api/health/purge", json={"repack": True})
+            self.assertEqual(reply.status, 202)
+            job_id = (await reply.json())["job_id"]
+            location = reply.headers["Location"]
+            self.assertEqual(location, f"/api/job/{job_id}")
+            self.assertEqual((await self.client.post("/api/health/purge", json={"repack": False})).status, 409)
+            poll = await (await self.client.get(location)).json()
+            self.assertEqual(poll["task"], "health-purge-repack")
+            self.assertEqual(poll["kind"], "health")
+            self.assertEqual(poll["progress"]["phase"], "waiting")
+            task = td_webserver._job_runtime_registry[job_id].task
+            self.assertEqual((await self.client.delete(location)).status, 202)
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 2)
+            self.assertEqual((await (await self.client.get(location)).json())["status"], "cancelled")
 
     async def test_static_dashboard_and_javascript_are_served(self) -> None:
         for path in ("/tdash.html", "/js/tdash-ui.js"):

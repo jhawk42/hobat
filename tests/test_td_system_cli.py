@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+from urllib.error import HTTPError, URLError
 from contextlib import closing, redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -22,6 +23,136 @@ def test_restore_apply_confirmation_alias():
     parser = td_system_cli.build_parser()
     argv = ["backups", "restore", "--input", "backup"]
     assert parser.parse_args([*argv, "--apply"]) == parser.parse_args([*argv, "--yes"])
+
+
+def _remote_response(document, status=200):
+    response = Mock(status=status)
+    response.read.return_value = json.dumps(document).encode()
+    context = Mock()
+    context.__enter__ = Mock(return_value=response)
+    context.__exit__ = Mock(return_value=False)
+    return context
+
+
+@pytest.mark.parametrize(
+    ("action", "options", "responses", "requests", "expected"),
+    [
+        ("status", [], [{"enabled": True, "last_run": None}], [("GET", "/api/scheduler", None)], {"enabled": True, "last_run": None}),
+        ("list", [], [{"jobs": [{"kind": "scheduler", "jobId": "a"}, {"task": "scheduler-nightly", "jobId": "b"}, {"kind": "health"}]}], [("GET", "/api/jobs", None)], {"jobs": [{"kind": "scheduler", "jobId": "a"}, {"task": "scheduler-nightly", "jobId": "b"}]}),
+        ("pause", [], [{"paused": True}], [("PATCH", "/api/scheduler", {"paused": True})], {"paused": True}),
+        ("resume", [], [{"paused": False}], [("PATCH", "/api/scheduler", {"paused": False})], {"paused": False}),
+        ("run-now", ["--apply"], [{"job_id": "j1", "status": "running", "mode": "full"}], [("POST", "/api/scheduler/run", {})], {"job_id": "j1", "status": "running", "mode": "full"}),
+        ("run-now", ["--apply", "--quick"], [{"job_id": "j2", "status": "running", "mode": "quick"}], [("POST", "/api/scheduler/run", {"quick": True})], {"job_id": "j2", "status": "running", "mode": "quick"}),
+        ("cancel", ["j1"], [{"task": "scheduler-nightly"}, {"job_id": "j1", "status": "cancelling"}], [("GET", "/api/job/j1", None), ("DELETE", "/api/job/j1", None)], {"job_id": "j1", "status": "cancelling"}),
+    ],
+)
+def test_remote_scheduler_commands(action, options, responses, requests, expected, capsys):
+    with patch.object(td_system_cli, "urlopen", side_effect=[_remote_response(item) for item in responses]) as send, patch.object(td_system_cli, "resolve_data_dir") as resolve:
+        assert td_cli.main(["system", "scheduler", action, *options, "--server-url", "https://hobat.test/ingress/", "--json"]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == expected
+    assert ("live collection and purge" in captured.err) == (action == "run-now")
+    resolve.assert_not_called()
+    assert len(send.call_args_list) == len(requests)
+    for call, (method, path, payload) in zip(send.call_args_list, requests):
+        request = call.args[0]
+        assert request.full_url == "https://hobat.test/ingress" + path
+        assert request.method == method
+        assert (json.loads(request.data) if request.data else None) == payload
+        assert call.kwargs["timeout"] == 10
+
+
+@pytest.mark.parametrize("argv", [
+    ["--datadir", "", "system", "scheduler", "status"],
+    ["--datadir", "local", "system", "scheduler", "status"],
+    ["system", "scheduler", "--datadir", "local", "status"],
+    ["system", "scheduler", "status", "--datadir", "local"],
+])
+def test_scheduler_rejects_explicit_datadir(argv, capsys):
+    with patch.object(td_system_cli, "urlopen") as send, patch.object(td_system_cli, "resolve_data_dir") as resolve:
+        assert td_cli.main([*argv, "--server-url", "http://hobat.test"]) != 0
+    assert "server owns the directory" in capsys.readouterr().err
+    send.assert_not_called()
+    resolve.assert_not_called()
+
+
+@pytest.mark.parametrize("action", ["status", "list", "pause", "resume", "cancel"])
+def test_scheduler_quick_is_rejected_except_run_now(action):
+    options = ["job1"] if action == "cancel" else []
+    with patch.object(td_system_cli, "urlopen") as send, pytest.raises(SystemExit) as exc:
+        td_cli.main(["system", "scheduler", action, *options, "--server-url", "http://hobat.test", "--quick"])
+    assert exc.value.code == 2
+    send.assert_not_called()
+
+
+def test_scheduler_run_now_requires_apply():
+    with patch.object(td_system_cli, "urlopen") as send, pytest.raises(SystemExit) as exc:
+        td_cli.main(["system", "scheduler", "run-now", "--server-url", "http://hobat.test"])
+    assert exc.value.code == 2
+    send.assert_not_called()
+
+
+@pytest.mark.parametrize("argv", [
+    ["status"],
+    ["run-now", "--apply", "--quick", "false", "--server-url", "http://hobat.test"],
+    ["run-now", "--apply", "--quick=false", "--server-url", "http://hobat.test"],
+])
+def test_scheduler_rejects_missing_url_and_quick_values(argv):
+    with patch.object(td_system_cli, "urlopen") as send, pytest.raises(SystemExit) as exc:
+        td_cli.main(["system", "scheduler", *argv])
+    assert exc.value.code == 2
+    send.assert_not_called()
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "http://user:secret@hobat.test", "http://hobat.test/?query=1", "http://hobat.test/#fragment", "http://hobat.test:invalid", "http://hobat.test/\x00"])
+def test_scheduler_rejects_invalid_server_urls(url, capsys):
+    with patch.object(td_system_cli, "urlopen") as send:
+        assert td_system_cli.main(["scheduler", "status", "--server-url", url]) == 1
+    assert "server-url" in capsys.readouterr().err
+    send.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", [
+    URLError("unreachable"),
+    TimeoutError(),
+    HTTPError("http://hobat.test", 409, "conflict", {}, None),
+    _remote_response(["invalid"]),
+    _remote_response({"jobs": "invalid"}),
+])
+def test_scheduler_transport_and_response_errors(failure, capsys):
+    with patch.object(td_system_cli, "urlopen", side_effect=[failure]):
+        assert td_system_cli.main(["scheduler", "list", "--server-url", "http://hobat.test"]) == 1
+    assert "Error:" in capsys.readouterr().err
+
+
+def test_scheduler_non_json_and_oversized_response(capsys):
+    for body in (b"not json", b"x" * (1024 * 1024 + 1)):
+        response = _remote_response({})
+        response.__enter__.return_value.read.return_value = body
+        with patch.object(td_system_cli, "urlopen", return_value=response):
+            assert td_system_cli.main(["scheduler", "status", "--server-url", "http://hobat.test"]) == 1
+        assert "Error:" in capsys.readouterr().err
+
+
+def test_scheduler_run_now_requires_job_id(capsys):
+    with patch.object(td_system_cli, "urlopen", return_value=_remote_response({"status": "running"})):
+        assert td_system_cli.main(["scheduler", "run-now", "--apply", "--server-url", "http://hobat.test"]) == 1
+    assert "invalid job acceptance" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("job_id", "job"), [("../other", None), ("job1", {"kind": "health"}), ("job1", {})])
+def test_cancel_only_scheduler_jobs(job_id, job, capsys):
+    with patch.object(td_system_cli, "urlopen", return_value=_remote_response(job or {})) as send:
+        assert td_system_cli.main(["scheduler", "cancel", job_id, "--server-url", "http://hobat.test"]) == 1
+    assert "Error:" in capsys.readouterr().err
+    assert send.call_count == (0 if job is None else 1)
+
+
+def test_cancel_expired_job_never_deletes(capsys):
+    with patch.object(td_system_cli, "urlopen", side_effect=HTTPError("http://hobat.test", 404, "not found", {}, None)) as send:
+        assert td_system_cli.main(["scheduler", "cancel", "job1", "--server-url", "http://hobat.test"]) == 1
+    assert "HTTP 404" in capsys.readouterr().err
+    assert send.call_count == 1
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result

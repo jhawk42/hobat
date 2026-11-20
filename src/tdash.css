@@ -2784,6 +2784,19 @@ button[aria-expanded="true"] > .disclosure-icon {
   color: var(--danger, #b00020);
 }
 
+.health-purge {
+  border-top: 1px solid var(--line);
+  margin-top: 20px;
+  padding-top: 12px;
+  overflow-wrap: anywhere;
+}
+
+.health-purge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* Complex value tree inside detail lists */
 .node-details-list .detail-value-list {
   margin: 2px 0 2px 12px;

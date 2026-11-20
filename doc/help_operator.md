@@ -161,6 +161,24 @@ accepted jobs from an old selection receive one cancellation attempt. Failed
 cancellation can be retried explicitly. Diagnostic submissions, especially counter
 resets, are never automatically replayed.
 
+## Scheduler Lock and Restore
+
+The enabled scheduler holds a lock for the life of the web server, even when
+idle or paused. For a regular `data/` directory, Hobat creates
+`.data.td-scheduler.lock` next to it (in the repo root if `data/` is there).
+The lock stays put when a restore replaces the entire data directory.
+
+If a Docker named volume or bind mount is mounted directly at `/data` and
+Hobat uses `/data` as its data directory, the lock is `/data/.td-scheduler.lock`.
+Restore updates that mount in place without moving the lock or scheduler state.
+
+**Stop the scheduler-enabled server before restoring; pausing is not enough.**
+With a bind mount such as `./data:/data`, a host-side restore may use the
+sibling lock while the container uses the lock inside `/data`. Stop the
+scheduler container before restoring from the host; the two lock paths do not
+coordinate. The file can remain after shutdown without the lock being held.
+Do not delete or move it while the server or restore is running.
+
 ## Collection and Diagnostic Policies
 
 Detailed
