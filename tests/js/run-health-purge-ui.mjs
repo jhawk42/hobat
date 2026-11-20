@@ -12,6 +12,7 @@ function element(id) {
     checked: id === "health-purge-repack", hidden: false, disabled: false,
     textContent: "", children: [], listeners: {},
     addEventListener(type, fn) { this.listeners[type] = fn; },
+    focus() { this.focused = true; },
     replaceChildren() { this.children = []; },
     appendChild(child) { this.children.push(child); },
   });
@@ -38,7 +39,7 @@ const context = vm.createContext({
   trackedJsonRequest: (url, options, mode) => trackedJsonRequest(url, options, mode, requestTimeoutMs, fetcher),
 });
 vm.runInContext(`const healthPurgeState = {
-  keepDays: null, submitting: false, jobId: null, active: false, uncertain: false,
+  keepDays: null, reviewing: false, submitting: false, jobId: null, active: false, uncertain: false,
   cancelling: false, status: "", progress: null, timer: null, controller: null,
   jobStatus: null, version: 0, retentionController: null,
 }; ${section}
@@ -47,15 +48,32 @@ const { state } = context;
 const response = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const statusText = () => element("health-purge-status").children.map((child) => child.textContent).join(" ");
+const startCleanup = () => {
+  context.reviewHealthPurge();
+  return context.submitHealthPurge();
+};
 
 queue.push(response(200, { enabled: false, paused: true, keep_days: 14 }));
 await context.loadHealthPurgeRetention();
 assert.match(element("health-purge-retention").textContent, /14 days/);
 assert.equal(element("btn-health-purge").disabled, false);
 assert.equal(calls.length, 1);
+context.reviewHealthPurge();
+assert.equal(state.reviewing, true);
+assert.equal(element("health-purge-options").hidden, true);
+assert.equal(element("health-purge-review").hidden, false);
+assert.equal(element("health-purge-review-scope").textContent,
+  "Delete health records older than 14 days; cutoff determined by the server when cleanup starts.");
+assert.equal(element("health-purge-review-repack").textContent, "Repack: On.");
+context.cancelHealthPurgeReview();
+assert.equal(state.reviewing, false);
+assert.equal(element("health-purge-options").hidden, false);
+assert.equal(element("health-purge-review").hidden, true);
+assert.equal(calls.length, 1);
 
 let accept;
 queue.push(() => new Promise((resolve) => { accept = resolve; }));
+context.reviewHealthPurge();
 const submission = context.submitHealthPurge();
 await context.submitHealthPurge();
 assert.equal(calls.length, 2);
@@ -100,20 +118,20 @@ queue.push(response(202, { job_id: "two" }), response(200, { status: "cancelled"
   "health:purge": { status: "cancelled", maintenance_unconfirmed: true },
   "system:repack": { status: "skipped" },
 } } }));
-await context.submitHealthPurge();
+await startCleanup();
 await flush();
 assert.equal(calls.at(-2).options.body, '{"repack":false}');
 assert.match(statusText(), /interrupted maintenance may have committed/);
 assert.match(statusText(), /Repack: skipped/);
 
 queue.push(response(409, { error: "busy" }));
-await context.submitHealthPurge();
+await startCleanup();
 assert.match(statusText(), /409.*busy/);
 assert.equal(element("btn-health-purge").disabled, false);
 
 queue.push(response(202, { job_id: "three", status: "running" }),
   response(200, { status: "running", progress: { steps: {} } }));
-await context.submitHealthPurge();
+await startCleanup();
 await flush();
 queue.push(response(202, { status: "cancelling" }),
   response(200, { status: "cancelling", progress: { steps: {} } }));
@@ -131,7 +149,7 @@ assert.match(statusText(), /Purge: failed/);
 assert.match(statusText(), /Repack: skipped/);
 
 queue.push(() => { throw new Error("network"); });
-await context.submitHealthPurge();
+await startCleanup();
 assert.match(statusText(), /unconfirmed/);
 assert.equal(element("btn-health-purge").disabled, true);
 const before = calls.length;
@@ -155,7 +173,7 @@ for (const stall of [
 }
 state.active = false;
 queue.push(() => new Promise(() => {}));
-await context.submitHealthPurge();
+await startCleanup();
 assert.equal(state.uncertain, true);
 assert.match(state.status, /unconfirmed/);
 const afterTimeout = calls.length;

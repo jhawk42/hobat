@@ -1153,15 +1153,17 @@ def test_thread_network_summary_rebuild_preserves_only_same_dataset_scroll() -> 
     )
 
 
-def test_operations_workspace_exposes_activity_and_jobs_tabs() -> None:
+def test_operations_workspace_exposes_activity_jobs_and_database_tabs() -> None:
     html = _read_text(HTML)
     ui_text = _read_text(UI_JS)
 
     for element_id in (
         "btn-activity-log",
         "btn-jobs",
+        "btn-database",
         "workspace-log-panel",
         "workspace-jobs-panel",
+        "workspace-database-panel",
         "btn-clear-logs",
         "btn-refresh-jobs",
         "btn-cancel-all-jobs",
@@ -1173,13 +1175,35 @@ def test_operations_workspace_exposes_activity_and_jobs_tabs() -> None:
     assert 'id="workspace-thread-network-panel"' not in html
     assert '["logs", "btn-activity-log", "workspace-log-panel"]' in ui_text
     assert '["jobs", "btn-jobs", "workspace-jobs-panel"]' in ui_text
+    assert '["database", "btn-database", "workspace-database-panel"]' in ui_text
     assert 'aria-controls="workspace-log-panel"' in html
     assert 'aria-controls="workspace-jobs-panel"' in html
+    assert 'aria-controls="workspace-database-panel"' in html
+    assert 'aria-labelledby="btn-database" hidden' in html
+    assert 'class="health-purge" role="tabpanel"' in html
     assert 'trackedFetch("/api/jobs"' in ui_text
     assert '}, "silent");' in ui_text
     assert "new AbortController()" in ui_text
     assert "jobsViewState.requestVersion" in ui_text
     assert 'window.confirm("Cancel all pending jobs?")' in ui_text
+
+
+def test_health_purge_exposes_a_review_before_starting_cleanup() -> None:
+    html = _read_text(HTML)
+
+    for element_id in (
+        "health-purge-options",
+        "health-purge-review",
+        "health-purge-review-scope",
+        "health-purge-review-repack",
+        "btn-health-purge-review-cancel",
+        "btn-health-purge-start",
+    ):
+        assert f'id="{element_id}"' in html
+    assert 'id="health-purge-repack" type="checkbox" checked' in html
+    assert '>Review cleanup</button>' in html
+    assert '>Start cleanup</button>' in html
+    assert '<strong>Disk Space Note.</strong> Repacking rewrites the entire database file' in html
 
 
 def test_device_status_close_button_toggles_functions_panel() -> None:

@@ -187,7 +187,27 @@ def test_labels_stale_body_and_operations_cleanup(dashboard):
     assert page.locator("#data-table tbody").inner_text().count("Updated peer") == 1
     assert page.locator("#device-label").input_value() == "Updated peer"
     dashboard.view("operations")
+    page.locator("#btn-database").click()
+    assert page.locator("#btn-database").get_attribute("aria-selected") == "true"
+    assert page.locator("#workspace-database-panel").is_visible()
+    assert page.locator("#workspace-jobs-panel").is_hidden()
+    page.wait_for_function("() => !document.querySelector('#btn-health-purge').disabled")
+    assert page.locator("#health-purge-repack").is_checked()
+    assert page.get_by_text("Disk Space Note.", exact=False).is_visible()
+    purge_requests = len([request for request in dashboard.requests if request[0] == "/api/health/purge"])
+    page.locator("#btn-health-purge").click()
+    assert page.locator("#health-purge-review").is_visible()
+    assert "older than 10 days; cutoff determined by the server when cleanup starts." in \
+        page.locator("#health-purge-review-scope").inner_text()
+    assert page.locator("#health-purge-review-repack").inner_text() == "Repack: On."
+    assert page.get_by_role("button", name="Start cleanup").is_visible()
+    page.locator("#btn-health-purge-review-cancel").click()
+    assert page.locator("#health-purge-options").is_visible()
+    assert page.locator("#health-purge-review").is_hidden()
+    assert len([request for request in dashboard.requests if request[0] == "/api/health/purge"]) == purge_requests
     page.locator("#btn-jobs").click()
+    assert page.locator("#workspace-jobs-panel").is_visible()
+    assert page.locator("#workspace-database-panel").is_hidden()
     page.wait_for_function("() => document.querySelectorAll('.workspace-jobs-table tbody tr').length === 2")
     page.locator(".workspace-jobs-table tbody tr").first.get_by_role("button", name="Cancel").click()
     page.wait_for_function("() => document.querySelectorAll('.workspace-jobs-table tbody tr').length === 1")

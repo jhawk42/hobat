@@ -139,6 +139,8 @@ class Dashboard:
             if method == "PATCH":
                 self.labels[address] = request.post_data_json["deviceLabel"]
             route.fulfill(json={"deviceLabel": self.labels.get(address, "")})
+        elif path == "/api/scheduler" and method == "GET":
+            route.fulfill(json={"enabled": False, "paused": False, "keep_days": 10})
         elif path == "/api/jobs" and method in {"GET", "DELETE"}:
             if method == "DELETE":
                 self.deleted.append("all")

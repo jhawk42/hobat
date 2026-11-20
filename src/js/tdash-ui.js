@@ -459,7 +459,7 @@ const jobsViewState = {
   cancellingJobIds: new Set(),
 };
 const healthPurgeState = {
-  keepDays: null, submitting: false, jobId: null, active: false,
+  keepDays: null, reviewing: false, submitting: false, jobId: null, active: false,
   uncertain: false, cancelling: false, status: "", progress: null,
   jobStatus: null, timer: null, controller: null, version: 0, retentionController: null,
 };
@@ -925,12 +925,20 @@ function healthPurgeVisible() {
 
 function renderHealthPurge() {
   const state = healthPurgeState;
+  const repack = document.getElementById("health-purge-repack");
   document.getElementById("health-purge-retention").textContent = state.keepDays === null
     ? "Effective retention unavailable. Return to Operations to retry."
     : `Effective retention: ${state.keepDays} days.`;
-  document.getElementById("btn-health-purge").disabled =
-    state.keepDays === null || state.submitting || state.active || state.uncertain;
-  document.getElementById("health-purge-repack").disabled = state.submitting || state.active || state.uncertain;
+  document.getElementById("health-purge-options").hidden = state.reviewing;
+  document.getElementById("health-purge-review").hidden = !state.reviewing;
+  document.getElementById("health-purge-review-scope").textContent =
+    state.keepDays === null
+      ? "Retention is unavailable; cleanup cannot be started."
+      : `Delete health records older than ${state.keepDays} days; cutoff determined by the server when cleanup starts.`;
+  document.getElementById("health-purge-review-repack").textContent = `Repack: ${repack.checked ? "On" : "Off"}.`;
+  document.getElementById("btn-health-purge").disabled = !healthPurgeCanStart();
+  document.getElementById("btn-health-purge-start").disabled = !healthPurgeCanStart();
+  repack.disabled = state.submitting || state.active || state.uncertain;
   const acknowledge = document.getElementById("btn-health-purge-acknowledge");
   if (acknowledge) acknowledge.hidden = !state.uncertain;
   const cancel = document.getElementById("btn-health-purge-cancel");
@@ -976,6 +984,26 @@ function renderHealthPurge() {
     paragraph.textContent = line;
     status.appendChild(paragraph);
   });
+}
+
+function healthPurgeCanStart() {
+  const state = healthPurgeState;
+  return healthPurgeVisible() && state.keepDays !== null
+    && !state.submitting && !state.active && !state.uncertain;
+}
+
+function reviewHealthPurge() {
+  if (!healthPurgeCanStart()) return;
+  healthPurgeState.reviewing = true;
+  renderHealthPurge();
+  document.getElementById("health-purge-review-heading").focus();
+}
+
+function cancelHealthPurgeReview() {
+  if (!healthPurgeState.reviewing) return;
+  healthPurgeState.reviewing = false;
+  renderHealthPurge();
+  document.getElementById("health-purge-heading").focus();
 }
 
 function rememberPurgePending(value) {
@@ -1068,7 +1096,8 @@ async function pollHealthPurge() {
 
 async function submitHealthPurge() {
   const state = healthPurgeState;
-  if (!healthPurgeVisible() || state.keepDays === null || state.submitting || state.active || state.uncertain) return;
+  if (!state.reviewing || !healthPurgeCanStart()) return;
+  state.reviewing = false;
   state.submitting = true;
   state.status = "Submitting maintenance request…";
   state.progress = null;
@@ -1145,7 +1174,9 @@ function activateHealthPurge() {
   if (healthPurgeState.active) void pollHealthPurge();
 }
 
-document.getElementById("btn-health-purge")?.addEventListener("click", () => void submitHealthPurge());
+document.getElementById("btn-health-purge")?.addEventListener("click", reviewHealthPurge);
+document.getElementById("btn-health-purge-review-cancel")?.addEventListener("click", cancelHealthPurgeReview);
+document.getElementById("btn-health-purge-start")?.addEventListener("click", () => void submitHealthPurge());
 document.getElementById("btn-health-purge-cancel")?.addEventListener("click", () => void cancelHealthPurge());
 document.getElementById("btn-health-purge-refresh")?.addEventListener("click", () => void pollHealthPurge());
 document.getElementById("btn-health-purge-acknowledge")?.addEventListener("click", () => {
@@ -1506,6 +1537,7 @@ function renderThreadNetworkPanel() {
 const OPERATIONS_SUBVIEWS = Object.freeze([
   ["logs", "btn-activity-log", "workspace-log-panel"],
   ["jobs", "btn-jobs", "workspace-jobs-panel"],
+  ["database", "btn-database", "workspace-database-panel"],
 ]);
 
 function renderOperationsSubview() {

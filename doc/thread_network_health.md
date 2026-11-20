@@ -1084,9 +1084,12 @@ same transaction; roster records are preserved.
 
 Dashboard Operations → Health Purge is an explicit manual action, even with
 the nightly scheduler disabled or paused. It displays the server's retention
-and lets you turn off the default-on Repack option before pressing Proceed.
-Repack starts only if purge succeeds. Free disk space should be at least the
-database file's current size; SQLite may need additional temporary space.
+and lets you change the default-on Repack option before reviewing the cleanup.
+The review states that health records older than the retention period will be
+deleted and that the server determines the cutoff when cleanup starts. Start
+cleanup only after reviewing that scope and the Repack selection. Repack starts
+only if purge succeeds. Free disk space should be at least the database file's
+current size; SQLite may need additional temporary space.
 If repack fails, already completed deletion is not rolled back. Cancellation
 does not undo a commit and an interrupted maintenance step may be unconfirmed.
 Dashboard job, purge, and health-processing requests use a local 15-second
