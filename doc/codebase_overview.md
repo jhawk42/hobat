@@ -285,7 +285,7 @@ datasets. It does not contain health thresholds or reclassify evidence.
 
 | File | Responsibility |
 |---|---|
-| `tdash-ui.js` | DOM event wiring, source/dataset controls, view dispatch, settings/appearance, Operations logs/jobs, device details/labels, and insights |
+| `tdash-ui.js` | DOM event wiring, source/dataset controls, view dispatch, settings/appearance, System logs/jobs/database, device details/labels, and insights |
 | [tdash-theme.js](../src/js/tdash-theme.js) | Guarded local preference storage, System resolution, root theme attributes, cross-tab updates, and frozen global theme controller |
 | `tdash-activity.js` | Bounded browser activity log, metadata sanitization, and tracked HTTP requests |
 | `tdash-dataset-registry.js` | Catalog-backed source groups and selectable dataset definitions |

@@ -217,7 +217,7 @@ def test_dashboard_control_icons_are_theme_aware_and_decorative() -> None:
         ("btn-topology", "Topology view"),
         ("btn-thread-network-summary", "Thread Network"),
         ("btn-device-details-properties", "Show device properties"),
-        ("btn-operations", "Operations view"),
+        ("btn-operations", "System view"),
     ):
         assert parser.attributes_by_id[button_id]["aria-label"] == label
         assert parser.attributes_by_id[button_id]["title"] == label
@@ -1153,10 +1153,13 @@ def test_thread_network_summary_rebuild_preserves_only_same_dataset_scroll() -> 
     )
 
 
-def test_operations_workspace_exposes_activity_jobs_and_database_tabs() -> None:
+def test_system_workspace_exposes_logs_jobs_and_database_tabs() -> None:
     html = _read_text(HTML)
     ui_text = _read_text(UI_JS)
 
+    assert '<h2>System</h2>' in html
+    assert 'aria-label="System view" title="System view"' in html
+    assert 'class="workspace-navigation-tab-label">System</span>' in html
     for element_id in (
         "btn-activity-log",
         "btn-jobs",
@@ -1170,7 +1173,7 @@ def test_operations_workspace_exposes_activity_jobs_and_database_tabs() -> None:
         "workspace-jobs-content",
     ):
         assert f'id="{element_id}"' in html
-    assert 'role="tablist" aria-label="Operations"' in html
+    assert 'role="tablist" aria-label="System"' in html
     assert 'id="btn-thread-network"' not in html
     assert 'id="workspace-thread-network-panel"' not in html
     assert '["logs", "btn-activity-log", "workspace-log-panel"]' in ui_text

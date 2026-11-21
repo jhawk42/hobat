@@ -213,9 +213,9 @@ without moving the camera or restarting physics. Active search and health-target
 navigation retain their own highlighting. See [topology styling and selection](doc/dashboard_vis_node_colors.md#search-and-selection).
 
 **Thread Network** is a primary workspace view, beside Topology, Table,
-Insights, Operations, and Settings. Its network-dossier icon opens network
+Insights, System, and Settings. Its network-dossier icon opens network
 facts, Leader/Primary BBR details, device/link summaries, and partition evidence
-for the loaded dataset; Operations retains Logs and Jobs. Topology/Table
+for the loaded dataset; System retains Logs, Jobs, and Database. Topology/Table
 filters do not apply to this summary and are hidden while it is active.
 
 The **Thread Network** view includes source-backed partition identifiers
@@ -317,7 +317,7 @@ Set these variables for `td_webserver` directly or in the Compose service's
 |---|---|
 | `TD_SCHEDULER_ENABLED` | Off by default; set `1` to enable. |
 | `TD_SCHEDULER_START_TIME` | Local 24-hour `HH:MM`; defaults to `04:20`. |
-| `TD_SCHEDULER_KEEP_DAYS` | Optional positive override for nightly and Operations purge; otherwise 10. |
+| `TD_SCHEDULER_KEEP_DAYS` | Optional positive override for nightly and System purge; otherwise 10. |
 | `TD_EXT_PAN_ID` | Required when enabled; the target network's Extended PAN ID. |
 | `TZ` | Normal process timezone, e.g. `America/New_York`; verify the status zone, offset and next local/UTC slot before relying on the schedule. Restart after changing it. |
 
@@ -326,7 +326,7 @@ processing, then permanently purges expired health records if health succeeds.
 On the second Sunday of the month it repacks only after successful purge.
 It skips missed or busy slots, does not retry failures, runs a repeated DST
 wall time once, and skips nonexistent wall times. Pause is runtime-only and
-does not cancel active work. Operations → Jobs can monitor or cancel the job.
+does not cancel active work. System → Jobs can monitor or cancel the job.
 While the chain is active the dashboard serves cached files, rejects explicit
 refreshes, and does not queue them. Cache Only does not stop the timer.
 

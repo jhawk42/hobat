@@ -1082,7 +1082,7 @@ purge. Endpoints exactly at the cutoff are retained unless the other endpoint
 is older. Cascading health rows and stale current pointers are removed in the
 same transaction; roster records are preserved.
 
-Dashboard Operations → Health Purge is an explicit manual action, even with
+Dashboard System → Health Purge is an explicit manual action, even with
 the nightly scheduler disabled or paused. It displays the server's retention
 and lets you change the default-on Repack option before reviewing the cleanup.
 The review states that health records older than the retention period will be

@@ -927,7 +927,7 @@ function renderHealthPurge() {
   const state = healthPurgeState;
   const repack = document.getElementById("health-purge-repack");
   document.getElementById("health-purge-retention").textContent = state.keepDays === null
-    ? "Effective retention unavailable. Return to Operations to retry."
+    ? "Effective retention unavailable. Return to System to retry."
     : `Effective retention: ${state.keepDays} days.`;
   document.getElementById("health-purge-options").hidden = state.reviewing;
   document.getElementById("health-purge-review").hidden = !state.reviewing;

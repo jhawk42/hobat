@@ -289,8 +289,8 @@ visibility-derived `aria-expanded`, and Show/Hide accessible names. Their state
 also follows the individual section headers; activating a disclosure with any
 controlled section hidden or collapsed opens all its sections.
 
-Device properties use an outline properties-sheet SVG; Operations uses a
-distinct two-stage workflow SVG for its Logs and Jobs workspace. Thread Network
+Device properties use an outline properties-sheet SVG; System uses a
+distinct two-stage workflow SVG for its Logs, Jobs, and Database workspace. Thread Network
 uses a network-dossier SVG: a small network branch beside fact lines inside
 an outline card. It is a decorative summary marker, not network health or a
 live device count.
@@ -299,7 +299,7 @@ navigation, accessible names, or keyboard behavior.
 
 Topology uses a six-node hexagonal mesh SVG with three opposite-node cross-links,
 including the top-to-bottom link. Its non-directional links and round nodes
-distinguish it from Operations; it is a decorative symbol, not a live node count.
+distinguish it from System; it is a decorative symbol, not a live node count.
 
 The Insights: Health heading ends with a decorative Activity Pulse SVG in the
 heading text color; it is a static section marker, not a live status indicator.
@@ -861,10 +861,10 @@ non-empty values are retained in `_merge_conflicts` and contributing files in
 
 ## Thread Network Workspace
 
-Primary navigation offers Topology, Table, Thread Network, Insights, Operations,
+Primary navigation offers Topology, Table, Thread Network, Insights, System,
 and Settings, in that order. The Thread Network tab targets the
-`thread-network-summary` peer panel under the shared workspace. Operations
-contains only Logs and Jobs. The summary keeps Dataset/Sync controls available
+`thread-network-summary` peer panel under the shared workspace. System
+contains Logs, Jobs, and Database. The summary keeps Dataset/Sync controls available
 but hides Topology/Table filters without resetting their values. The existing
 dataset-default Topology/Table switch after Sync is unchanged.
 

@@ -166,7 +166,7 @@ def test_actual_adaptor_error_clears_old_canvas(dashboard):
     topology(dashboard)
 
 
-def test_labels_stale_body_and_operations_cleanup(dashboard):
+def test_labels_stale_body_and_system_database_cleanup(dashboard):
     page = dashboard.page
     dashboard.sync()
     dashboard.view("table")

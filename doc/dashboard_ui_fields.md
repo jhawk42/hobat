@@ -163,7 +163,7 @@ loaded row counts and displayed columns; Topology shows visible nodes and links;
 Insights shows the selected health assessment's status, completeness, and
 observation age. `Filtered` indicates active restrictions or search. Incomplete
 previews, failed syncs, mixed networks, and unknown network scope remain visible.
-Settings and Operations do not show dataset status.
+Settings and System do not show dataset status.
 In Insights, the pulse icon follows the status-details button; the redundant
 Insights heading is omitted while the navigation tab names the panel.
 The Details-panel toggle stays at the toolbar's right edge, beside the
