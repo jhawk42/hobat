@@ -1966,6 +1966,11 @@
       "eui": {
         "sources": [
           {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3,
+            "rosterOnly": true
+          },
+          {
             "filename": "td-otbr-restapi-devices-fetch.json",
             "rank": 3
           },

@@ -52,7 +52,7 @@ from td_health_observation_store import (
     PurgeResult,
     StoreResult,
 )
-from td_health_roster import RosterFact
+from td_health_roster import RosterFact, compatible_last_known_policy
 from td_health_preparation import (
     Preparation, PreparationCorruptionError, VERSION as PREPARATION_VERSION,
     OBSERVATION_COLUMNS, PAIR_COLUMNS, canonical as preparation_canonical,
@@ -1043,7 +1043,10 @@ class SQLiteHealthStore:
                 (observation.network_id, device_id, field),
             ).fetchone()
             if current:
-                if current["roster_policy_digest"] not in (None, policy.digest) or (current["source_rank"] or 0) > highest:
+                old_digest = current["roster_policy_digest"]
+                if (old_digest is not None and not compatible_last_known_policy(
+                    policy, old_digest, field, current["source_file"], current["source_rank"],
+                )) or (current["source_rank"] or 0) > highest:
                     continue
                 if current["source_observed_at"]:
                     newer = datetime.fromisoformat(source_time) > datetime.fromisoformat(current["source_observed_at"])
@@ -1074,13 +1077,15 @@ class SQLiteHealthStore:
     def _refresh_alias_conflicts(connection: sqlite3.Connection, network_id: str) -> None:
         policy = load_health_manifest().roster_policy
         connection.execute("DELETE FROM device_identity_conflicts WHERE network_id=?", (network_id,))
-        rows = connection.execute(
+        rows = [row for row in connection.execute(
             """SELECT * FROM device_last_known WHERE network_id=?
-               AND field_key IN ('eui', 'eui64', 'rloc16', 'routerId')
-               AND roster_policy_digest=? AND source_observed_at IS NOT NULL
+               AND field_key IN ('eui', 'rloc16', 'routerId')
+               AND source_observed_at IS NOT NULL
                ORDER BY field_key, value_json, device_id""",
-            (network_id, policy.digest),
-        ).fetchall()
+            (network_id,),
+        ) if compatible_last_known_policy(
+            policy, row["roster_policy_digest"], row["field_key"], row["source_file"], row["source_rank"],
+        )]
         now = datetime.now(timezone.utc)
         for index, first in enumerate(rows):
             age = (now - datetime.fromisoformat(first["source_observed_at"])).total_seconds()

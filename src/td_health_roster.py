@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from td_const import OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
 from td_device_fields import (
     FIELD_DEFINITIONS,
     get_canonical_ext_address,
@@ -33,6 +34,8 @@ _INVENTORY_FIELDS = frozenset({
 })
 _PLACEHOLDERS = frozenset({"unknown", "n/a", "none", "null", "-", "--"})
 _HEX64 = re.compile(r"^[0-9a-f]{16}$")
+_CLI_EUI_PREDECESSOR = "bbf7b5290a3c95de4c70b033b13d1bc5ef01455807fd9ddeaa30bfb0e323b21b"
+_CLI_EUI_SUCCESSOR = "3e6c56be6544c17ef36b9ed722fd49668c65eebada697bd4cc9db21a11887c54"
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,19 @@ class RosterFact:
     source_file: str
     source_rank: int
     confidence: str
+
+
+def compatible_last_known_policy(
+    policy: RosterPolicy, digest: str | None, field: str, filename: str, rank: int | None,
+) -> bool:
+    if digest == policy.digest:
+        return True
+    # These exact policies differ only by the new CLI EUI source.
+    return (
+        policy.digest == _CLI_EUI_SUCCESSOR and digest == _CLI_EUI_PREDECESSOR
+        and (field, filename) != ("eui", OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME)
+        and rank is not None and policy.sources.get(field, {}).get(filename) == rank
+    )
 
 
 def _raw_value(record: Mapping[str, Any], path: str) -> Any:

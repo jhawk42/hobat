@@ -984,6 +984,89 @@ def test_roster_facts_have_original_field_authority_not_aggregate_rank(tmp_path)
                for fact in result.roster_facts)
 
 
+@pytest.mark.parametrize("dataset_id", ["otbr_cli_unified", "multi_source_unified"])
+def test_cli_eui_roster_evidence_comes_from_original_diagnostic_row(tmp_path, dataset_id):
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    seed(tmp_path, dataset_id)
+    _save(tmp_path, filename, [
+        {"extAddress": "0011223344556677", "eui": "02:00:00:00:00:00:00:02",
+         "sourceObservedAt": SOURCE_TIME},
+        {"extAddress": "0011223344556688", "eui": "0000000000000000",
+         "sourceObservedAt": SOURCE_TIME},
+        {"eui": "0200000000000003", "sourceObservedAt": SOURCE_TIME},
+    ])
+    build_unified_dataset(tmp_path, dataset_id)
+    result = process(tmp_path, dataset_id)
+    assert [(f.device_id, f.value_json, f.source_file, f.source_rank)
+            for f in result.roster_facts if f.field_key == "eui"] == [
+        ("extaddr:0011223344556677", '"0200000000000002"', filename, 3),
+    ]
+
+
+def test_cli_eui_cached_health_rollout_and_backup_restore(tmp_path, monkeypatch):
+    import td_health_processor
+    import td_health_read
+    import td_health_sqlite
+    from td_health_manifest_history import canonical_json, load_manifest_history
+    from td_system_backups import create_backup, restore_backup
+
+    data = tmp_path / "data"
+    data.mkdir()
+    dataset_id = "otbr_cli_unified"
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    device_id = "extaddr:0011223344556677"
+    store = SQLiteHealthStore(data / "hobat_v1.db")
+    service = TDHealthReadService(data)
+    _seed(data, dataset_id)
+    _save(data, "td-otbr-cli-meshdiag-router-childtables.json", [
+        {"extAddress": "0011223344556677", "rloc16": "0x1000", "childTable": [],
+         "tableAttempt": {"status": "success"}, "sourceObservedAt": SOURCE_TIME},
+    ])
+    row = {"extAddress": "0011223344556677", "rloc16": "0x1000",
+           "eui": "0200000000000002", "sourceObservedAt": SOURCE_TIME}
+    _save(data, filename, [row])
+    build_unified_dataset(data, dataset_id)
+    prior_path = tmp_path / "prior.json"
+    resolver = load_manifest_history()
+    prior_path.write_bytes(canonical_json(next(r.manifest for r in resolver.revisions
+                                               if r.manifest_digest.startswith("43cdeb81"))))
+    prior = load_health_manifest(prior_path)
+    read_time = datetime.fromisoformat("2026-01-02T00:00:00+00:00")
+
+    def detail():
+        return service.roster_device(network_id=NETWORK, device_id=device_id, read_time=read_time)
+
+    def old_policy(patch):
+        for module in (td_health_processor, td_health_sqlite, td_health_read):
+            patch.setattr(module, "load_health_manifest", lambda: prior)
+
+    with monkeypatch.context() as patch:
+        old_policy(patch)
+        original = process(data, dataset_id, store=store)
+        before = detail()
+    backup = tmp_path / "backup"
+    create_backup(data, backup)
+    assert detail() == before
+    process(data, dataset_id, store=store)
+    assert detail()["fields"]["eui"]["freshness"] == "absent"
+
+    _save(data, filename, [{**row, "deviceLabel": "new observation"}])
+    build_unified_dataset(data, dataset_id)
+    new = process(data, dataset_id, store=store)
+    assert new.observation.observation_id != original.observation.observation_id
+    assert new.observation.completeness.value == "complete"
+    field = detail()["fields"]["eui"]
+    assert (field["value"], field["sourceFile"], field["sourceObservedAt"]) == (row["eui"], filename, SOURCE_TIME)
+    process(data, dataset_id, store=store)
+    with closing(sqlite3.connect(store.path)) as db:
+        assert db.execute("SELECT COUNT(*) FROM device_fact_samples WHERE field_key='eui'").fetchone()[0] == 1
+    restore_backup(data, backup)
+    with monkeypatch.context() as patch:
+        old_policy(patch)
+        assert detail() == before
+        assert process(data, dataset_id, store=store).observation.observation_id == original.observation.observation_id
+
+
 def test_embedded_mdns_services_do_not_change_original_health_samples(tmp_path, monkeypatch):
     import td_unified_dataset as unified
     from test_td_unified_composition import OMR, _hap_service, _matter_service

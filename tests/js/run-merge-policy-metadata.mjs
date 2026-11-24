@@ -1,5 +1,6 @@
 import { sourceDefaults, sourceRank, fieldRank } from "../../src/js/tdash-source-authority.js";
 import { MERGE_FIELD_HANDLERS, createMergeContext } from "../../src/js/tdash-merge.js";
+import { getDatasetCatalog } from "../../src/js/tdash-dataset-registry.js";
 
 
 const context = createMergeContext("high.json", "unknown.json", {
@@ -9,6 +10,7 @@ const context = createMergeContext("high.json", "unknown.json", {
 
 process.stdout.write(`${JSON.stringify({
   sourcePrecedence: sourceDefaults(),
+  euiMergeOverrides: getDatasetCatalog().authority.fieldOverrides.eui,
   authorityCases: {
     sourceDefault: sourceRank("td-otbr-cli-networkdiag-fetch-all.json"),
     fieldOverride: fieldRank("extAddress", "td-otbr-cli-networkdiag-fetch-all.json"),

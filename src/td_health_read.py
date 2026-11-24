@@ -19,6 +19,7 @@ from td_health_comparison import (
 )
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from td_health_manifest import ROSTER_FIELDS, RETIRED_HEALTH_RESULT_DATASET_IDS, load_health_manifest
+from td_health_roster import compatible_last_known_policy
 from td_dataset_catalog import RETIRED_HEALTH_DATASET_IDS
 from td_health_observation_store import (
     HOBAT_DATABASE_FILENAME, HealthStoreMigrationError,
@@ -373,8 +374,11 @@ class TDHealthReadService:
             age = (now - datetime.fromisoformat(time)).total_seconds() if time else None
             if age is not None and age < 0:
                 raise HealthCorruptStoreError("Invalid future roster source time")
-            expiry = policy.freshness_seconds[field] if row["roster_policy_digest"] == policy.digest else None
-            freshness = ("unknown" if age is None or row["roster_policy_digest"] != policy.digest
+            compatible = compatible_last_known_policy(
+                policy, row["roster_policy_digest"], field, row["source_file"], row["source_rank"],
+            )
+            expiry = policy.freshness_seconds[field]
+            freshness = ("unknown" if age is None or not compatible
                          else "stale" if expiry is not None and age > expiry else "fresh")
             fields[field] = {
                 "value": _decode_json(row["value_json"], field="roster value"),

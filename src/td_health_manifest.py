@@ -136,7 +136,7 @@ def _roster_policy(raw: object, datasets: Mapping[str, HealthDataset]) -> Roster
             raise HealthManifestError(f"Missing roster sources for {field}")
         ranks: dict[str, int] = {}
         for source in declared_sources:
-            if not isinstance(source, dict) or set(source) != {"filename", "rank"}:
+            if not isinstance(source, dict) or not valid_roster_source_shape(source):
                 raise HealthManifestError(f"Invalid roster source for {field}")
             filename = _safe_filename(source["filename"], field=f"rosterPolicy.{field}")
             if filename not in allowed or filename in ranks or type(source["rank"]) is not int or source["rank"] <= 0:
@@ -151,6 +151,13 @@ def _roster_policy(raw: object, datasets: Mapping[str, HealthDataset]) -> Roster
     return RosterPolicy(raw["version"], hashlib.sha256(encoded).hexdigest(),
                         raw["aliasCollisionWindowSeconds"], raw["maxStringLength"],
                         raw["maxAddresses"], MappingProxyType(sources), MappingProxyType(freshness))
+
+
+def valid_roster_source_shape(source: Mapping) -> bool:
+    keys = set(source)
+    return keys == {"filename", "rank"} or (
+        keys == {"filename", "rank", "rosterOnly"} and source["rosterOnly"] is True
+    )
 
 
 def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:

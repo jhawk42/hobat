@@ -206,7 +206,8 @@ export function validateDatasetCatalog(catalog) {
   }
   if (!catalog.rosterPolicy?.fields) throw new Error("Dataset catalog requires roster policy fields.");
   const fieldOverrides = Object.fromEntries(Object.entries(catalog.rosterPolicy.fields).map(([field, policy]) => [
-    field, Object.fromEntries(policy.sources.map(({ filename, rank }) => [filename, rank])),
+    field, Object.fromEntries(policy.sources.filter(({ rosterOnly }) => rosterOnly !== true)
+      .map(({ filename, rank }) => [filename, rank])),
   ]));
   return {
     ...catalog,

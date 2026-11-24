@@ -299,9 +299,9 @@ The exact displaced eleven-product manifest is archived as
 `8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81`.
 The displaced four-product manifest digest is
 `40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f`;
-it is retained in manifest history. The current catalog digest is
+it is retained in manifest history. The displaced HA topology catalog digest is
 `43cdeb81065f5241ba0fa328c4eb63ffbdfb8dda231afc66eaca0ec3e71b94a0`.
-The previous catalog, archived as
+The preceding presentation-only catalog, archived as
 `ee673b43a09f1ed085d9d1026069205ada8624a362c177dab13317f255ecb947`,
 differs only in the HA Unified topology defaults. These catalogs have the same
 health projection:
@@ -309,6 +309,42 @@ health projection:
 The four retained replay/target contracts are unchanged. Archived retired
 recipes have no current health target and cannot recreate purged results through
 history migration. Archive membership does not broaden producer support.
+
+### Approved Unified processing paths for roster EUI
+
+These Unified datasets can contribute EUI64 to the health roster during
+health processing:
+
+| Unified dataset | Approved original EUI evidence |
+| --- | --- |
+| OTBR REST Unified | `td-otbr-restapi-devices-fetch.json` and `td-otbr-restapi-diagnostics-fetch-all.json` |
+| OTBR CLI Unified | `td-otbr-cli-networkdiag-fetch-all.json` |
+| Multi-source Unified | The original OTBR REST and OTBR CLI files above, plus the approved HA Matter WS files |
+
+HA Matter WS Unified also remains eligible through its original device,
+topology, and diagnostic files listed in the
+[roster policy](../src/td-dataset-manifest.json), when they report an EUI.
+The roster does not read EUI from merged Unified rows: one original record
+must carry both the extended address and a valid non-zero EUI.
+
+### OTBR CLI EUI roster evidence
+
+The CLI rank-3 entry applies only to the roster; Unified assembly and replay
+contracts are unchanged. CLI EUI has the same rank as REST diagnostic EUI,
+but disagreement in one observation prevents promotion.
+
+Existing last-known facts admitted at the same rank under the immediately
+preceding policy retain freshness and remain eligible for normal promotion
+and collision checks. Their saved provenance is not rewritten. The
+predecessor catalog (`43cdeb81065f5241ba0fa328c4eb63ffbdfb8dda231afc66eaca0ec3e71b94a0`)
+is archived with its four Unified producer contracts. The new catalog digest
+is `a9d2f9fa3acd706da5db7d58b9bcc7cfb6ea3753922e3b40ed8f27bac0348f2d`.
+
+A new complete observation can populate a missing roster EUI. Reprocessing
+an identical observation does not insert facts retroactively. Use the
+separately reviewed alias backfill workflow for retrospective fills. Keep a
+verified pre-deployment backup; to roll back, stop writers and restore the
+backup and matching pre-change code/catalog before restarting.
 
 ### Historical dataset identifier cutover (2026-10-27)
 

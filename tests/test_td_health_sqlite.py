@@ -406,6 +406,91 @@ def test_roster_source_time_and_partial_observation_do_not_refresh_projection(tm
         ).fetchone()[0] == '"child"'
 
 
+def test_cli_eui_policy_cutover_preserves_old_facts_and_admits_new_evidence(tmp_path, monkeypatch) -> None:
+    import td_health_read
+    import td_health_sqlite
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path
+    from td_health_manifest import load_health_manifest
+    from td_health_manifest_history import canonical_json, load_manifest_history
+    from td_health_read import TDHealthReadService
+
+    current_path = Path(td_health_sqlite.__file__).with_name("td-dataset-manifest.json")
+    current = load_health_manifest(current_path)
+    monkeypatch.setattr(td_health_sqlite, "load_health_manifest", lambda: current)
+    monkeypatch.setattr(td_health_read, "load_health_manifest", lambda: current)
+    archive = next(r for r in load_manifest_history().revisions
+                   if r.manifest_digest.startswith("43cdeb81"))
+    prior_path = tmp_path / "prior.json"
+    prior_path.write_bytes(canonical_json(archive.manifest))
+    prior = load_health_manifest(prior_path)
+    store = SQLiteHealthStore(tmp_path / "hobat_v1.db")
+    now = datetime.now(timezone.utc)
+    base = now - timedelta(minutes=4)
+    cli = "td-otbr-cli-networkdiag-fetch-all.json"
+    rest = "td-otbr-restapi-diagnostics-fetch-all.json"
+    ha = "td-ha-matter-ws-topology.json"
+    eui = "0200000000000002"
+    original, _ = _result("seed")
+    first = original.devices[0]
+    second = replace(first, device_id="extaddr:0200000000000001", ext_address="0200000000000001")
+
+    def save(name, minute, values, completeness=Completeness.COMPLETE):
+        observation, assessment = _result(name)
+        time = (base + timedelta(minutes=minute)).isoformat()
+        observation = replace(observation, dataset_id="otbr_cli_unified",
+                              observed_at=time,
+                              devices=(first, second), completeness=completeness,
+                              sources=tuple(SourceEvidence(f, name + f, "final", "valid", time)
+                                            for f in sorted({v[3] for v in values})))
+        assessment = replace(assessment, assessed_at=time)
+        facts = tuple(RosterFact(device.device_id, key, json.dumps(value),
+                                 "alias" if key == "eui" else "transient", source, rank, "high")
+                      for device, key, value, source, rank in values)
+        return store.save_processing_result(observation, assessment, roster_facts=facts)
+
+    service = TDHealthReadService(tmp_path)
+
+    def detail(device):
+        return service.roster_device(network_id=original.network_id, device_id=device.device_id, read_time=now)
+
+    with monkeypatch.context() as old:
+        old.setattr(td_health_sqlite, "load_health_manifest", lambda: prior)
+        old.setattr(td_health_read, "load_health_manifest", lambda: prior)
+        save("old", 1, [(first, "eui", eui, rest, 3), (first, "role", "router", cli, 3)])
+        before = detail(first)
+    assert detail(first) == before
+    assert detail(first)["fields"]["eui"]["freshness"] == "fresh"
+
+    save("partial", 2, [(second, "eui", eui, cli, 3)], Completeness.PARTIAL)
+    save("conflict", 2, [(second, "eui", eui, cli, 3), (second, "eui", "0200000000000003", rest, 3)])
+    assert detail(second)["fields"]["eui"]["freshness"] == "absent"
+    values = [(second, "eui", eui, cli, 3),
+              (first, "eui", "0200000000000004", ha, 1),
+              (first, "role", "leader", cli, 3)]
+    assert save("new", 3, values).observation_created
+    assert not save("new", 3, values).observation_created
+    assert detail(first)["fields"]["eui"]["value"] == eui
+    assert detail(first)["fields"]["role"]["value"] == "leader"
+    assert detail(second)["fields"]["eui"]["sourceFile"] == cli
+    assert detail(second)["fields"]["eui"]["conflictState"] == "alias-collision"
+    save("stale", 0, [(second, "eui", "0200000000000005", cli, 3)])
+    with closing(store._connect()) as db, db:
+        assert db.execute(
+            """SELECT roster_policy_digest FROM device_last_known
+               WHERE device_id=? AND field_key='eui'""", (first.device_id,),
+        ).fetchone()[0] == prior.roster_policy.digest
+        assert db.execute(
+            """SELECT roster_policy_digest FROM device_last_known
+               WHERE device_id=? AND field_key='eui'""", (second.device_id,),
+        ).fetchone()[0] == current.roster_policy.digest
+        db.execute("UPDATE device_last_known SET roster_policy_digest='unrelated' WHERE field_key='role'")
+    save("unrelated", 4, [(first, "role", "child", cli, 3)])
+    assert detail(first)["fields"]["role"]["value"] == "leader"
+    assert detail(first)["fields"]["role"]["freshness"] == "unknown"
+    assert detail(second)["fields"]["eui"]["value"] == eui
+
+
 def test_atomic_save_rolls_back_when_assessment_insert_fails(tmp_path, monkeypatch) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
     observation, assessment = _result()

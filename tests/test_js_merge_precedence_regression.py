@@ -30,6 +30,8 @@ def test_javascript_policy_metadata_matches_python() -> None:
     catalog = load_dataset_catalog()
     assert result["sourcePrecedence"] == SOURCE_PRECEDENCE == catalog["authority"]["sourceDefaults"]
     assert catalog["authority"]["fieldOverrides"]["extAddress"]["td-otbr-cli-networkdiag-fetch-all.json"] == 3
+    assert result["euiMergeOverrides"] == catalog["authority"]["fieldOverrides"]["eui"]
+    assert "td-otbr-cli-networkdiag-fetch-all.json" not in result["euiMergeOverrides"]
     assert len(result["sourcePrecedence"]) == 23
     assert result["authorityCases"] == {
         "sourceDefault": source_rank("td-otbr-cli-networkdiag-fetch-all.json"),

@@ -23,6 +23,7 @@ from td_health_manifest import (
     HealthManifestError,
     HealthProfile,
     load_health_manifest,
+    valid_roster_source_shape,
 )
 
 
@@ -88,6 +89,10 @@ PRODUCER_SAMPLE_SUPPORT = MappingProxyType({
     "8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81": _CURRENT_SAMPLE_SUPPORT,
     "40e386090c94675d1fa12e3898236684764f1e10bdc8719c4f3e8bba8c3ae93f": _CURRENT_SAMPLE_SUPPORT,
     "ee673b43a09f1ed085d9d1026069205ada8624a362c177dab13317f255ecb947": _CURRENT_SAMPLE_SUPPORT,
+    "43cdeb81065f5241ba0fa328c4eb63ffbdfb8dda231afc66eaca0ec3e71b94a0": MappingProxyType({
+        key: value for key, value in _CURRENT_SAMPLE_SUPPORT.items()
+        if value == "comparison-v1-unified"
+    }),
 })
 
 
@@ -359,7 +364,7 @@ def _validate_policy(raw: object, datasets: Mapping[str, HealthDataset], digest:
             raise ManifestHistoryError("Missing rosterPolicy sources")
         seen: set[str] = set()
         for source in sources:
-            if not isinstance(source, Mapping) or set(source) != {"filename", "rank"}:
+            if not isinstance(source, Mapping) or not valid_roster_source_shape(source):
                 raise ManifestHistoryError("Invalid rosterPolicy source")
             name = _filename(source["filename"])
             if name not in allowed or name in seen or type(source["rank"]) is not int or source["rank"] <= 0:

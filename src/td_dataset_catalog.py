@@ -263,6 +263,10 @@ def load_dataset_catalog(path: Path = MANIFEST_PATH) -> dict:
         policy = load_health_manifest(path).roster_policy
     except (OSError, UnicodeError, json.JSONDecodeError, HealthManifestError) as exc:
         raise HealthManifestError(f"Cannot load dataset catalog {path}: {exc}") from exc
-    raw["authority"]["fieldOverrides"] = {field: dict(ranks) for field, ranks in policy.sources.items()}
+    raw["authority"]["fieldOverrides"] = {
+        field: {source["filename"]: source["rank"] for source in definition["sources"]
+                if not source.get("rosterOnly")}
+        for field, definition in raw["rosterPolicy"]["fields"].items()
+    }
     raw["authority"]["freshnessSeconds"] = dict(policy.freshness_seconds)
     return raw

@@ -22,7 +22,7 @@ def test_manifest_contains_only_approved_datasets() -> None:
     manifest = load_health_manifest()
 
     assert manifest.schema_version == 2
-    assert manifest.roster_policy.digest == "bbf7b5290a3c95de4c70b033b13d1bc5ef01455807fd9ddeaa30bfb0e323b21b"
+    assert manifest.roster_policy.digest == "3e6c56be6544c17ef36b9ed722fd49668c65eebada697bd4cc9db21a11887c54"
     assert set(manifest.datasets) == EXPECTED_DATASETS
     from td_health_manifest import RETIRED_HEALTH_RESULT_DATASET_IDS
     from td_health_manifest_history import load_manifest_history
@@ -139,8 +139,8 @@ def test_reviewed_current_manifest_projection_and_archive_agree() -> None:
     resolver = load_manifest_history()
     current = load_health_manifest()
     assert resolver.current.datasets == current.datasets
-    assert resolver.current.manifest_digest == "43cdeb81065f5241ba0fa328c4eb63ffbdfb8dda231afc66eaca0ec3e71b94a0"
-    assert resolver.current.health_contract_digest == "bef3b4accb98e9c60d9ef7bcc75232caa3f20fa06ed1dbbc77e1e8ec2852a0b7"
+    assert resolver.current.manifest_digest == "a9d2f9fa3acd706da5db7d58b9bcc7cfb6ea3753922e3b40ed8f27bac0348f2d"
+    assert resolver.current.health_contract_digest == "a52e4775abae6ea8d0c2a6d8268230fac0de8f423d24c484354c5507748b54c4"
     assert canonical_digest(health_projection(resolver.current.manifest)) == resolver.current.health_contract_digest
     assert resolver.current.revision_id not in {revision.revision_id for revision in resolver.revisions}
     assert resolver.current.manifest["rosterPolicy"]["version"] == current.roster_policy.version
