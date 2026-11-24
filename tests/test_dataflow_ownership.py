@@ -64,12 +64,16 @@ def test_canonical_catalog_aliases_and_preserved_recipes(node_json):
         "ha_matter_ws_matter_topology", "ha_matter_ws_thread_topology", "ha_matter_ws_topology_merge",
         "eve_layout", "eve_topology", "thread_tools_diagnostics", "multi_source_otbr_mdns",
         "multi_source_otbr_topology_mdns", "multi_source_merged", "mdns_border_routers",
-        "mdns_hap", "mdns_matter", "mdns_thread", "system_device_labels",
+        "mdns_hap", "mdns_matter", "mdns_thread", "thread_watch_devices",
+        "system_device_labels",
     )
     original_datasets = [entry for entry in catalog["datasets"] if "unified" not in entry]
     assert tuple(entry["value"] for entry in original_datasets) == expected_ids
+    preserved_datasets = [
+        entry for entry in original_datasets if entry["source"] != "thread-watch"
+    ]
     expected_aliases = {}
-    for old, new in zip(baseline["datasets"], original_datasets, strict=True):
+    for old, new in zip(baseline["datasets"], preserved_datasets, strict=True):
         assert old["files"] == new["files"]
         for field in ("healthEligible", "healthProfile", "mergeStrategy", "rowExtractor", "adaptor",
                       "mergeInputs", "mergeGroups"):
@@ -83,10 +87,10 @@ def test_canonical_catalog_aliases_and_preserved_recipes(node_json):
     assert len(expected_aliases) == 26
     assert catalog["sourceAliases"] == {"merged": "multi-source"}
     sources = {source["value"]: source for source in catalog["datasources"]}
-    assert set(sources) == {
+    assert set(sources) == ({
         catalog["sourceAliases"].get(source["value"], source["value"])
         for source in baseline["datasources"]
-    }
+    } | {"thread-watch"})
     for old in baseline["datasources"]:
         source_id = catalog["sourceAliases"].get(old["value"], old["value"])
         new = sources[source_id]

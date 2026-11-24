@@ -42,6 +42,7 @@ import otbr_restapi_download
 import otbr_restapi_cli
 
 import ha_matter_ws_cli
+import thread_watch_cli
 
 import merge_dataset
 import device_label
@@ -539,6 +540,35 @@ def _add_ha_matter_ws_commands(subparsers: argparse._SubParsersAction) -> None:
 
 
 # type: ignore[type-arg]
+def _add_thread_watch_commands(subparsers: argparse._SubParsersAction) -> None:
+    thread_watch = subparsers.add_parser(
+        "thread-watch",
+        help="Collect a bounded Thread Watch devices inventory",
+        description="Collect a bounded Thread Watch devices inventory",
+    )
+    thread_watch.add_argument("--host", default=None)
+    thread_watch.add_argument("--port", default=None)
+    thread_watch.add_argument("--uri", default=None)
+    thread_watch.add_argument("--connect-timeout", type=float, default=None)
+    thread_watch.add_argument("--request-timeout", type=float, default=None)
+    thread_watch.add_argument("--datadir", default=argparse.SUPPRESS, metavar="DIR")
+    thread_watch.add_argument(
+        "--output", "-o", default=argparse.SUPPRESS, metavar="FILE"
+    )
+    thread_watch.add_argument("--no-progress", action="store_true", default=False)
+    thread_watch.add_argument("--no-stdout-json", action="store_true", default=False)
+    thread_watch.add_argument(
+        "--debug", "-d", action="store_true", default=argparse.SUPPRESS
+    )
+    commands = thread_watch.add_subparsers(
+        dest="thread_watch_command", required=False
+    )
+    devices = commands.add_parser("devices")
+    device_commands = devices.add_subparsers(dest="thread_watch_devices_command")
+    device_commands.add_parser("fetch-all")
+
+
+# type: ignore[type-arg]
 def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:
     """Build the flattened merge commands."""
 
@@ -607,6 +637,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_otbr_cli_commands(subparsers)
     _add_otbr_restapi_commands(subparsers)
     _add_ha_matter_ws_commands(subparsers)
+    _add_thread_watch_commands(subparsers)
     _add_process_commands(subparsers)
     _add_system_commands(subparsers)
     _add_merge_commands(subparsers)
@@ -626,6 +657,9 @@ def build_parser() -> argparse.ArgumentParser:
     ha-matter-ws
         usage: td_cli ha-matter-ws [-h] {server-info,device,devices,thread,diagnostics,mesh-diagnostics,topology,all} ...
 
+    thread-watch
+        usage: td_cli thread-watch [-h] {devices} ...
+
     mdns
         usage: td_cli mdns [-h] [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
 
@@ -639,7 +673,7 @@ def build_parser() -> argparse.ArgumentParser:
         usage: td_cli system [-h] backups {create,restore} ...
 
     source-probe
-        usage: td_cli source-probe [-h] --source {otbr-cli,otbr-restapi,ha-matter-ws} [--json]
+        usage: td_cli source-probe [-h] --source {otbr-cli,otbr-restapi,ha-matter-ws,thread-watch} [--json]
 
     merge-dataset
         usage: td_cli merge-dataset [-h] ...
@@ -654,6 +688,7 @@ def build_parser() -> argparse.ArgumentParser:
         "otbr-cli": subparsers._name_parser_map["otbr-cli"],
         "otbr-restapi": subparsers._name_parser_map["otbr-restapi"],
         "ha-matter-ws": subparsers._name_parser_map["ha-matter-ws"],
+        "thread-watch": subparsers._name_parser_map["thread-watch"],
         "process-eve": subparsers._name_parser_map["process-eve"],
         "health": subparsers._name_parser_map["health"],
         "system": subparsers._name_parser_map["system"],
@@ -1259,6 +1294,45 @@ def _dispatch_ha_matter_ws(
     )
 
 
+def _dispatch_thread_watch(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    sub_parser = parser._subcommand_parsers["thread-watch"]  # type: ignore[attr-defined]
+    command = getattr(args, "thread_watch_command", None)
+    if not command:
+        sub_parser.print_help()
+        return 0
+    nested = getattr(args, "thread_watch_devices_command", None)
+    if not nested:
+        return _normalize_module_rc(
+            thread_watch_cli.main([command, "--help"]), "thread_watch_cli.main"
+        )
+    forwarded: list[str] = []
+    for attribute, option in (
+        ("datadir", "--datadir"),
+        ("host", "--host"),
+        ("port", "--port"),
+        ("uri", "--uri"),
+        ("connect_timeout", "--connect-timeout"),
+        ("request_timeout", "--request-timeout"),
+        ("output", "--output"),
+    ):
+        value = getattr(args, attribute, None)
+        if value is not None:
+            forwarded += [option, str(value)]
+    for attribute, option in (
+        ("no_progress", "--no-progress"),
+        ("no_stdout_json", "--no-stdout-json"),
+        ("debug", "--debug"),
+    ):
+        if getattr(args, attribute, False):
+            forwarded.append(option)
+    forwarded += [command, nested, *extra_args]
+    return _normalize_module_rc(
+        thread_watch_cli.main(forwarded), "thread_watch_cli.main"
+    )
+
+
 def _dispatch_merge(
     args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
@@ -1299,6 +1373,7 @@ _FAMILY_DISPATCHERS = {
     "mdns": _dispatch_mdns,
     "otbr-restapi": _dispatch_otbr_restapi,
     "ha-matter-ws": _dispatch_ha_matter_ws,
+    "thread-watch": _dispatch_thread_watch,
     "process-eve": _dispatch_process_eve,
     "health": _dispatch_health,
     "system": _dispatch_system,
@@ -1347,6 +1422,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args, parser)
 
     single_record_json_output = (
+        args.command == "thread-watch"
+    ) or (
         args.command in ("device-label", "merge-extaddr")
         and any(option.partition("=")[0] in (
             "--read-extaddr", "--update-extaddr", "--sync-eui", "--suggest-ha-matter", "--suggest-hap",

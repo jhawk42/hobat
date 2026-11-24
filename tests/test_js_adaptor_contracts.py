@@ -95,7 +95,7 @@ def test_pinned_adaptor_outputs_match_exact_baseline(node_json) -> None:
 def test_source_adaptors_emit_through_shared_model() -> None:
     modules = sorted((REPO_ROOT / "src" / "js").glob("tdash-adaptor-*.js"))
     sources = [module for module in modules if module.stem not in {"tdash-adaptor-shared", "tdash-adaptor-model"}]
-    assert len(sources) == 7
+    assert len(sources) == 8
     for module in sources:
         code = module.read_text(encoding="utf-8")
         assert "emitThroughAdaptorModel(" in code or "emitAdaptorResult(" in code, module.name

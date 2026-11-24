@@ -183,7 +183,7 @@ def test_selector_rollout_keeps_explicit_recipes_and_fast_same_source_workflows(
     from td_dataset_catalog import load_dataset_catalog, resolve_dataset
 
     catalog = load_dataset_catalog()
-    assert len(catalog["datasets"]) == 43
+    assert len(catalog["datasets"]) == 44
     by_id = {entry["value"]: entry for entry in catalog["datasets"]}
     assert {
         source["value"]: source["primary_dataset_value"]
@@ -194,6 +194,7 @@ def test_selector_rollout_keeps_explicit_recipes_and_fast_same_source_workflows(
         "ha-matter-ws": "ha_matter_ws_unified",
         "multi-source": "multi_source_unified",
         "mdns": "mdns_unified",
+        "thread-watch": "thread_watch_devices",
     }
     assert {
         source["value"]: source["default_dataset_value"]
@@ -203,6 +204,7 @@ def test_selector_rollout_keeps_explicit_recipes_and_fast_same_source_workflows(
         "otbr-restapi": "otbr_restapi_devices_diagnostics_list",
         "ha-matter-ws": "ha_matter_ws_matter_topology",
         "multi-source": "multi_source_unified",
+        "thread-watch": "thread_watch_devices",
     }
     retired = {
         "otbr_cli_topology", "otbr_restapi_topology", "ha_matter_ws_topology_merge",
@@ -211,7 +213,7 @@ def test_selector_rollout_keeps_explicit_recipes_and_fast_same_source_workflows(
     assert {value for value in retired if by_id[value].get("selectable", True) is False} == retired
     for value in retired:
         assert resolve_dataset(catalog, value) == by_id[value]
-    assert sum(entry.get("selectable", True) for entry in by_id.values()) == 39
+    assert sum(entry.get("selectable", True) for entry in by_id.values()) == 40
     for pending in ("multi_source_merged",):
         assert by_id[pending].get("selectable", True)
     for source in catalog["datasources"]:

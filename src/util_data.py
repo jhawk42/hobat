@@ -521,7 +521,18 @@ def save_final_json(
         writer(data, filename)
     else:
         writer(data, filename, indent=indent, add_trailing_newline=add_trailing_newline)
-    if writer is save_json_atomic and Path(filename).name.startswith(("td-otbr-cli-", "td-otbr-restapi-", "td-ha-matter-ws-", "td-mdns-scopes-", "td-eve-")):
+    if (
+        writer is save_json_atomic
+        and Path(filename).name.startswith(
+            (
+                "td-otbr-cli-",
+                "td-otbr-restapi-",
+                "td-ha-matter-ws-",
+                "td-mdns-scopes-",
+                "td-eve-",
+            )
+        )
+    ):
         from td_network_identity import resolve_network_scope
 
         write_network_scope(

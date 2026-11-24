@@ -22,8 +22,14 @@ def archived_health_catalog(tmp_path_factory, monkeypatch):
 	import td_health_manifest_history
 
 	archive = json.loads(td_health_manifest_history.HISTORY_PATH.read_text())
-	prior = archive["revisions"].pop()
-	assert prior["manifestDigest"] == "8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81"
+	retained_digest = "8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81"
+	index = next(
+		index
+		for index, revision in enumerate(archive["revisions"])
+		if revision["manifestDigest"] == retained_digest
+	)
+	prior = archive["revisions"].pop(index)
+	assert prior["manifestDigest"] == retained_digest
 	contract_dir = tmp_path_factory.mktemp("retained-health-contract")
 	manifest_path = contract_dir / "retained-manifest.json"
 	history_path = contract_dir / "retained-manifest-history.json"

@@ -17,16 +17,25 @@ import {
   enrichRawFiles,
   enrichRows,
   setStaticDeviceLabel,
+  shouldRetryThreadWatchRepair,
 } from "../../src/js/tdash-dataset.js";
 import { normalizeRows } from "../../src/js/tdash-merge.js";
 import { normalizeDatasetPayload } from "../../src/js/tdash-utils.js";
-import { buildDeviceProjection } from "../../src/js/tdash-device-projection.js";
+import {
+  buildDeviceProjection,
+  buildDeviceProjections,
+} from "../../src/js/tdash-device-projection.js";
 import { ADAPTOR_HANDLERS, runAdaptor } from "../../src/js/tdash-adaptors.js";
+import {
+  createTopologyViewModel,
+  resolveTopologyNodeId,
+} from "../../src/js/tdash-topology-view-model.js";
 import {
   computeTopologyCapabilities,
   isNodeVisibleByFilter,
   isRowVisibleByNodeFilter,
 } from "../../src/js/tdash-filters.js";
+import { findTableRowByDeviceId } from "../../src/js/tdash-table-renderer.js";
 
 
 function entry(overrides = {}) {
@@ -254,6 +263,280 @@ setDatasetCatalog(DATASET_CATALOG_FALLBACK);
 
 const haMatterSource = DATASOURCE_REGISTRY.find((source) => source.value === "ha-matter-ws");
 assert.equal(haMatterSource?.default_dataset_value, "ha_matter_ws_matter_topology");
+const threadWatchSource = DATASOURCE_REGISTRY.find((source) => source.value === "thread-watch");
+assert.equal(threadWatchSource?.default_dataset_value, "thread_watch_devices");
+const threadWatchEntry = DATASET_REGISTRY.find(
+  (dataset) => dataset.value === "thread_watch_devices",
+);
+assert.equal(threadWatchEntry?.defaultView, "topology");
+assert.equal(
+  shouldRetryThreadWatchRepair(
+    "/api/data/td-thread-watch-devices.json",
+    409,
+    { "Cache-Control": "max-age=60" },
+  ),
+  true,
+);
+assert.equal(
+  shouldRetryThreadWatchRepair(
+    "/api/data/td-thread-watch-devices.json",
+    409,
+    { "Cache-Control": "only-if-cached, max-age=31536000" },
+  ),
+  false,
+);
+assert.equal(
+  shouldRetryThreadWatchRepair("/api/data/other.json", 409, {}),
+  false,
+);
+const threadWatchRows = [
+  {
+    type: "threadDevice",
+    extAddress: "AABBCCDDEEFF0011",
+    rloc16: "0x9001",
+    role: null,
+    deviceLabel: "duplicate one",
+    threadWatch: {
+      addr: "AABBCCDDEEFF0011",
+      leader: true,
+      dotted: { "a.b": 1 },
+      key_sequences: { latest: 0 },
+    },
+    isLeader: true,
+  },
+  {
+    type: "threadDevice",
+    extAddress: "AABBCCDDEEFF0011",
+    rloc16: "0x9000",
+    role: "router",
+    isRouter: true,
+    routerId: 36,
+    deviceLabel: "duplicate two",
+    threadWatch: {
+      addr: "AABBCCDDEEFF0011",
+      leader: false,
+      "unsafe.name": 9007199254740993,
+    },
+  },
+  {
+    type: "threadDevice",
+    extAddress: "BBCCDDEEFF001122",
+    rloc16: "0x9001",
+    role: "child",
+    parentExtAddress: "AABBCCDDEEFF0011",
+    parentRouterId: 36,
+    deviceLabel: "derived child",
+    children: undefined,
+    threadWatch: {
+      addr: "BBCCDDEEFF001122",
+      rloc16: "9001",
+      role: "child",
+      router_id: 36,
+      parent_addr: "AABBCCDDEEFF0011",
+    },
+  },
+  {
+    type: "threadDevice",
+    deviceLabel: "identity-less",
+    threadWatch: { name: "identity-less", future: [null, false, 0] },
+  },
+];
+const normalizedThreadWatchFile = normalizeDatasetFilePayload(
+  threadWatchEntry,
+  0,
+  structuredClone(threadWatchRows),
+);
+assert.deepEqual(
+  normalizedThreadWatchFile.map((row) => row.threadWatch),
+  threadWatchRows.map((row) => row.threadWatch),
+);
+const threadWatchAssembly = buildDatasetRows(
+  threadWatchEntry,
+  [normalizedThreadWatchFile],
+  { loadGeneration: "fixture" },
+);
+assert.deepEqual(
+  threadWatchAssembly.rows.map((row) => row.threadWatch),
+  threadWatchRows.map((row) => row.threadWatch),
+);
+assert.deepEqual(
+  threadWatchAssembly.rows.map((row) => row._threadWatchRowId),
+  ["tw:fixture:0", "tw:fixture:1", "tw:fixture:2", "tw:fixture:3"],
+);
+assert.ok(threadWatchAssembly.rows.every((row) => row["mode.device"] === undefined));
+const threadWatchDataset = {
+  entry: threadWatchEntry,
+  rawFiles: [normalizedThreadWatchFile],
+  rows: threadWatchAssembly.rows,
+  adaptorRows: threadWatchAssembly.adaptorRows,
+};
+const threadWatchAdaptor = runAdaptor(threadWatchDataset);
+assert.equal(threadWatchAdaptor.nodeData.length, 4);
+assert.equal(threadWatchAdaptor.edgeData.length, 1);
+assert.equal(threadWatchAdaptor.rawByIdForDetails.size, 4);
+assert.equal(
+  threadWatchAdaptor.nodeData.find(
+    (node) => node.id === threadWatchAssembly.rows[1]._threadWatchRowId,
+  ).size,
+  45,
+);
+assert.equal(
+  threadWatchAdaptor.nodeData.find(
+    (node) => node.id === threadWatchAssembly.rows[1]._threadWatchRowId,
+  ).themeRole,
+  "router",
+);
+assert.equal(threadWatchAdaptor.edgeData[0].from, threadWatchAssembly.rows[1]._threadWatchRowId);
+assert.equal(threadWatchAdaptor.edgeData[0].to, threadWatchAssembly.rows[2]._threadWatchRowId);
+const publishedChild = {
+  role: "child",
+  rloc16: "0x9001",
+  parentExtAddress: "AABBCCDDEEFF0011",
+};
+const published = buildDatasetRows(threadWatchEntry, [[
+  {
+    ...threadWatchRows[1],
+    children: [{ rloc16: "0x9001" }, { rloc16: "0x9001" }],
+    totalChildren: 2,
+  },
+  { ...publishedChild, threadWatch: { name: "first" } },
+  { ...publishedChild, threadWatch: { name: "second" } },
+  { ...publishedChild, rloc16: "0x9002" },
+  { ...publishedChild, rloc16: "0x9401" },
+]]);
+const publishedAdaptor = runAdaptor({ entry: threadWatchEntry, rawFiles: [published.rows], ...published });
+assert.deepEqual(
+  publishedAdaptor.edgeData.map((edge) => edge.to),
+  published.rows.slice(1, 3).map((row) => row._threadWatchRowId),
+);
+assert.equal(publishedAdaptor.edgeData.length, published.rows[0].totalChildren);
+assert.deepEqual(
+  threadWatchAdaptor.edgeData[0].linkCategories,
+  ["default_children"],
+);
+assert.equal(threadWatchAdaptor.edgeData[0].linkQuality, undefined);
+assert.equal(threadWatchAdaptor.edgeData[0].linkMargin, undefined);
+assert.equal(threadWatchAdaptor.edgeData[0].averageRssi, undefined);
+assert.equal(threadWatchAdaptor.edgeData[0].width, 8);
+assert.equal(threadWatchAdaptor.edgeData[0].themeColorKey, "lqParentChild");
+assert.equal(
+  threadWatchAdaptor.nodeData.find(
+    (node) => node.id === threadWatchAssembly.rows[3]._threadWatchRowId,
+  ).shape,
+  "dot",
+);
+assert.equal(
+  threadWatchAdaptor.nodeData.find(
+    (node) => node.id === threadWatchAssembly.rows[3]._threadWatchRowId,
+  ).threadWatchRoleUnknown,
+  true,
+);
+assert.equal(buildDeviceProjection(threadWatchAssembly.rows[0]).isRouter, false);
+assert.equal(buildDeviceProjection(threadWatchAssembly.rows[0]).isLeader, true);
+assert.equal(
+  findTableRowByDeviceId(
+    threadWatchAssembly.rows,
+    threadWatchAssembly.rows[1]._threadWatchRowId,
+  ),
+  threadWatchAssembly.rows[1],
+);
+assert.equal(findTableRowByDeviceId(threadWatchAssembly.rows, "aabbccddeeff0011"), null);
+const invalidRlocRows = buildDatasetRows(
+  threadWatchEntry,
+  [[
+    {
+      ...threadWatchRows[1],
+      rloc16: null,
+      _threadWatchRowId: undefined,
+    },
+    {
+      ...threadWatchRows[2],
+      rloc16: null,
+    },
+  ]],
+  { loadGeneration: "invalid" },
+);
+assert.equal(runAdaptor({
+  entry: threadWatchEntry,
+  rawFiles: [invalidRlocRows],
+  rows: invalidRlocRows.rows,
+}).edgeData.length, 0);
+const ambiguousParentRows = [
+  {
+    type: "threadDevice",
+    extAddress: "aaaaaaaaaaaaaaaa",
+    rloc16: "0x8800",
+    role: "router",
+    isRouter: true,
+  },
+  {
+    type: "threadDevice",
+    extAddress: "aaaaaaaaaaaaaaaa",
+    rloc16: "0x9000",
+    role: "router",
+    isRouter: true,
+  },
+  {
+    type: "threadDevice",
+    extAddress: "bbbbbbbbbbbbbbbb",
+    rloc16: "0x9001",
+    role: "child",
+    parentExtAddress: "aaaaaaaaaaaaaaaa",
+  },
+];
+const ambiguousParentAssembly = buildDatasetRows(
+  threadWatchEntry,
+  [ambiguousParentRows],
+  { loadGeneration: "ambiguous" },
+);
+assert.equal(runAdaptor({
+  entry: threadWatchEntry,
+  rawFiles: [ambiguousParentRows],
+  rows: ambiguousParentAssembly.rows,
+}).edgeData.length, 0);
+const threadWatchView = createTopologyViewModel(
+  threadWatchAdaptor,
+  buildDeviceProjections(threadWatchAssembly.rows),
+);
+assert.equal(
+  resolveTopologyNodeId(threadWatchView, threadWatchAssembly.rows[1]),
+  threadWatchAssembly.rows[1]._threadWatchRowId,
+);
+assert.equal(
+  resolveTopologyNodeId(threadWatchView, {
+    ...threadWatchAssembly.rows[1],
+    _threadWatchRowId: "tw:stale:1",
+  }),
+  null,
+);
+assert.deepEqual(enrichRows(threadWatchAssembly.rows, threadWatchEntry), threadWatchAssembly.rows);
+assert.deepEqual(
+  enrichRawFiles([normalizedThreadWatchFile], threadWatchEntry),
+  [normalizedThreadWatchFile],
+);
+const rotationRows = [
+  threadWatchRows[1],
+  {
+    ...threadWatchRows[2],
+    extAddress: "ccddeeff00112233",
+    threadWatch: { rotated_to: "bbccddeeff001122", quiet: false },
+  },
+  { ...threadWatchRows[2], threadWatch: { rotated_to: null, quiet: true } },
+  { ...threadWatchRows[3], deviceLabel: threadWatchRows[2].deviceLabel },
+];
+const rotationAssembly = buildDatasetRows(threadWatchEntry, [rotationRows]);
+assert.deepEqual(rotationAssembly.rows.map((row) => row._threadWatchRowId), [
+  "tw:standalone:0", "tw:standalone:2", "tw:standalone:3",
+]);
+assert.deepEqual(rotationAssembly.rows[1].threadWatch, { rotated_to: null, quiet: true });
+assert.equal(rotationRows[1].threadWatch.rotated_to, "bbccddeeff001122");
+const rotationAdaptor = runAdaptor({
+  entry: threadWatchEntry,
+  rawFiles: [rotationRows],
+  ...rotationAssembly,
+});
+assert.equal(rotationAdaptor.nodeData.length, 3);
+assert.deepEqual(rotationAdaptor.edgeData.map((edge) => edge.to), ["tw:standalone:2"]);
 const haMatterDashboard = {
   diagnostics: [{ nodeId: 1, branch: "diagnostics" }],
   meshDiagnostics: [{ nodeId: 2, branch: "meshDiagnostics" }],

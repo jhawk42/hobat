@@ -1695,7 +1695,7 @@ function renderCurrentView({ force = false } = {}) {
       adaptorRows: currentDataset.adaptorRows
         ? enrichRows(currentDataset.adaptorRows)
         : undefined,
-      rawFiles: enrichRawFiles(currentDataset.rawFiles),
+      rawFiles: enrichRawFiles(currentDataset.rawFiles, currentDataset.entry),
     }
     : currentDataset;
 

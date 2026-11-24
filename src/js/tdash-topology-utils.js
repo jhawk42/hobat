@@ -694,7 +694,9 @@ export function buildNodeLabelFont({ fontSize = 13, isRouter = false } = {}) {
 export function computeDatasetCounts(nodeData, edgeData) {
   const borderRouters = nodeData.filter((n) => n.isBorderRouter === true).length;
   const routers       = nodeData.filter((n) => n.isRouter === true && !n.isBorderRouter).length;
-  const children      = nodeData.filter((n) => n.isRouter !== true).length;
+  const children      = nodeData.filter(
+    (n) => n.isRouter !== true && n.threadWatchRoleUnknown !== true,
+  ).length;
   const visibleEdges  = edgeData.filter((e) => !e.baseHidden);
   return {
     devices:       nodeData.length,

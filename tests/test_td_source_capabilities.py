@@ -16,6 +16,7 @@ from td_const import (
     HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
     MDNS_SCOPES_BR_FILENAME,
     OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+    THREAD_WATCH_DEVICES_FILENAME,
 )
 import td_source_capabilities
 from td_source_capabilities import SourceCapabilityService
@@ -24,11 +25,14 @@ from util_data import write_network_scope
 import td_webserver
 import td_unified_dataset
 import td_cli
+import thread_watch_cli
 from td_dataset_catalog import load_dataset_catalog
 from util_data import network_scope_path
 
 
-@pytest.mark.parametrize("source", ("otbr-cli", "otbr-restapi", "ha-matter-ws"))
+@pytest.mark.parametrize(
+    "source", ("otbr-cli", "otbr-restapi", "ha-matter-ws", "thread-watch")
+)
 def test_live_probe_bypasses_cached_files_and_probe_ttl(monkeypatch, tmp_path, source):
     monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "0")
     monkeypatch.setenv("TD_DATA_DIR", str(tmp_path))
@@ -96,6 +100,9 @@ def test_source_probe_cli_json_and_exit_contract(monkeypatch, capsys, caplog, ou
         ("ha-matter-ws", "TD_HA_MATTER_WS_PORT", "-1"),
         ("ha-matter-ws", "TD_HA_MATTER_WS_PORT", "65536"),
         ("ha-matter-ws", "TD_HA_MATTER_WS_HOST", "invalid host"),
+        ("thread-watch", "TD_THREAD_WATCH_HOST", "invalid host"),
+        ("thread-watch", "TD_THREAD_WATCH_PORT", "65536"),
+        ("thread-watch", "TD_THREAD_WATCH_URI", "http://user:pass@watch.test"),
     ],
 )
 def test_source_probe_configuration_error_is_not_unavailability(monkeypatch, capsys, source, variable, value):
@@ -149,6 +156,58 @@ def test_live_probe_does_not_hide_unexpected_client_errors(monkeypatch, capsys, 
         monkeypatch.setattr(td_source_capabilities, "HaMatterWsClient", MagicMock(return_value=client))
     assert td_cli.main(["source-probe", "--source", source, "--json"]) == 2
     assert json.loads(capsys.readouterr().out)["probe"]["reason"] == "probe-execution-error"
+
+
+def test_thread_watch_valid_cache_skips_probe_and_invalid_pair_is_unavailable(
+    monkeypatch, tmp_path
+) -> None:
+    output = tmp_path / THREAD_WATCH_DEVICES_FILENAME
+    thread_watch_cli._publish([{"threadWatch": {"name": "fixture"}}], output)
+    probe = AsyncMock(return_value="unreachable")
+    service = SourceCapabilityService(probes={"thread-watch": probe})
+
+    valid = asyncio.run(service.capabilities(tmp_path))
+    assert valid["sources"]["thread-watch"]["state"] == "cached"
+    assert valid["files"][THREAD_WATCH_DEVICES_FILENAME]["cached"] is True
+    probe.assert_not_awaited()
+
+    network_scope_path(output).write_text("{}")
+    invalid = asyncio.run(service.capabilities(tmp_path))
+    assert invalid["sources"]["thread-watch"]["state"] == "probe-failed"
+    assert invalid["files"][THREAD_WATCH_DEVICES_FILENAME]["cached"] is False
+    assert (
+        invalid["files"][THREAD_WATCH_DEVICES_FILENAME]["cacheError"]
+        == "invalid-sidecar"
+    )
+    probe.assert_awaited_once()
+
+
+def test_thread_watch_transport_and_protocol_failures_are_bounded(monkeypatch) -> None:
+    probe = AsyncMock(side_effect=td_source_capabilities.ThreadWatchTransportError("offline"))
+    monkeypatch.setattr(td_source_capabilities, "fetch_thread_watch_devices", probe)
+    result = asyncio.run(td_source_capabilities.probe_source("thread-watch"))
+    assert result["probe"] == {"state": "failed", "reason": "unreachable"}
+
+    probe.side_effect = td_source_capabilities.ThreadWatchInvalidResponseError("invalid")
+    result = asyncio.run(td_source_capabilities.probe_source("thread-watch"))
+    assert result["probe"] == {"state": "failed", "reason": "invalid-response"}
+
+
+def test_thread_watch_invalid_capability_configuration_is_probe_error(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("TD_THREAD_WATCH_URI", "http://user:private@watch.test")
+    probe = AsyncMock(return_value=None)
+    service = SourceCapabilityService(probes={"thread-watch": probe})
+
+    result = asyncio.run(service.capabilities(tmp_path))
+
+    assert result["sources"]["thread-watch"]["state"] == "probe-error"
+    assert result["sources"]["thread-watch"]["probe"] == {
+        "state": "error",
+        "reason": "invalid-configuration",
+    }
+    probe.assert_not_awaited()
 
 
 def test_live_probe_deadline_cancels_stalled_probe(monkeypatch):

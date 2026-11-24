@@ -334,7 +334,7 @@ export function normalizeRowMergeAliases(row, options = {}) {
   }
   // Step 3: derive mode.device (FTD/MTD) when not already set
   const existingModeDevice = normalized?.mode?.device ?? normalized?.["mode.device"];
-  if (!existingModeDevice) {
+  if (!existingModeDevice && options.source !== "thread-watch") {
     const derived = deriveModeDevice(normalized);
     if (derived) {
       if (isPlainObject(normalized.mode)) {
@@ -742,6 +742,19 @@ function _createMatterEndpointArrayNode(path, records) {
   return listItem;
 }
 
+function detailScalarText(value) {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  let text = value === null ? "null" : String(value);
+  if (
+    typeof value === "number"
+    && (Number.isInteger(value) && !Number.isSafeInteger(value)
+      || !Number.isFinite(value))
+  ) {
+    text += " (not exact; inspect the cached JSON)";
+  }
+  return text;
+}
+
 function _renderObjectEntries(obj, path = "") {
   return Object.entries(obj).map(([key, value]) => {
     const fieldPath = path ? `${path}.${key}` : key;
@@ -775,8 +788,7 @@ export function createDetailValueNode(key, value, fieldPath = key) {
     return _createKvRow(displayLabel, "n/a", true, fieldPath);
   }
   if (typeof value !== "object") {
-    const text = typeof value === "boolean" ? (value ? "true" : "false") : String(value);
-    return _createKvRow(displayLabel, text, false, fieldPath);
+    return _createKvRow(displayLabel, detailScalarText(value), false, fieldPath);
   }
 
   // Empty array
@@ -803,7 +815,7 @@ export function createDetailValueNode(key, value, fieldPath = key) {
     details.appendChild(summary);
     const items = value.map((item) => {
       const subLi = document.createElement("li");
-      subLi.textContent = item === null ? "null" : String(item);
+      subLi.textContent = detailScalarText(item);
       return subLi;
     });
     details.appendChild(_createSubList(items));
@@ -823,7 +835,7 @@ export function createDetailValueNode(key, value, fieldPath = key) {
     const items = value.map((item, idx) => {
       const subLi = document.createElement("li");
       if (item === null || typeof item !== "object") {
-        subLi.textContent = item === null ? "null" : String(item);
+        subLi.textContent = detailScalarText(item);
         return subLi;
       }
       const idxSpan = document.createElement("span");
@@ -842,9 +854,18 @@ export function createDetailValueNode(key, value, fieldPath = key) {
   const li = document.createElement("li");
   const details = document.createElement("details");
   details.className = "detail-value-collapsible";
-  details.open = true;
+  details.open = fieldPath !== "threadWatch";
   const summary = document.createElement("summary");
-  summary.textContent = `${displayLabel}:`;
+  summary.textContent = fieldPath === "threadWatch"
+    ? "Thread Watch raw record:"
+    : `${displayLabel}:`;
+  if (fieldPath === "threadWatch") {
+    const note = document.createElement("p");
+    note.className = "detail-cache-note";
+    note.textContent =
+      "Values shown here are the retained API object. Unsafe integers are not authoritative in JavaScript; inspect the cached JSON.";
+    details.appendChild(note);
+  }
   details.appendChild(summary);
   details.appendChild(_createSubList(_renderObjectEntries(value, fieldPath)));
   li.appendChild(details);
@@ -1090,6 +1111,10 @@ export function flattenObjectEntries(value, path = "", entries = []) {
     }
     keys.forEach((key) => {
       const fieldPath = path ? `${path}.${key}` : key;
+      if (!path && key === "threadWatch") {
+        entries.push([fieldPath, value[key]]);
+        return;
+      }
       if (
         fieldPath === "diagnosticCoverage"
         && isPlainObject(value[key])
@@ -1118,7 +1143,7 @@ export function flattenObjectEntries(value, path = "", entries = []) {
 }
 
 export function shouldExcludeDetailPath(_path, _context) {
-  return false;
+  return _path === "_threadWatchRowId";
 }
 
 /**

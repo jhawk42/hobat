@@ -302,7 +302,7 @@ class TestTopLevelCommands(unittest.TestCase):
         options_block = config_text.split("options:", 1)[1].split("schema:", 1)[0]
         self.assertNotIn("TD_DEBUG_LEVEL", options_block)
 
-    def test_addon_debug_level_launcher_export(self):
+    def test_addon_launcher_exports_configured_options(self):
         repository_root = Path(__file__).resolve().parents[1]
         run_script = repository_root / "addon_hobat" / "run.sh"
         launcher_stub = """
@@ -310,6 +310,9 @@ import os
 print(os.environ.get("TD_DEBUG_LEVEL", "__UNSET__"))
 print(os.environ["TD_DEVICE_ACTIONS_ENABLED"])
 print(os.environ["TD_DEVICE_RESET_ENABLED"])
+print(os.environ["TD_THREAD_WATCH_HOST"])
+print(os.environ["TD_THREAD_WATCH_PORT"])
+print(os.environ.get("TD_THREAD_WATCH_URI", "__UNSET__"))
 """
         bash_stub = """
 bashio::config.has_value() {
@@ -322,6 +325,8 @@ bashio::config() {
         ot_rest_listen_port) printf '8081' ;;
         ha_matter_ws_host) printf '127.0.0.1' ;;
         ha_matter_ws_port) printf '5580' ;;
+        thread_watch_host) printf 'watch.example' ;;
+        thread_watch_port) printf '9191' ;;
         device_actions_enabled|device_reset_enabled) printf 'true' ;;
     esac
 }
@@ -338,6 +343,8 @@ source "$2"
                 with self.subTest(value=value):
                     environment = os.environ.copy()
                     environment.pop("TD_DEBUG_LEVEL", None)
+                    for suffix in ("HOST", "PORT", "URI"):
+                        environment.pop(f"TD_THREAD_WATCH_{suffix}", None)
                     environment["CONFIGURED"] = "0" if value is None else "1"
                     environment["DEBUG_VALUE"] = value or ""
                     completed = subprocess.run(
@@ -358,7 +365,9 @@ source "$2"
 
                     output = completed.stdout.splitlines()
                     self.assertEqual(output[0], value or "__UNSET__")
-                    self.assertEqual(output[1:], ["true", "true"])
+                    self.assertEqual(
+                        output[1:], ["true", "true", "watch.example", "9191", "__UNSET__"]
+                    )
 
 
 # ---------------------------------------------------------------------------

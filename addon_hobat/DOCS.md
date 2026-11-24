@@ -22,6 +22,15 @@ Only nodes commissioned to that Matter controller are visible. Unavailable or
 sleeping nodes may omit diagnostics, Wi-Fi Matter nodes do not expose Thread
 diagnostics, and Matter collection does not replace OTBR network-wide data.
 
+Thread Watch is optional. Set `thread_watch_host` to the hostname or IP
+address of a trusted review server (without `http://`) and `thread_watch_port`
+to its HTTP port, then restart the add-on. The defaults are `127.0.0.1` and
+`9180`. The launcher exports `TD_THREAD_WATCH_HOST` and `TD_THREAD_WATCH_PORT`.
+If you previously set `thread_watch_uri`, replace it with these two settings.
+Host and port use HTTP; standalone CLI use of `--uri` still supports HTTPS.
+These settings do not install or start Thread Watch. Keep the unauthenticated
+review API and retained names and addresses on a trusted network.
+
 ## Optional nightly scheduler
 
 To enable the nightly scheduler set `scheduler_enabled: true` in the
@@ -73,4 +82,10 @@ Select **Home Assistant Matter** to view Devices, Diagnostics, Mesh
 Diagnostics, or Topology. Enable **Cache Only** before Sync when the dashboard
 must not contact Matter Server. Refreshes are serialized under one Matter
 source lock and expensive collections run as cancellable background jobs.
+
+Select **thread-watch > Devices** for its cached passive inventory. Cache Only
+does not collect. A normal Sync or Force Refresh can issue one bounded
+`/api/devices` request. Duplicate and identity-less rows remain independent,
+but the inventory is not a current-membership, merge, roster, or health claim
+and carries an explicit unknown network scope.
 

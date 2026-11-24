@@ -69,11 +69,14 @@ function buildDatasetSnapshot(loadedFiles, rows, adapted, topologyCapabilities, 
 
 const dataDir = process.argv[2] ?? "data";
 const selected = process.argv[3]?.startsWith("--") ? null : process.argv[3];
+const datasetList = process.argv.find((arg) => arg.startsWith("--datasets="));
+const selectedDatasets = datasetList ? new Set(datasetList.slice("--datasets=".length).split(",")) : null;
 const useProjection = process.argv.includes("--projection");
 const shapeOnly = process.argv.includes("--shape-only");
 const comparePaths = process.argv.includes("--compare");
 const results = {};
-for (const entry of DATASET_REGISTRY.filter((item) => !selected || item.value === selected)) {
+for (const entry of DATASET_REGISTRY) {
+  if ((selected && entry.value !== selected) || (selectedDatasets && !selectedDatasets.has(entry.value))) continue;
   const rawFiles = entry.files.map((file) => {
     const filename = path.join(dataDir, file);
     return fs.existsSync(filename) ? JSON.parse(fs.readFileSync(filename, "utf8")) : null;

@@ -35,7 +35,12 @@ from td_health_manifest_history import load_manifest_history
 from td_health_rules import HealthRuleCatalogError
 
 
-PROFILE = load_manifest_history().revisions[-1].datasets["otbr_cli_topology_mdns"].health_profile
+PROFILE = next(
+    revision.datasets["otbr_cli_topology_mdns"].health_profile
+    for revision in load_manifest_history().revisions
+    if revision.manifest_digest
+    == "8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81"
+)
 
 
 def _observation(relationship: RelationshipSample) -> Observation:

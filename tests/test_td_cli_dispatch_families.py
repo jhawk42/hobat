@@ -174,6 +174,49 @@ def test_restapi_global_options_preserve_exact_forwarding_order():
     )
 
 
+def test_thread_watch_dispatch_forwards_owner_options():
+    argv = [
+        "--datadir",
+        "/tmp/td",
+        "thread-watch",
+        "--host",
+        "watch.local",
+        "--port",
+        "9191",
+        "--connect-timeout",
+        "4",
+        "--request-timeout",
+        "8",
+        "--output",
+        "custom.json",
+        "--no-stdout-json",
+        "devices",
+        "fetch-all",
+    ]
+    with patch.object(td_cli.thread_watch_cli, "main", return_value=7) as owner:
+        assert _dispatch(argv) == 7
+
+    owner.assert_called_once_with(
+        [
+            "--datadir",
+            "/tmp/td",
+            "--host",
+            "watch.local",
+            "--port",
+            "9191",
+            "--connect-timeout",
+            "4.0",
+            "--request-timeout",
+            "8.0",
+            "--output",
+            "custom.json",
+            "--no-stdout-json",
+            "devices",
+            "fetch-all",
+        ]
+    )
+
+
 @pytest.mark.parametrize(("raw_rc", "expected_rc"), [(None, 0), (5, 5), ("bad", 1)])
 def test_family_return_codes_use_shared_normalization(raw_rc, expected_rc):
     with patch.object(td_cli.eve_process, "main", return_value=raw_rc):

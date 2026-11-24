@@ -155,6 +155,7 @@ for arbitrary unlabeled secrets in unrelated third-party output.
 | `otbr-cli` | Scan OTBR CLI commands |
 | `otbr-restapi` | Query OTBR REST API commands |
 | `ha-matter-ws` | Collect commissioned-node and native Thread snapshots or run an explicit Matter-node diagnostic |
+| `thread-watch` | Collect the passive Thread Watch devices inventory |
 | `mdns` | Scan Thread-related mDNS scopes |
 | `process-eve` | Parse and enhance an Eve Thread layout file |
 | `health` | Process, inspect, or purge health history |
@@ -174,7 +175,8 @@ for arbitrary unlabeled secrets in unrelated third-party output.
 PYTHONPATH=src python3 -m td_cli source-probe --source otbr-cli --json
 ```
 
-Supported sources are `otbr-cli`, `otbr-restapi`, and `ha-matter-ws`. This
+Supported sources are `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, and
+`thread-watch`. This
 explicit live-only command reuses the bounded source capability probes, but
 does not inspect cached files, reuse earlier probe results, or read/write the
 data directory. The dashboard capabilities endpoint remains cache-first:
@@ -217,9 +219,10 @@ role in `probe.reason` for operator diagnostics, for example:
 
 The shared dashboard probe uses the same role checks and failure reasons;
 cached evidence still bypasses live probing. REST reads node state; HA Matter
-opens a WebSocket and validates its server-info handshake. They do not run
-diagnostics or mDNS discovery. mDNS and system have no equivalent endpoint
-preflight and are not accepted sources.
+opens a WebSocket and validates its server-info handshake; Thread Watch makes
+one bounded `/api/devices` request and validates its envelope without saving
+the body. They do not run diagnostics or mDNS discovery. mDNS and system have
+no equivalent endpoint preflight and are not accepted sources.
 
 The local full and quick collection scripts probe each supported source once,
 immediately before its collection block. Unavailable sources are skipped;
@@ -496,6 +499,47 @@ for `network_topology_updated` events.
 Normal output excludes Matter credentials. Collection is read-only and limited
 to nodes commissioned to the connected controller. Missing diagnostics on an
 unavailable or non-Thread Matter node are not treated as zero values.
+
+### `thread-watch`
+
+```text
+td_cli thread-watch [source-options] devices fetch-all
+```
+
+Source options are `--host`, `--port`, `--uri`, `--connect-timeout`,
+`--request-timeout`, `--datadir`, `--output`, `--no-progress`, `--debug`, and
+`--no-stdout-json`. An explicit `--uri` is a root HTTP(S) URL and wins over
+host/port. Otherwise explicit host/port values combine with
+`TD_THREAD_WATCH_HOST`/`TD_THREAD_WATCH_PORT` and the `localhost`/`9180`
+defaults. With no explicit host/port, `TD_THREAD_WATCH_URI` is used when set.
+Blank configured values are errors rather than fallbacks.
+
+`fetch-all` makes exactly one unfiltered `GET /api/devices`. It disables
+redirects and retries, validates UTF-8 JSON and the complete `devices`
+envelope, rejects credential-bearing field names, and bounds the decompressed
+body at 16 MiB. It writes `td-thread-watch-devices.json` as a top-level array
+after preserving every source object under `threadWatch`. Validated root
+projections include `extAddress`, `rloc16`, `deviceLabel`, parent fields, and
+positive router/Border Router/leader flags. Malformed raw values remain
+inspectable and produce value-free projection warnings.
+After projection, an explicit child row is attached to a unique parent router
+when `parentExtAddress` matches and the child's RLOC16 encodes that router's
+RLOC16. The parent gains an OTBR-style `children` record containing only child
+ID, RLOC16, address, label, and role. No mode, timeout, availability, or link
+quality is inferred.
+
+The final and `td-thread-watch-devices.network.json` companion are published
+under a process lock. The companion always declares unknown network scope and
+binds the exact final bytes with SHA-256. Failures before publication retain
+the previous pair. A companion-write failure returns `7`; a changed final is
+not described as rolled back. If the output directory cannot be prepared,
+the command also returns `7`, before making any request.
+
+Normal stdout is the final JSON array. `--no-stdout-json` is for the web-server
+job so it does not capture the household inventory in subprocess logs. Thread
+Watch is passive recorder state, not fresh OTBR evidence: PAN, parent,
+reception, quiet, HA, and key-history values gain no Unified, merge, roster, or
+health authority.
 
 ### `mdns`
 

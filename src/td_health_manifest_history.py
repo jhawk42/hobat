@@ -75,6 +75,8 @@ _CURRENT_SAMPLE_SUPPORT = MappingProxyType({
 })
 # Reviewed schema-4 producers only; a structurally equivalent recipe is not proof.
 PRODUCER_SAMPLE_SUPPORT = MappingProxyType({
+    "1e753b7af609e9351336edb16cb18ddbc2739947369cfc1aef3e20ffd5c55bd0": _CURRENT_SAMPLE_SUPPORT,
+    "a9d2f9fa3acd706da5db7d58b9bcc7cfb6ea3753922e3b40ed8f27bac0348f2d": _CURRENT_SAMPLE_SUPPORT,
     **{digest: _ORIGINAL_SAMPLE_SUPPORT for digest in _ROSTER_V1},
     "50b5a9f2e71c734a9fe5b8615d0fe7ee3e2a22f3965bd616af6bf1a2c3e05598": _ORIGINAL_SAMPLE_SUPPORT,
     "9ec1668fbd091746f82c6783b219e6e447e29a2ee81b6817f8e3c2aa8c2c9e28": _CURRENT_SAMPLE_SUPPORT,

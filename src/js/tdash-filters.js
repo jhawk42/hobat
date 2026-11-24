@@ -757,13 +757,19 @@ export function getRowRoleProjection(row, modeDevice = undefined) {
   const isBorderRouter = getColumnValue(row, "isBorderRouter") === true;
   const role = toText(getColumnValue(row, "role")).trim().toLowerCase();
   const explicitRouter = getColumnValue(row, "isRouter");
-  const derivedRouter = rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6;
+  const threadWatchRowId = typeof row?._threadWatchRowId === "string";
+  const derivedRouter = !threadWatchRowId
+    && rloc16.startsWith("0x")
+    && rloc16.endsWith("00")
+    && rloc16.length === 6;
   const roleRouter = ["router", "leader", "border router", "border_router", "borderrouter"].includes(role);
   const isRouter = typeof explicitRouter === "boolean"
     ? explicitRouter
-    : role
-      ? roleRouter
-      : derivedRouter;
+    : threadWatchRowId
+      ? false
+      : role
+        ? roleRouter
+        : derivedRouter;
   const isChild = roleValues.some((value) =>
     ["child", "sleepychild", "enddevice", "sleepyenddevice", "reed"].includes(value),
   );

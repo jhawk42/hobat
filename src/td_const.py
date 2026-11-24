@@ -56,6 +56,7 @@ HA_MATTER_WS_THREAD_DIAGNOSTICS_PARTIAL_FILENAME = "td-ha-matter-ws-thread-diagn
 HA_MATTER_WS_THREAD_DIAGNOSTICS_OUTCOME_FILENAME = "td-ha-matter-ws-thread-diagnostics.outcome.json"
 HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME = "td-ha-matter-ws-network-topology.json"
 HA_MATTER_WS_NETWORK_TOPOLOGY_OUTCOME_FILENAME = "td-ha-matter-ws-network-topology.outcome.json"
+THREAD_WATCH_DEVICES_FILENAME = "td-thread-watch-devices.json"
 
 EVE_TOPOLOGY_FILENAME = "td-eve-topology.json"
 THREAD_TOOLS_DIAGNOSTICS_FILENAME = "diagnostics.json"

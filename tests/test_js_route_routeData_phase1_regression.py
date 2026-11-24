@@ -54,15 +54,18 @@ def test_dataset_uses_internal_vs_canonical_route_normalization_modes() -> None:
 
     # Public dataset output should expose canonical route.routeData shape.
     assert "normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT)" in text
-    assert "normalizeDatasetPayload(file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT)" in text
 
 
 def test_dataset_partial_and_final_outputs_use_canonicalized_buffers() -> None:
     text = _read_text(DATASET_JS)
 
     assert "export function buildDatasetRows(entry, rawFiles, options = {})" in text
-    assert "normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT)" in text
-    assert "const canonicalRawFiles = rawFiles.map((file) =>" in text
-    assert "const assembled = buildDatasetRows(entry, rawFiles);" in text
+    assert text.count(
+        "normalizeDatasetFilePayload(entry, index, file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT)"
+    ) == 2
+    assert (
+        "const assembled = buildDatasetRows(entry, rawFiles, { loadGeneration });"
+        in text
+    )
     assert "const { rows, loadedFiles } = assembled;" in text
     assert "rows: assembled.rows" in text

@@ -56,6 +56,16 @@ const allText = (node) => [
  ...node.children.flatMap(allText),
 ].filter(Boolean).join(" ");
 
+const threadWatchRaw = createDetailValueNode(
+  "threadWatch",
+  { addr: "AABB", nested: { "dotted.key": 9007199254740993 } },
+  "threadWatch",
+);
+assert.equal(threadWatchRaw.children[0].open, false);
+assert.equal(threadWatchRaw.children[0].children[0].className, "detail-cache-note");
+assert.match(allText(threadWatchRaw), /not authoritative in JavaScript/);
+assert.match(allText(threadWatchRaw), /not exact; inspect the cached JSON/);
+
 for (const field of ["rloc16", "deviceLabel"]) {
   const identity = createDetailValueNode("Unrelated display label", "identity value", field);
   assert.equal(identity.children[1].className, "detail-kv-value detail-identity-value");

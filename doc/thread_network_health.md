@@ -221,6 +221,12 @@ reviewed sample support is preserved, not inferred from archive membership.
 All earlier archive entries remain immutable. No sample versions,
 coverage, authority, backup/rollback or rerun guarantees change.
 
+The Thread Watch Devices default-view change archives the displaced manifest
+from `d1a793f` (`1e753b7af609e9351336edb16cb18ddbc2739947369cfc1aef3e20ffd5c55bd0`).
+Only presentation changed; health projection
+`a52e4775abae6ea8d0c2a6d8268230fac0de8f423d24c484354c5507748b54c4`
+and its reviewed sample, replay, and target contracts remain unchanged.
+
 After migration, refresh a native assessment from cached snapshots before
 normal dashboard use when the report identifies a policy transition or
 context-dependent current coverage:
@@ -339,6 +345,15 @@ and collision checks. Their saved provenance is not rewritten. The
 predecessor catalog (`43cdeb81065f5241ba0fa328c4eb63ffbdfb8dda231afc66eaca0ec3e71b94a0`)
 is archived with its four Unified producer contracts. The new catalog digest
 is `a9d2f9fa3acd706da5db7d58b9bcc7cfb6ea3753922e3b40ed8f27bac0348f2d`.
+
+The Thread Watch catalog addition displaced that manifest without changing the
+health projection. Revision
+`a9d2f9fa3acd706da5db7d58b9bcc7cfb6ea3753922e3b40ed8f27bac0348f2d`
+is archived with health projection
+`a52e4775abae6ea8d0c2a6d8268230fac0de8f423d24c484354c5507748b54c4`.
+Thread Watch is health-ineligible and has no roster, merge, or Unified recipe;
+archive membership grants no new replay target. Existing replay, lineage,
+rollback, target, and rerun contracts remain unchanged.
 
 A new complete observation can populate a missing roster EUI. Reprocessing
 an identical observation does not insert facts retroactively. Use the

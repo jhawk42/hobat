@@ -58,14 +58,29 @@ function deriveDiagnostics(row, metrics, deviceType, isRouter, isBorderRouter, i
 }
 
 export function buildDeviceProjection(row, index = 0) {
-  const deviceId = row._unifiedRecordId ?? getDeviceIdentityKeys(row)[0] ?? `row:${index}`;
+  const threadWatchRowId = typeof row?._threadWatchRowId === "string"
+    ? row._threadWatchRowId
+    : null;
+  const deviceId = threadWatchRowId
+    ?? row._unifiedRecordId
+    ?? getDeviceIdentityKeys(row)[0]
+    ?? `row:${index}`;
   const rloc16 = toText(getColumnValue(row, "rloc16")).toLowerCase();
   const role = toText(getColumnValue(row, "role")).trim().toLowerCase();
   const explicitRouter = getColumnValue(row, "isRouter");
   const roleRouter = ["router", "leader", "border router", "border_router", "borderrouter"].includes(role);
   const hasRole = typeof explicitRouter === "boolean" || role.length > 0;
-  const derivedRouter = rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6;
-  const isRouter = typeof explicitRouter === "boolean" ? explicitRouter : hasRole ? roleRouter : derivedRouter;
+  const derivedRouter = threadWatchRowId === null
+    && rloc16.startsWith("0x")
+    && rloc16.endsWith("00")
+    && rloc16.length === 6;
+  const isRouter = typeof explicitRouter === "boolean"
+    ? explicitRouter
+    : threadWatchRowId !== null
+      ? false
+      : hasRole
+        ? roleRouter
+        : derivedRouter;
   const roleEvidence = typeof explicitRouter === "boolean" || role.length > 0
     ? "explicit" : derivedRouter ? "rloc16-derived" : "none";
   const deviceType = toText(getColumnValue(row, "mode.device")).toUpperCase();
@@ -102,6 +117,7 @@ export function buildDeviceProjection(row, index = 0) {
   );
   return {
     deviceId,
+    ...(threadWatchRowId ? { _threadWatchRowId: threadWatchRowId } : {}),
     ...(row._unifiedRecordId ? { _unifiedRecordId: row._unifiedRecordId } : {}),
     extAddress: toText(getColumnValue(row, "extAddress")),
     rloc16,

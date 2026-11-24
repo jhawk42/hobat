@@ -8,9 +8,6 @@ import pytest
 from td_dataset_catalog import load_dataset_catalog
 
 
-pytestmark = pytest.mark.requires_data_dir
-
-
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/view_capability_baseline.json"
 ROLE_AUTHORITY_FILTERS = {
@@ -22,10 +19,7 @@ ROLE_AUTHORITY_FILTERS = {
 }
 
 
-def test_cached_view_capabilities_cover_catalog_and_preserve_shape(node_json) -> None:
-    actual = node_json(
-        "tests/js/run-view-capability-snapshot.mjs", "data", "--shape-only", timeout=60,
-    )
+def _legacy_baseline():
     expected = json.loads(FIXTURE.read_text(encoding="utf-8"))
     for entry in load_dataset_catalog()["datasets"]:
         if "unified" in entry and all(
@@ -33,6 +27,16 @@ def test_cached_view_capabilities_cover_catalog_and_preserve_shape(node_json) ->
         ):
             expected[entry["value"]] = expected["otbr_restapi_topology"]
 
+    return expected
+
+
+@pytest.mark.requires_data_dir
+def test_cached_view_capabilities_cover_catalog_and_preserve_shape(node_json) -> None:
+    expected = _legacy_baseline()
+    actual = node_json(
+        "tests/js/run-view-capability-snapshot.mjs", "data",
+        f"--datasets={','.join(expected)}", "--shape-only", timeout=60,
+    )
     assert set(actual) == set(expected)
     for dataset, snapshot in actual.items():
         assert set(snapshot) == set(expected[dataset]), dataset
@@ -50,9 +54,25 @@ def test_cached_view_capabilities_cover_catalog_and_preserve_shape(node_json) ->
         assert all(value is None for value in snapshot["visibility"].values()), dataset
 
 
+def test_thread_watch_view_shape_does_not_require_local_cache(node_json, tmp_path) -> None:
+    (tmp_path / "td-thread-watch-devices.json").write_text(json.dumps([
+        {"type": "threadDevice", "role": "router", "isRouter": True, "threadWatch": {"name": "router"}},
+        {"type": "threadDevice", "threadWatch": {"name": "unknown"}},
+    ]))
+    runner = "tests/js/run-view-capability-snapshot.mjs"
+    assert node_json(runner, str(tmp_path), "--datasets=otbr_restapi_topology", "--shape-only") == {}
+    actual = node_json(runner, str(tmp_path), "thread_watch_devices", "--shape-only")
+    snapshot = actual["thread_watch_devices"]
+    assert snapshot["nodeCount"] == snapshot["rowCount"] == 2
+    assert "main-routers" in snapshot["offered"]["nodeModes"]
+    assert snapshot["edgeCategories"] == []
+
+
+@pytest.mark.requires_data_dir
 def test_projection_matches_legacy_except_documented_role_changes(node_json) -> None:
     comparisons = node_json(
-        "tests/js/run-view-capability-snapshot.mjs", "data", "--compare", timeout=90,
+        "tests/js/run-view-capability-snapshot.mjs", "data",
+        f"--datasets={','.join(_legacy_baseline())}", "--compare", timeout=90,
     )
     for dataset, comparison in comparisons.items():
         assert set(comparison) == {"legacy", "projected"}, dataset

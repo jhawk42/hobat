@@ -1774,6 +1774,23 @@
       ]
     },
     {
+      "source": "thread-watch",
+      "value": "thread_watch_devices",
+      "label": "Devices",
+      "group": "Inventory",
+      "files": [
+        "td-thread-watch-devices.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "thread-watch",
+      "defaultPhysicsProfile": "mesh-compact",
+      "defaultLinkFilter": "all_links",
+      "defaultView": "topology",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false
+    },
+    {
       "source": "system",
       "value": "system_device_labels",
       "label": "ExtAddr to Device Label Map",
@@ -2834,6 +2851,12 @@
       "primary_dataset_value": "mdns_unified"
     },
     {
+      "value": "thread-watch",
+      "label": "thread-watch",
+      "default_dataset_value": "thread_watch_devices",
+      "primary_dataset_value": "thread_watch_devices"
+    },
+    {
       "value": "eve",
       "label": "eve app"
     },
@@ -2990,6 +3013,7 @@
       "td-ha-matter-ws-dashboard.json",
       "td-ha-matter-ws-thread-border-routers.json",
       "td-ha-matter-ws-network-topology.json",
+      "td-thread-watch-devices.json",
       "td-mdns-scopes-br.json",
       "td-mdns-scopes-hap.json",
       "td-mdns-scopes-matter.json",
@@ -3039,7 +3063,8 @@
       "ha-matter-ws-network-topology",
       "ha-matter-ws-merge-topology",
       "router-table",
-      "raw-array"
+      "raw-array",
+      "thread-watch"
     ],
     "physicsProfiles": [
       "mesh-baseline",
@@ -3056,7 +3081,8 @@
       "eve-enhanced": "eve-processed",
       "eve-native": "eve-native",
       "thread-tools-native": "thread-tools-native",
-      "otbr-restapi": "otbr-restapi"
+      "otbr-restapi": "otbr-restapi",
+      "thread-watch": "raw-array"
     },
     "valuePrefixBySource": {
       "otbr-cli": "otbr_cli_",
@@ -3066,7 +3092,8 @@
       "thread-tools": "thread_tools_",
       "mdns": "mdns_",
       "system": "system_",
-      "multi-source": "multi_source_"
+      "multi-source": "multi_source_",
+      "thread-watch": "thread_watch_"
     }
   },
   "datasetAliases": {

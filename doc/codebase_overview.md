@@ -9,7 +9,7 @@ or collection action. Browser modules assemble dataset rows, derive device
 projections, adapt topology models, filter, lay out, and render the returned data.
 
 ```text
-OTBR CLI / OTBR REST / HA Matter WS / mDNS / Eve exports
+OTBR CLI / OTBR REST / HA Matter WS / Thread Watch / mDNS / Eve exports
                  |
                  v
         Python collectors and parsers
@@ -219,6 +219,7 @@ guessed mask; missing/conflicting evidence skips optional enrichment.
 |---|---|
 | `mdns_thread_scopes.py`, `mdns_hap.py`, `mdns_matter.py`, `mdns_meshcop.py`, `mdns_thread_util.py` | Zeroconf discovery and source-specific service normalization |
 | `eve_process.py` | Eve export parsing, identifier conversion, and topology enrichment |
+| `thread_watch_client.py`, `thread_watch_snapshots.py`, `thread_watch_cli.py` | One bounded `/api/devices` request, lossless record construction, and digest-bound unknown-scope inventory publication |
 | `merge_dataset.py` | Input selection, normalization, identity-aware merge, validation report, and merged snapshot |
 | [merge_report.py](../src/merge_report.py) | Merge command input/result contracts, viable seed-identity checks, and atomic dataset/report publication with network context |
 | `merge_policy_identity.py`, `merge_policy_mdns.py`, `merge_policy_relationship.py` | Domain-specific identity matching, mDNS record handling, and relationship/route merge policy used by dataset merging |

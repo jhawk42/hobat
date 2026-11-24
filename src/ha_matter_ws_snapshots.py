@@ -10,6 +10,7 @@ from ha_matter_ws_roles import (
     normalize_ha_matter_roles,
 )
 from td_device_fields import normalize_input_record
+from td_snapshot_security import SENSITIVE_KEYS, normalized_security_key
 
 
 DASHBOARD_SCHEMA_VERSION = "1.0.0"
@@ -21,37 +22,12 @@ class MatterSnapshotSecurityError(ValueError):
     """A normalized snapshot contains credential material."""
 
 
-SENSITIVE_KEYS = frozenset(
-    {
-        "accesscontrol",
-        "acl",
-        "activedataset",
-        "certificate",
-        "certificates",
-        "daccertificate",
-        "nocs",
-        "networkkey",
-        "operationaldataset",
-        "trustedrootcertificates",
-        "rootpublickey",
-        "groupkeymap",
-        "groupkeyset",
-        "groupepochkey",
-        "operationalcredentials",
-        "paicertificate",
-        "pendingdataset",
-        "pskc",
-        "threadcredentials",
-    }
-)
-
-
 def assert_snapshot_safe(value: Any) -> None:
     """Reject credential-bearing fields before a normalized snapshot is returned."""
 
     if isinstance(value, Mapping):
         for key, child in value.items():
-            normalized_key = "".join(character for character in str(key).lower() if character.isalnum())
+            normalized_key = normalized_security_key(key)
             if normalized_key in SENSITIVE_KEYS:
                 raise MatterSnapshotSecurityError(
                     f"Normalized Matter snapshot contains forbidden field {key!r}"

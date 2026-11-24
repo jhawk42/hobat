@@ -12,7 +12,10 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import td_webserver
+import thread_watch_cli
 from aiohttp.test_utils import TestClient, TestServer
+from td_const import THREAD_WATCH_DEVICES_FILENAME
+from util_data import network_scope_path
 from webserver_test_support import cleanup_webserver_state
 
 
@@ -174,6 +177,117 @@ class WebServerRouteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status, 200)
         self.assertEqual(await response.read(), self.data_content)
+
+    async def test_thread_watch_pair_serves_exact_bytes_and_304_only_after_validation(self) -> None:
+        output = self.data_dir / THREAD_WATCH_DEVICES_FILENAME
+        thread_watch_cli._publish(
+            [{"type": "threadDevice", "threadWatch": {"name": "fixture"}}],
+            output,
+        )
+        original = output.read_bytes()
+
+        with patch.object(
+            td_webserver, "read_thread_watch_pair", wraps=td_webserver.read_thread_watch_pair,
+        ) as read_pair:
+            response = await self.client.get(
+                f"/api/data/{THREAD_WATCH_DEVICES_FILENAME.upper()}",
+                headers={"Cache-Control": "only-if-cached, max-age=31536000"},
+            )
+        read_pair.assert_called_once_with(output)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(await response.read(), original)
+        etag = response.headers["ETag"]
+
+        response = await self.client.get(
+            f"/api/data/{THREAD_WATCH_DEVICES_FILENAME}",
+            headers={"If-None-Match": etag},
+        )
+        self.assertEqual(response.status, 304)
+
+        companion_path = network_scope_path(output)
+        companion_url = f"/api/data/{companion_path.name.upper()}"
+        companion = await self.client.get(companion_url)
+        self.assertEqual(companion.status, 200)
+        self.assertEqual(await companion.read(), companion_path.read_bytes())
+        companion_etag = companion.headers["ETag"]
+        response = await self.client.get(companion_url, headers={"If-None-Match": companion_etag})
+        self.assertEqual(response.status, 304)
+
+        output.write_bytes(b'[{"changed":true}]')
+        for url, digest in (
+            (f"/api/data/{THREAD_WATCH_DEVICES_FILENAME}", etag),
+            (companion_url, companion_etag),
+        ):
+            for headers in (
+                {"If-None-Match": digest},
+                {"If-Modified-Since": "Fri, 01 Jan 2100 00:00:00 GMT"},
+            ):
+                with self.subTest(url=url, headers=headers):
+                    self.assertEqual((await self.client.get(url, headers=headers)).status, 409)
+
+    async def test_thread_watch_cache_only_serves_old_pair_without_refresh(self) -> None:
+        output = self.data_dir / THREAD_WATCH_DEVICES_FILENAME
+        thread_watch_cli._publish([], output)
+        companion = network_scope_path(output)
+        os.utime(companion, (1, 1))
+
+        with patch.object(
+            td_webserver, "_dispatch_long_cost",
+            new_callable=AsyncMock,
+            return_value=td_webserver.aiohttp.web.Response(status=202),
+        ) as dispatch:
+            cached = await self.client.get(
+                f"/api/data/{output.name}", headers={"Cache-Control": "only-if-cached"}
+            )
+            self.assertEqual(cached.status, 200)
+            self.assertEqual(await cached.read(), output.read_bytes())
+            sidecar = await self.client.get(
+                f"/api/data/{companion.name}", headers={"Cache-Control": "no-cache"}
+            )
+            self.assertEqual(sidecar.status, 200)
+            dispatch.assert_not_awaited()
+
+            refresh = await self.client.get(
+                f"/api/data/{output.name}", headers={"Cache-Control": "max-age=3600"}
+            )
+            self.assertEqual(refresh.status, 202)
+            dispatch.assert_awaited_once()
+
+    async def test_thread_watch_missing_or_invalid_companion_is_explicit_409(self) -> None:
+        output = self.data_dir / THREAD_WATCH_DEVICES_FILENAME
+        output.write_bytes(b"[]")
+        response = await self.client.get(
+            f"/api/data/{network_scope_path(output).name}",
+            headers={"If-None-Match": '"anything"'},
+        )
+        self.assertEqual(response.status, 409)
+        self.assertIn("missing-sidecar", await response.text())
+
+        response = await self.client.get(
+            f"/api/data/{THREAD_WATCH_DEVICES_FILENAME}",
+            headers={
+                "Cache-Control": "only-if-cached, max-age=31536000",
+                "If-None-Match": '"anything"',
+            },
+        )
+        self.assertEqual(response.status, 409)
+
+    async def test_thread_watch_action_never_advertises_a_checkpoint(self) -> None:
+        action = td_webserver.get_file_action(THREAD_WATCH_DEVICES_FILENAME)
+        self.assertEqual(
+            action.action,
+            ["thread-watch", "--no-stdout-json", "devices", "fetch-all"],
+        )
+        checkpoint = thread_watch_cli.network_scope_path(
+            self.data_dir / THREAD_WATCH_DEVICES_FILENAME
+        ).with_suffix(".partial.json").name.lower()
+        self.assertNotIn(checkpoint, td_webserver._CHECKPOINT_FILENAMES)
+        self.assertEqual(
+            td_webserver._build_checkpoint_poll_metadata(
+                THREAD_WATCH_DEVICES_FILENAME, self.data_dir
+            ),
+            {},
+        )
 
     async def test_data_api_preserves_canonical_border_router_snapshot_bytes(self) -> None:
         content = b'[{"isBorderRouter":false}]'

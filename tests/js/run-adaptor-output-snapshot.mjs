@@ -57,6 +57,7 @@ export function createPinnedAdaptorSnapshot() {
 export function createCachedAdaptorSnapshot() {
   const snapshot = {};
   for (const entry of DATASET_REGISTRY) {
+    if (entry.source === "thread-watch") continue;
     const rawFiles = entry.files.map((filename) => {
       const file = path.join("data", filename);
       return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;

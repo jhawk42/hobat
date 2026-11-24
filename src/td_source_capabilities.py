@@ -62,6 +62,7 @@ from td_const import (
     OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME,
     OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
     THREAD_TOOLS_DIAGNOSTICS_FILENAME,
+    THREAD_WATCH_DEVICES_FILENAME,
 )
 from util_ot_ctl import (
     TD_OTBR_CONTAINER_NAME_DEFAULT,
@@ -72,6 +73,14 @@ from util_ot_ctl import (
 from util_data import network_scope_path, read_network_scope
 from td_dataset_catalog import load_dataset_catalog
 from td_unified_dataset import UnifiedDatasetError, inspect_unified_cache
+from thread_watch_cache import ThreadWatchCacheError, read_thread_watch_pair
+from thread_watch_client import (
+    ThreadWatchArgumentError,
+    ThreadWatchInvalidResponseError,
+    ThreadWatchTransportError,
+    fetch_thread_watch_devices,
+    resolve_thread_watch_uri,
+)
 
 
 PROBE_TIMEOUT_SECONDS = 2.0
@@ -114,6 +123,7 @@ SOURCE_FILES = {
         HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
         HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
     ),
+    "thread-watch": (THREAD_WATCH_DEVICES_FILENAME,),
     "eve": ("Eve Thread Network Layout.evethreadlayout", EVE_TOPOLOGY_FILENAME),
     "thread-tools": (THREAD_TOOLS_DIAGNOSTICS_FILENAME,),
     "mdns": (
@@ -194,6 +204,19 @@ async def _probe_otbr_cli() -> str | None:
     return state if state in OTBR_CLI_INACTIVE_STATES else "invalid-response"
 
 
+async def _probe_thread_watch() -> str | None:
+    try:
+        await fetch_thread_watch_devices(
+            connect_timeout=PROBE_TIMEOUT_SECONDS,
+            request_timeout=PROBE_TIMEOUT_SECONDS,
+        )
+    except ThreadWatchTransportError:
+        return "unreachable"
+    except ThreadWatchInvalidResponseError:
+        return "invalid-response"
+    return None
+
+
 async def _probe_otbr_restapi() -> str | None:
     try:
         await asyncio.wait_for(
@@ -230,6 +253,7 @@ DEFAULT_PROBES: dict[str, Probe] = {
     "otbr-cli": _probe_otbr_cli,
     "otbr-restapi": _probe_otbr_restapi,
     "ha-matter-ws": _probe_ha_matter_ws,
+    "thread-watch": _probe_thread_watch,
 }
 
 
@@ -264,6 +288,14 @@ def _validate_probe_configuration(source: str) -> None:
         ):
             raise ProbeConfigurationError(f"{port_variable} must be an integer between 1 and 65535")
     if source == "otbr-cli":
+        return
+    if source == "thread-watch":
+        try:
+            resolve_thread_watch_uri()
+        except ThreadWatchArgumentError as exc:
+            raise ProbeConfigurationError(
+                "Invalid Thread Watch endpoint configuration"
+            ) from exc
         return
     endpoint = (
         f"http://{resolve_default_rest_host()}:{resolve_default_rest_port()}"
@@ -387,6 +419,15 @@ class SourceCapabilityService:
         }
         for filename, file_info in files.items():
             if file_info["cached"]:
+                if filename == THREAD_WATCH_DEVICES_FILENAME:
+                    try:
+                        pair = read_thread_watch_pair(data_dir / filename)
+                    except ThreadWatchCacheError as exc:
+                        file_info["cached"] = False
+                        file_info["cacheError"] = exc.reason
+                        continue
+                    file_info["networkInstance"] = json.loads(pair.companion)
+                    continue
                 scope, _ = read_network_scope(data_dir / filename)
                 if scope is not None:
                     file_info["networkInstance"] = scope
@@ -423,6 +464,17 @@ class SourceCapabilityService:
                 continue
             if can_probe is not None and not can_probe():
                 sources[source] = self._source_result(source, "unavailable", False, "not-run")
+                continue
+            try:
+                _validate_probe_configuration(source)
+            except ProbeConfigurationError:
+                sources[source] = self._source_result(
+                    source,
+                    "probe-error",
+                    False,
+                    "error",
+                    "invalid-configuration",
+                )
                 continue
             error = await self._run_probe(source, probe)
             state = "live" if error is None else "probe-failed"

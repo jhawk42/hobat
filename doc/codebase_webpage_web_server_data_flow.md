@@ -34,6 +34,36 @@ buildDatasetRows -> buildDeviceProjections -> runAdaptor
                    table + diagnostic filters   topology view model
 ```
 
+### Thread Watch Devices inventory
+
+Thread Watch is a cache-first, health-ineligible Devices source. Its collector
+does one unfiltered read of a configured HTTP(S) review server's
+`/api/devices`, then publishes a raw-array snapshot plus a verified unknown
+scope companion. The companion is required for cache availability and every
+HTTP 200/304 response; it binds the exact snapshot bytes and keeps recorder
+state outside network identity, merge, roster, Unified, and health authority.
+Cache Only can serve a valid pair regardless of age. Normal refresh uses the
+older of the two publication timestamps; requesting the companion never
+starts collection.
+
+The browser treats array entries independently, even when addresses are
+duplicated or absent. The dataset loader keeps each `threadWatch` subtree out
+of normalization and enrichment and reattaches it for details. Like Thread
+Watch's `/devices` page, the Table and Topology omit retired addresses
+(`threadWatch.rotated_to`) without changing the cached snapshot or hiding quiet
+devices that are not retired. The collector matches each explicit child
+row to a unique router using `parentExtAddress` and the router prefix encoded
+in the child's RLOC16, then adds a minimal OTBR-style `children` entry. The
+custom adaptor emits one node per displayed row and draws edges from those
+published relationships between displayed addresses. Older caches without a `children` projection still use the
+source-local address and RLOC16 checks in the browser. No child mode, timeout,
+RSSI, or link quality is inferred. Role projection still does not infer a
+router or child from RLOC16.
+Cache Only never starts collection. A missing valid cache can trigger
+a separate bounded capability probe, while a normal Sync/refresh uses the
+asynchronous Thread Watch file action. No `.partial.json` contract is
+advertised for this one-request collector.
+
 The browser never calls OTBR directly. Live work is owned by Python collectors
 started through `td_cli`; the browser consumes files from the configured data
 directory through the server allowlist. Not every CLI action collects live
@@ -549,16 +579,17 @@ deduplicate by filename -> create background job -> 202 + Location
 
 `FILE_ACTION_MAP` is the authoritative filename-to-action registry. Each
 `FileAction` specifies `max_age_s`, an action argument list or `STATIC`, an
-estimated cost, and `force_async`. Checkpoint filenames are derived from eligible dynamic entries with the
-`.partial.json` suffix and are served as non-regenerating, zero-max-age files.
-Unified actions are explicitly excluded: their publication boundary is the
-committed report, not a progressive checkpoint.
+estimated cost, `force_async`, and `supports_checkpoint`. Only entries that
+opt in get `.partial.json` routes and checkpoint polling metadata. Those
+routes serve non-regenerating, zero-max-age files. Unified and Thread Watch
+do not opt in.
 
 For dynamic files, request `Cache-Control: max-age=N` overrides the configured
 age, including when the request permits an older snapshot. Nonnegative integers
 and quoted ASCII decimal values such as `max-age="60"` are supported.
 `max-age=0` or `no-cache` requests regeneration; `only-if-cached` forbids it and
-returns 404 if the snapshot is missing or stale under the requested policy.
+returns 404 if an ordinary snapshot is missing or stale under the requested
+policy. Thread Watch serves an older pair in Cache Only if it still verifies.
 Invalid ages, including negative, empty, bare, or nonnumeric values, return
 HTTP 400 before dispatch rather than falling back to another age policy.
 Static files and checkpoints bypass regeneration-age validation.

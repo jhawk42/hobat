@@ -56,22 +56,25 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
                 _make_request("td-unknown-file.partial.json", _make_app(self.data_dir))
             )
 
-    async def test_all_long_running_files_have_checkpoint_in_set(self) -> None:
-        """Collector jobs expose checkpoints; Unified exposes committed generations only."""
+    async def test_checkpoint_allowlist_preserves_existing_action_coverage(self) -> None:
         from td_const import TD_CHECKPOINT_FILENAME_SUFFIX
         for name, fa in td_webserver.FILE_ACTION_MAP.items():
-            if fa.action == "STATIC":
-                continue
             expected = (
                 name.rsplit(".", 1)[0] + TD_CHECKPOINT_FILENAME_SUFFIX
             ).lower()
-            if fa.action[0] == "unify-dataset":
-                self.assertNotIn(expected, td_webserver._CHECKPOINT_FILENAMES)
-                continue
-            self.assertIn(
-                expected,
-                td_webserver._CHECKPOINT_FILENAMES,
-                f"Missing checkpoint entry for {name}",
+            with self.subTest(filename=name):
+                if fa.action == "STATIC" or fa.action[0] in {"unify-dataset", "thread-watch"}:
+                    self.assertNotIn(expected, td_webserver._CHECKPOINT_FILENAMES)
+                    self.assertEqual(td_webserver._build_checkpoint_poll_metadata(name, self.data_dir), {})
+                else:
+                    self.assertIn(expected, td_webserver._CHECKPOINT_FILENAMES)
+
+    async def test_thread_watch_checkpoint_not_served_even_if_present(self) -> None:
+        checkpoint = "td-thread-watch-devices.partial.json"
+        (self.data_dir / checkpoint).write_bytes(b"[]")
+        with self.assertRaises(aiohttp.web.HTTPNotFound):
+            await td_webserver.handle_data_api(
+                _make_request(checkpoint, _make_app(self.data_dir))
             )
 
     async def test_checkpoint_filename_derivation_for_mdns(self) -> None:

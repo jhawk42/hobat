@@ -385,6 +385,13 @@ function addRecordIdentityMappings(index, record, deviceId) {
 }
 
 function resolveProjectedDeviceId(index, record) {
+  const rowId = typeof record?._threadWatchRowId === "string"
+    ? record._threadWatchRowId
+    : "";
+  if (rowId && index.has(`thread-watch:${rowId}`)) {
+    return index.get(`thread-watch:${rowId}`);
+  }
+  if (rowId) return undefined;
   const identityKey = getDeviceIdentityKeys(record).find((key) => index.has(key));
   if (identityKey) return index.get(identityKey);
   const recordId = normalizedRecordId(record);
@@ -423,6 +430,11 @@ export function projectObservedTopologyLinkCounts(rows, adaptorResult) {
   deviceIds.forEach((deviceId) => {
     const normalizedDeviceId = String(deviceId);
     identityToDeviceId.set(`id:${normalizedDeviceId.toLowerCase()}`, normalizedDeviceId);
+    const rowId = adaptorResult.rawByIdForDetails?.get(deviceId)?._threadWatchRowId
+      ?? adaptorResult.nodeMap?.get(deviceId)?._threadWatchRowId;
+    if (rowId) {
+      identityToDeviceId.set(`thread-watch:${rowId}`, normalizedDeviceId);
+    }
     addRecordIdentityMappings(identityToDeviceId, adaptorResult.nodeMap?.get(deviceId), normalizedDeviceId);
     addRecordIdentityMappings(identityToDeviceId, adaptorResult.rawByIdForDetails?.get(deviceId), normalizedDeviceId);
     addRecordIdentityMappings(

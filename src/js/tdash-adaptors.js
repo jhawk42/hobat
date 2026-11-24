@@ -11,6 +11,7 @@ export { adaptEve, adaptEveNative };
 import { adaptThreadToolsNative } from './tdash-adaptor-thread-tools.js';
 import { getDeviceIdentityKeys } from './tdash-device-fields.js';
 import { adaptUnified } from './tdash-adaptor-unified.js';
+import { adaptThreadWatch } from './tdash-adaptor-thread-watch.js';
 export { adaptThreadToolsNative };
 function buildFileMap(fileNames, rawFiles) {
   const map = new Map();
@@ -38,6 +39,7 @@ export const ADAPTOR_HANDLERS = Object.freeze({
   'ha-matter-ws-network-topology': (fileMap, rows) => adaptHaMatterWsNetworkTopology(fileMap, rows),
   'ha-matter-ws-merge-topology': (fileMap, rows) => adaptHaMatterWsMergeTopology(fileMap, rows),
   'raw-array': (fileMap) => adaptRawArray(fileMap),
+  'thread-watch': (fileMap, rows) => adaptThreadWatch(fileMap, rows),
 });
 
 function canonicalReedRowsByIdentity(rows) {
@@ -81,6 +83,8 @@ export function runAdaptor(dataset) {
   const adaptorRows = dataset.adaptorRows ?? rows;
   const handlerRows = entry.adaptor === "ha-matter-ws" ? adaptorRows : rows;
   const result = handler(fileMap, handlerRows, entry);
-  applyCanonicalReedFacts(result, adaptorRows);
+  if (entry.source !== "thread-watch") {
+    applyCanonicalReedFacts(result, adaptorRows);
+  }
   return result;
 }

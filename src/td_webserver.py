@@ -57,6 +57,12 @@ from td_device_actions import (
     validate_request_against_record,
 )
 from td_source_capabilities import SourceCapabilityService
+from thread_watch_cache import (
+    THREAD_WATCH_SCOPE_FILENAME,
+    ThreadWatchCacheError,
+    ThreadWatchVerifiedPair,
+    read_thread_watch_pair,
+)
 from td_scheduler import (
     ENABLED_ENV as TD_SCHEDULER_ENABLED_ENV_NAME,
     Scheduler,
@@ -116,6 +122,7 @@ from td_const import (
     OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
     TD_DATA_DIR_ARG_HELP,
     THREAD_TOOLS_DIAGNOSTICS_FILENAME,
+    THREAD_WATCH_DEVICES_FILENAME,
 )
 from device_label import (
     normalize_valid_eui,
@@ -159,6 +166,11 @@ _FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 # Mapping table and cache helpers
 # ---------------------------------------------------------------------------
 
+_THREAD_WATCH_CANONICAL_FILENAMES = {
+    name.lower(): name
+    for name in (THREAD_WATCH_DEVICES_FILENAME, THREAD_WATCH_SCOPE_FILENAME)
+}
+
 
 @dataclasses.dataclass
 class FileAction:
@@ -173,6 +185,7 @@ class FileAction:
     # action_cost_s.  Use this for any action whose worst-case duration exceeds
     # the browser-safe synchronous limit (~30 s) but is under _LONG_COST_THRESHOLD_S.
     force_async: bool = False
+    supports_checkpoint: bool = False
 
 
 def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
@@ -180,7 +193,8 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         # System
         # Fetches extaddr to device_label mapping file.
         EXTADDR_DEVICE_LABEL_MAP_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["merge-extaddr","--merge-mdns-br"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["merge-extaddr","--merge-mdns-br"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
 
         # mdns
@@ -188,27 +202,33 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         MDNS_SCOPES_THREAD_FILENAME: FileAction(
             # ~60 sec browse
             max_age_s=default_max_age_s, action=["mdns", "thread"], action_cost_s=60, force_async=True,
+            supports_checkpoint=True,
         ),
         MDNS_SCOPES_BR_FILENAME: FileAction(
             # ~60 sec browse
-            max_age_s=default_max_age_s, action=["mdns", "br"], action_cost_s=60, force_async=True
+            max_age_s=default_max_age_s, action=["mdns", "br"], action_cost_s=60, force_async=True,
+            supports_checkpoint=True,
         ),
         MDNS_SCOPES_HAP_FILENAME: FileAction(
             # ~60 sec browse
-            max_age_s=default_max_age_s, action=["mdns", "hap"], action_cost_s=60, force_async=True
+            max_age_s=default_max_age_s, action=["mdns", "hap"], action_cost_s=60, force_async=True,
+            supports_checkpoint=True,
         ),
         MDNS_SCOPES_MATTER_FILENAME: FileAction(
             # ~60 sec browse
-            max_age_s=default_max_age_s, action=["mdns", "matter"], action_cost_s=60, force_async=True
+            max_age_s=default_max_age_s, action=["mdns", "matter"], action_cost_s=60, force_async=True,
+            supports_checkpoint=True,
         ),
 
         # otbr-cli
         # Single ot-ctl commands — near-instant.
         OTBR_CLI_THREAD_NETWORK_INFO_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["otbr-cli", "thread-network-info"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["otbr-cli", "thread-network-info"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
         OTBR_CLI_ROUTER_TABLE_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["otbr-cli", "router-table"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["otbr-cli", "router-table"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
         # meshdiag topology may consume the full 30 s ot-ctl command timeout.
         OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME: FileAction(
@@ -216,6 +236,7 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             action=["otbr-cli", "meshdiag", "topology"],
             action_cost_s=30,
             force_async=True,
+            supports_checkpoint=True,
         ),
         # Per-router meshdiag commands — ~1–2 s each router; 90 s for ~50-router network.
         # force_async=True: 90 s exceeds the browser-safe synchronous limit (~30 s).
@@ -224,18 +245,21 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             action=["otbr-cli", "meshdiag", "childip6"],
             action_cost_s=90,
             force_async=True,
+            supports_checkpoint=True,
         ),
         OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-cli", "meshdiag", "childtable"],
             action_cost_s=90,  # ~1–2 s per router
             force_async=True,
+            supports_checkpoint=True,
         ),
         OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-cli", "meshdiag", "routerneighbortable"],
             action_cost_s=90,  # ~1–2 s per router
             force_async=True,
+            supports_checkpoint=True,
         ),
         # networkdiag — TLV request per router with retries; up to ~10 min on large networks.
         OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME: FileAction(
@@ -243,6 +267,7 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             action=["otbr-cli", "networkdiag", "fetch-all"],
             action_cost_s=600,  # ~10 min for ~60 routers with timeout retries
             force_async=True,
+            supports_checkpoint=True,
         ),
         # networkdiag multicast-network — TLV request per router with retries; up to ~16 seconds on large networks.
         OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME: FileAction(
@@ -250,6 +275,7 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             action=["otbr-cli", "networkdiag", "multicast-network"],
             action_cost_s=16,  # ~16 seconds with timeout retries
             force_async=True,
+            supports_checkpoint=True,
         ),
         # networkdiag multicast-neighbors — TLV request per router with retries; up to ~16 seconds on large networks.
         OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME: FileAction(
@@ -257,33 +283,41 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             action=["otbr-cli", "networkdiag", "multicast-neighbors"],
             action_cost_s=16,  # ~16 seconds with timeout retries
             force_async=True,
+            supports_checkpoint=True,
         ),
 
         # otbr-restapi
         # REST API downloads — single HTTP call, near-instant.
         OTBR_RESTAPI_DATASET_ACTIVE_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
         OTBR_RESTAPI_DEVICES_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
         OTBR_RESTAPI_DIAGNOSTICS_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
         OTBR_RESTAPI_DEVICES_LIST_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "list"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "list"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
         OTBR_RESTAPI_DEVICES_FETCH_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-restapi", "devices", "fetch"],
             action_cost_s=40,
             force_async=True,
+            supports_checkpoint=True,
         ),
         OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "list"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "list"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
         OTBR_RESTAPI_ACTIONS_LIST_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "actions", "list"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["otbr-restapi", "actions", "list"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
         OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s,
@@ -293,6 +327,7 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             ],
             action_cost_s=1200,
             force_async=True,
+            supports_checkpoint=True,
         ),
         OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s,
@@ -302,6 +337,7 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             ],
             action_cost_s=1200,
             force_async=True,
+            supports_checkpoint=True,
         ),
 
         # Home Assistant Matter Server WebSocket snapshots share one controller lock.
@@ -309,54 +345,72 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "server-info"],
             action_cost_s=10,
+            supports_checkpoint=True,
         ),
         HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "devices", "fetch-all"],
             action_cost_s=60,
             force_async=True,
+            supports_checkpoint=True,
         ),
         HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "diagnostics", "fetch-all"],
             action_cost_s=60,
             force_async=True,
+            supports_checkpoint=True,
         ),
         HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "mesh-diagnostics", "fetch-all"],
             action_cost_s=60,
             force_async=True,
+            supports_checkpoint=True,
         ),
         HA_MATTER_WS_TOPOLOGY_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "topology"],
             action_cost_s=60,
             force_async=True,
+            supports_checkpoint=True,
         ),
         HA_MATTER_WS_DASHBOARD_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "dashboard"],
             action_cost_s=60,
             force_async=True,
+            supports_checkpoint=True,
         ),
         HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "all"],
             action_cost_s=90,
             force_async=True,
+            supports_checkpoint=True,
         ),
         HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "thread", "border-routers"],
             action_cost_s=10,
             force_async=True,
+            supports_checkpoint=True,
         ),
         HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "network-topology"],
             action_cost_s=10,
             force_async=True,
+            supports_checkpoint=True,
+        ),
+        THREAD_WATCH_DEVICES_FILENAME: FileAction(
+            max_age_s=default_max_age_s,
+            action=["thread-watch", "--no-stdout-json", "devices", "fetch-all"],
+            action_cost_s=60,
+            force_async=True,
+        ),
+        THREAD_WATCH_SCOPE_FILENAME: FileAction(
+            max_age_s=default_max_age_s, action="STATIC", action_cost_s=0
         ),
 
         # Eve App
@@ -365,7 +419,8 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s, action="STATIC", action_cost_s=2
         ),
         EVE_TOPOLOGY_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["process-eve"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["process-eve"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
 
         # Thread Tools app — externally managed static file.
@@ -375,7 +430,8 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
 
         # Pre-merged output — produced by merge_dataset; treated as static here.
         MERGED_TOPOLOGY_ALL_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["merge-dataset"], action_cost_s=2
+            max_age_s=default_max_age_s, action=["merge-dataset"], action_cost_s=2,
+            supports_checkpoint=True,
         ),
     }
     for entry in load_dataset_catalog()["datasets"]:
@@ -425,11 +481,11 @@ _CHECKPOINT_FILE_ACTION = FileAction(max_age_s=0, action="STATIC", action_cost_s
 
 
 def _build_checkpoint_filename_set(file_action_map: dict[str, FileAction]) -> set[str]:
-    """Return lowercase checkpoint filenames for every dynamic entry in file_action_map."""
+    """Return lowercase checkpoint filenames for entries that opt in."""
     return {
         create_checkpoint_filename(filename).lower()
         for filename, fa in file_action_map.items()
-        if fa.action != "STATIC" and fa.action[0] != "unify-dataset"
+        if fa.supports_checkpoint
     }
 
 
@@ -682,12 +738,19 @@ def _to_epoch_ms(ts: float) -> int:
     return int(ts * 1000)
 
 
+def _file_has_checkpoint(filename: str) -> bool:
+    file_action = get_file_action(filename)
+    return file_action is not None and file_action.supports_checkpoint
+
+
 def _build_checkpoint_poll_metadata(filename: str, data_dir: Path) -> dict[str, object]:
     """Build additive checkpoint metadata for a running long-cost job.
 
     Metadata fields are omitted when inputs are unavailable. The caller is
     expected to attach this only for non-terminal in-progress polling states.
     """
+    if not _file_has_checkpoint(filename):
+        return {}
     checkpoint_filename = create_checkpoint_filename(filename)
     checkpoint_path = data_dir / checkpoint_filename
     final_path = data_dir / filename
@@ -1126,18 +1189,94 @@ def _resolve_and_validate(filename: str, data_dir: Path) -> tuple["FileAction", 
     Raises ``HTTPNotFound`` for path-traversal attempts or unknown filenames.
     Does NOT check whether the file exists on disk.
 
-    Checkpoint partial files (e.g. *.partial.json) are accepted when they
-    correspond to a known dynamic FILE_ACTION_MAP entry. They are served as
+    Checkpoint partial files (e.g. *.partial.json) are accepted when their
+    FILE_ACTION_MAP entry opts in. They are served as
     STATIC with max_age_s=0; a 404 is returned when the file is absent.
     """
     if not _safe_filename(filename):
         raise aiohttp.web.HTTPNotFound()
+    canonical_thread_watch = _THREAD_WATCH_CANONICAL_FILENAMES.get(filename.lower())
     file_action = get_file_action(filename)
     if file_action is None:
         if filename.lower() not in _CHECKPOINT_FILENAMES:
             raise aiohttp.web.HTTPNotFound(reason=f"Unknown filename: {filename}")
         file_action = _CHECKPOINT_FILE_ACTION
-    return file_action, data_dir / filename
+    return file_action, data_dir / (canonical_thread_watch or filename)
+
+
+@dataclasses.dataclass(frozen=True)
+class _ThreadWatchCacheState:
+    pair: ThreadWatchVerifiedPair | None
+    error: ThreadWatchCacheError | None = None
+
+
+def _inspect_thread_watch_cache(file_path: Path) -> _ThreadWatchCacheState | None:
+    filename = _THREAD_WATCH_CANONICAL_FILENAMES.get(file_path.name.lower())
+    if filename is None:
+        return None
+    snapshot_path = file_path.with_name(THREAD_WATCH_DEVICES_FILENAME)
+    if not snapshot_path.is_file():
+        if filename == THREAD_WATCH_SCOPE_FILENAME:
+            raise aiohttp.web.HTTPNotFound(
+                reason=f"Static file not found: {THREAD_WATCH_DEVICES_FILENAME}"
+            )
+        return _ThreadWatchCacheState(None)
+    try:
+        return _ThreadWatchCacheState(read_thread_watch_pair(snapshot_path))
+    except ThreadWatchCacheError as exc:
+        if filename == THREAD_WATCH_SCOPE_FILENAME:
+            raise _thread_watch_cache_conflict(exc) from exc
+        return _ThreadWatchCacheState(None, exc)
+    return _ThreadWatchCacheState("snapshot", pair, None)
+
+
+def _thread_watch_cache_conflict(exc: ThreadWatchCacheError) -> aiohttp.web.HTTPConflict:
+    return aiohttp.web.HTTPConflict(
+        reason=f"Thread Watch cache is invalid: {exc.reason}"
+    )
+
+
+def _reject_invalid_thread_watch_cache(
+    request: aiohttp.web.Request,
+    state: _ThreadWatchCacheState | None,
+    *,
+    only_if_cached: bool,
+) -> None:
+    if (
+        state is None
+        or state.error is None
+        or not (
+            only_if_cached
+            or request.headers.get("If-None-Match") is not None
+            or request.headers.get("If-Modified-Since") is not None
+        )
+    ):
+        return
+    raise _thread_watch_cache_conflict(state.error) from state.error
+
+
+def _should_regenerate_data_file(
+    file_path: Path,
+    file_action: FileAction,
+    no_cache: bool,
+    request_max_age_s: int | None,
+    thread_watch: _ThreadWatchCacheState | None,
+) -> bool:
+    if thread_watch is None:
+        return _should_regenerate(
+            file_path, file_action, no_cache, request_max_age_s
+        )
+    if thread_watch.pair is None:
+        return True
+    max_age_s = (
+        request_max_age_s
+        if request_max_age_s is not None and request_max_age_s >= 0
+        else file_action.max_age_s
+    )
+    return (
+        no_cache
+        or (time.time() - thread_watch.pair.publication_mtime) >= max_age_s
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1382,6 +1521,8 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     only_if_cached = bool(cc.get("only-if-cached", False))
 
     file_action, file_path = _resolve_and_validate(filename, data_dir)
+    thread_watch = _inspect_thread_watch_cache(file_path)
+    verified_pair = thread_watch.pair if thread_watch else None
     request_max_age_s = None
     if file_action.action != "STATIC":
         try:
@@ -1396,6 +1537,12 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                   filename, no_cache, file_action, file_path)
     scheduler = request.app.get(TD_SCHEDULER_APP_KEY)
     explicit_refresh = not only_if_cached and (no_cache or request_max_age_s == 0)
+    _reject_invalid_thread_watch_cache(
+        request, thread_watch, only_if_cached=only_if_cached
+    )
+    needs_regeneration = _should_regenerate_data_file(
+        file_path, file_action, no_cache, request_max_age_s, thread_watch
+    )
 
     if file_action.action == "STATIC":
         if not file_path.is_file():
@@ -1408,13 +1555,12 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
             raise aiohttp.web.HTTPNotFound(
                 reason=f"Cache-only data file not available: {filename}"
             )
-    elif only_if_cached and _should_regenerate(
-        file_path, file_action, no_cache, request_max_age_s
-    ):
-        raise aiohttp.web.HTTPNotFound(
-            reason=f"Cache-only data file not available: {filename}"
-        )
-    elif _should_regenerate(file_path, file_action, no_cache, request_max_age_s):
+    elif only_if_cached:
+        if needs_regeneration and verified_pair is None:
+            raise aiohttp.web.HTTPNotFound(
+                reason=f"Cache-only data file not available: {filename}"
+            )
+    elif needs_regeneration:
         action_args: list[str] = list(file_action.action)  # type: ignore[arg-type]
         if (
             request.app.get(TD_LOG_THREAD_SECRETS_APP_KEY, False)
@@ -1427,6 +1573,7 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
             filename, action_args, data_dir, file_action, no_cache,
             request_max_age_s=request_max_age_s, scheduler=scheduler,
         )
+        verified_pair = None
         if not admitted:
             if explicit_refresh:
                 return _nightly_conflict()
@@ -1438,7 +1585,7 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     logging.debug("Serving file %s for request (no_cache=%s)", file_path, no_cache)
     logging.debug("<<<<<<<<<")
 
-    return _build_file_response(file_path, file_action, request)
+    return _build_file_response(file_path, file_action, request, thread_watch_pair=verified_pair)
 
 
 def _start_workflow(
@@ -2333,10 +2480,32 @@ def _etag_matches(etag: str, header: str) -> bool:
     return False
 
 
+def _read_thread_watch_response_file(
+    file_path: Path,
+    pair: ThreadWatchVerifiedPair | None,
+) -> tuple[bytes, float, str] | None:
+    filename = _THREAD_WATCH_CANONICAL_FILENAMES.get(file_path.name.lower())
+    if filename is None:
+        return None
+    try:
+        if pair is None:
+            pair = read_thread_watch_pair(file_path.with_name(THREAD_WATCH_DEVICES_FILENAME))
+    except ThreadWatchCacheError as exc:
+        logging.error(
+            "Refusing invalid Thread Watch cache pair: %s", exc.reason
+        )
+        raise _thread_watch_cache_conflict(exc) from exc
+    if filename == THREAD_WATCH_DEVICES_FILENAME:
+        return pair.snapshot, pair.publication_mtime, pair.snapshot_digest
+    return pair.companion, pair.companion_mtime, pair.companion_digest
+
+
 def _build_file_response(
     file_path: Path,
     file_action: "FileAction",
     request: aiohttp.web.Request | None = None,
+    *,
+    thread_watch_pair: ThreadWatchVerifiedPair | None = None,
 ) -> aiohttp.web.Response:
     """Read *file_path* from disk and return a Response with cache headers.
 
@@ -2349,7 +2518,10 @@ def _build_file_response(
     verified_payload = None
     materialization_state = None
     try:
-        if unified is not None:
+        thread_watch_response = _read_thread_watch_response_file(file_path, thread_watch_pair)
+        if thread_watch_response is not None:
+            verified_payload, file_mtime, etag = thread_watch_response
+        elif unified is not None:
             artifact, report = read_generation_artifact(file_path.parent, unified, file_path.name)
             verified_payload = artifact.content
             materialization_state = report["materializationState"]

@@ -16,6 +16,19 @@ EXPECTED_DATASETS = {
     "ha_matter_ws_unified",
     "multi_source_unified",
 }
+RETIRED_MANIFEST_DIGEST = (
+    "8d7fc3316a6859d07bd9ff8e5007001bb0737c248b812042fa8d77d6452bad81"
+)
+
+
+def _retired_datasets():
+    from td_health_manifest_history import load_manifest_history
+
+    return next(
+        revision.datasets
+        for revision in load_manifest_history().revisions
+        if revision.manifest_digest == RETIRED_MANIFEST_DIGEST
+    )
 
 
 def test_manifest_contains_only_approved_datasets() -> None:
@@ -25,8 +38,7 @@ def test_manifest_contains_only_approved_datasets() -> None:
     assert manifest.roster_policy.digest == "3e6c56be6544c17ef36b9ed722fd49668c65eebada697bd4cc9db21a11887c54"
     assert set(manifest.datasets) == EXPECTED_DATASETS
     from td_health_manifest import RETIRED_HEALTH_RESULT_DATASET_IDS
-    from td_health_manifest_history import load_manifest_history
-    retired = load_manifest_history().revisions[-1].datasets
+    retired = _retired_datasets()
     for dataset_id in RETIRED_HEALTH_RESULT_DATASET_IDS:
         with pytest.raises(HealthManifestError, match="not health eligible"):
             manifest.dataset(dataset_id)
@@ -139,7 +151,7 @@ def test_reviewed_current_manifest_projection_and_archive_agree() -> None:
     resolver = load_manifest_history()
     current = load_health_manifest()
     assert resolver.current.datasets == current.datasets
-    assert resolver.current.manifest_digest == "a9d2f9fa3acd706da5db7d58b9bcc7cfb6ea3753922e3b40ed8f27bac0348f2d"
+    assert resolver.current.manifest_digest == "ea1c4cb5114c3d2d83fd046f07b194f1738a03fef2cbf03b374f327a5b42a416"
     assert resolver.current.health_contract_digest == "a52e4775abae6ea8d0c2a6d8268230fac0de8f423d24c484354c5507748b54c4"
     assert canonical_digest(health_projection(resolver.current.manifest)) == resolver.current.health_contract_digest
     assert resolver.current.revision_id not in {revision.revision_id for revision in resolver.revisions}
@@ -149,8 +161,8 @@ def test_reviewed_current_manifest_projection_and_archive_agree() -> None:
 
 
 def test_approved_health_input_modes_preserve_legacy_omitted_projection():
-    from td_health_manifest_history import _profile, profile_declaration, load_manifest_history
-    legacy = load_manifest_history().revisions[-1].datasets["otbr_cli_diagnostics_fetch"].health_profile
+    from td_health_manifest_history import _profile, profile_declaration
+    legacy = _retired_datasets()["otbr_cli_diagnostics_fetch"].health_profile
     assert legacy.input_mode == "files"
     assert legacy.evidence_report is None
     declaration = profile_declaration(legacy)

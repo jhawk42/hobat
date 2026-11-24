@@ -7,7 +7,8 @@ Hobat is a Thread network dashboard and command-line toolkit for collecting, vis
 ## Capabilities
 
 - Data sources: OTBR CLI, OTBR REST API, Home Assistant Matter Server, mDNS,
-  Eve exports, and Thread Tools exports, with support for merged datasets.
+  Thread Watch, Eve exports, and Thread Tools exports, with support for merged
+  datasets.
 - Interactive Topology and sortable, filterable Table views.
 - System, Light, and Dark appearance preferences shared by dashboard and topology.
 - Topology layouts: compact mesh, ring mesh, horizontal tree, vertical tree,
@@ -100,7 +101,38 @@ Multi-source defaults to Unified; the other source defaults remain unchanged.
 CLI and REST topology, the HA seven-file composite, and the Multi-source dynamic
 merge are hidden from menus but retain explicit recipe lookup. The legacy
 precomputed Multi-source option remains selectable. The catalog currently
-contains 43 definitions / 39 selectable options.
+contains 44 definitions / 40 selectable options.
+
+## Thread Watch Devices
+
+Hobat can cache the read-only Thread Watch `/api/devices` inventory without
+contacting OTBR:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data thread-watch \
+  --host 192.168.4.77 --port 9180 devices fetch-all
+```
+
+The command makes one unfiltered request and writes
+`td-thread-watch-devices.json` as a top-level array. Every original row remains
+under `threadWatch`; validated identity and role projections are additional
+root fields. Duplicate and identity-less rows remain independent. Hobat's
+Table and Topology views hide addresses that Thread Watch marks as retired
+(`threadWatch.rotated_to`); the snapshot still retains them. Devices defaults
+to Topology when switching to the dataset's default view is enabled. Its
+digest-bound `.network.json` companion records unknown network scope, so this
+inventory is not admitted to merge authority, health, or the device roster.
+Explicit child rows enrich a uniquely matching router's `children` inventory
+using the child's RLOC16 router prefix and `parentExtAddress`; this derived
+relationship does not add fresh OTBR mode, timeout, reachability, or link
+quality evidence.
+
+Use `TD_THREAD_WATCH_URI` for a trusted HTTP(S) review-server root, or
+`TD_THREAD_WATCH_HOST` and `TD_THREAD_WATCH_PORT` (defaults `localhost:9180`).
+HTTPS uses normal certificate verification. Redirects, retries, credential
+URLs, and per-device requests are not used. Cache Only never starts
+collection, although capability discovery can independently probe when no
+valid cache exists.
 Availability checks validate outcomes using each source's own format, including
 HA Matter. Standalone REST diagnostic and mesh-diagnostic sweeps publish full
 digest-bound outcome metadata even with `--items-only`; the flag still returns

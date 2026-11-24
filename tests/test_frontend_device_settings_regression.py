@@ -268,7 +268,10 @@ def test_selection_clear_paths_publish_null() -> None:
 def test_static_label_cache_can_override_stale_raw_labels() -> None:
     dataset_text = _read_text(DATASET_JS)
     enrichment_start = dataset_text.index("function enrichNodeWithStaticLabel(node)")
-    enrichment_end = dataset_text.index("export function enrichRows(rows)", enrichment_start)
+    enrichment_end = dataset_text.index(
+        "export function enrichRows(",
+        enrichment_start,
+    )
     enrichment = dataset_text[enrichment_start:enrichment_end]
 
     assert "export function setStaticDeviceLabel(extaddr, deviceLabel, eui)" in dataset_text

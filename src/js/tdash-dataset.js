@@ -12,6 +12,7 @@ import {
 } from "./tdash-utils.js";
 import {
   normalizeRows,
+  withRowProvenance,
   mergeRowsByRloc16,
   mergeRowsByIdentity,
 } from "./tdash-merge.js";
@@ -111,6 +112,17 @@ function extractRawRows(payload) {
   return Array.isArray(payload) ? payload : [];
 }
 
+let _datasetLoadGeneration = 0;
+
+function transformThreadWatchRows(payload, transform) {
+  if (!Array.isArray(payload)) return payload;
+  return payload.map((row) => {
+    if (!isPlainObject(row) || !Object.hasOwn(row, "threadWatch")) return transform(row);
+    const { threadWatch, ...canonical } = row;
+    return { ...transform(canonical), threadWatch };
+  });
+}
+
 function extractEnvelopeRows(payload, property) {
   if (Array.isArray(payload)) return payload;
   return isPlainObject(payload) && Array.isArray(payload[property])
@@ -164,7 +176,11 @@ function extractProcessedEveRows(payload) {
   });
 }
 
-export function normalizeDatasetFilePayload(_entry, _fileIndex, payload, options = {}) {
+export function normalizeDatasetFilePayload(entry, _fileIndex, payload, options = {}) {
+  if (entry?.source === "thread-watch") {
+    return transformThreadWatchRows(payload, (row) =>
+      normalizeDatasetPayload(row, { ...options, source: "thread-watch" }));
+  }
   return normalizeDatasetPayload(payload, options);
 }
 
@@ -213,6 +229,18 @@ export function buildDatasetRows(entry, rawFiles, options = {}) {
       loadedFiles,
       loadedFileIndexes,
     };
+  }
+
+  if (entry.source === "thread-watch") {
+    const firstIndex = loadedFileIndexes[0];
+    const generation = String(options.loadGeneration ?? "standalone");
+    const rows = normalizeDatasetFilePayload(
+      entry, firstIndex, extractRawRows(rawFiles[firstIndex]), NORMALIZE_OPTIONS_CANONICAL_OUTPUT,
+    ).map((row, index) => ({
+      ...withRowProvenance(isPlainObject(row) ? row : { row_index: index, value: row }, loadedFiles[0]),
+      _threadWatchRowId: `tw:${generation}:${index}`,
+    })).filter((row) => !row.threadWatch?.rotated_to);
+    return { rows, adaptorRows: rows, loadedFiles, loadedFileIndexes };
   }
 
   const strategyHandler = MERGE_STRATEGY_HANDLERS[entry.mergeStrategy];
@@ -445,7 +473,7 @@ export function enrichRows(rows) {
 // and plain node objects directly.
 function enrichRawValue(value) {
   if (Array.isArray(value)) {
-    return value.map((item) => enrichRawValue(item));
+    return value.map(enrichRawValue);
   }
   if (isPlainObject(value)) {
     const enriched = enrichNodeWithStaticLabel(value);
@@ -464,8 +492,10 @@ function enrichRawValue(value) {
 }
 
 // Returns a new rawFiles array with enrichment applied to each file's data.
-export function enrichRawFiles(rawFiles) {
-  return rawFiles.map((file) => (file === null ? null : enrichRawValue(file)));
+export function enrichRawFiles(rawFiles, entry = null) {
+  return rawFiles.map((file) => entry?.source === "thread-watch"
+    ? transformThreadWatchRows(file, enrichRawValue)
+    : enrichRawValue(file));
 }
 
 // ── Core fetch helper ─────────────────────────────────────────────────────────
@@ -518,6 +548,14 @@ function _oldestLoadedFileTimestamp(loadedFiles) {
 
 // accepts optional request headers; returns { data, responseMaxAge }.
 // handles HTTP 202 by delegating to pollJobUntilDone.
+export function shouldRetryThreadWatchRepair(url, status, requestHeaders = {}) {
+  return (
+    status === 409
+    && url === "/api/data/td-thread-watch-devices.json"
+    && !requestHeaders["Cache-Control"]?.includes("only-if-cached")
+  );
+}
+
 async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpointData = null) {
   _assertFetchSessionActive(sessionId);
   const signal =
@@ -536,6 +574,20 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpoin
   }
 
   _assertFetchSessionActive(sessionId);
+  if (shouldRetryThreadWatchRepair(url, response.status, requestHeaders)) {
+    try {
+      response = await trackedFetch(url, {
+        headers: { ...requestHeaders, "Cache-Control": "no-cache" },
+        cache: "no-store",
+        signal,
+      });
+    } catch (err) {
+      if (_isAbortError(err)) {
+        throw new FetchCancelledError(`Fetch cancelled: ${url}`);
+      }
+      throw err;
+    }
+  }
   if (response.status === 202) {
     const job = await response.json();
     _emitDatasetActivity("job-status", {
@@ -809,14 +861,14 @@ export function setStaticDeviceLabel(extaddr, deviceLabel, eui) {
 
 // Builds a partial dataset from whichever entries in rawFiles are non-null.
 // Returns null when no file has arrived yet. Used for incremental rendering.
-function _buildPartialDataset(entry, rawFiles, loadStartTime) {
-  const assembled = buildDatasetRows(entry, rawFiles);
+function _buildPartialDataset(entry, rawFiles, loadStartTime, loadGeneration) {
+  const assembled = buildDatasetRows(entry, rawFiles, { loadGeneration });
   const { rows, loadedFiles } = assembled;
   if (loadedFiles.length === 0) return null;
-  const canonicalRawFiles = rawFiles.map((file) =>
+  const canonicalRawFiles = rawFiles.map((file, index) =>
     file === null || file === undefined
       ? null
-      : normalizeDatasetPayload(file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
+      : normalizeDatasetFilePayload(entry, index, file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
   );
 
   const oldestLastModifiedAt = _oldestLoadedFileTimestamp(loadedFiles);
@@ -865,6 +917,7 @@ export async function loadDataset(entryValue, options = {}) {
   const estimateActionCostSecs = entry.estimateActionCostSecs ?? "?";
   const initialLabel = entry.label;
   const loadStartTime = Date.now();
+  const loadGeneration = ++_datasetLoadGeneration;
   statusEl.textContent = `Loading ${initialLabel}…`;
   if (progressEl) progressEl.value = 0;
 
@@ -907,7 +960,9 @@ export async function loadDataset(entryValue, options = {}) {
                 checkpointData,
                 NORMALIZE_OPTIONS_MERGE_INTERNAL,
               );
-              const partialDataset = _buildPartialDataset(entry, rawFilesInProgress, loadStartTime);
+              const partialDataset = _buildPartialDataset(
+                entry, rawFilesInProgress, loadStartTime, loadGeneration,
+              );
               if (partialDataset !== null) {
                 currentDataset = partialDataset;
                 _recordIncrementalUpdate("checkpoint");
@@ -929,7 +984,9 @@ export async function loadDataset(entryValue, options = {}) {
                 data,
                 NORMALIZE_OPTIONS_MERGE_INTERNAL,
               );
-              const partialDataset = _buildPartialDataset(entry, rawFilesInProgress, loadStartTime);
+              const partialDataset = _buildPartialDataset(
+                entry, rawFilesInProgress, loadStartTime, loadGeneration,
+              );
               if (partialDataset !== null) {
                 currentDataset = partialDataset;
                 _recordIncrementalUpdate("file");
@@ -1019,12 +1076,12 @@ export async function loadDataset(entryValue, options = {}) {
     return null;
   }
 
-  const assembled = buildDatasetRows(entry, rawFiles);
+  const assembled = buildDatasetRows(entry, rawFiles, { loadGeneration });
   const fetchDurationMs = Date.now() - loadStartTime;
-  const canonicalRawFiles = rawFiles.map((file) =>
+  const canonicalRawFiles = rawFiles.map((file, index) =>
     file === null
       ? null
-      : normalizeDatasetPayload(file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
+      : normalizeDatasetFilePayload(entry, index, file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
   );
 
   // Use the oldest lastModifiedAt across all loaded files (most stale piece of the dataset)

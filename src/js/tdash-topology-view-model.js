@@ -107,13 +107,23 @@ function resolveNodeThemeRole(node, records, isRelationshipChild) {
 function identityKeysForRecord(record) {
   const keys = getDeviceIdentityKeys(record);
   const explicitId = toText(record?.id).toLowerCase();
-  return explicitId ? [...keys, `id:${explicitId}`] : keys;
+  const threadWatchRowId = typeof record?._threadWatchRowId === "string"
+    ? `thread-watch:${record._threadWatchRowId}`
+    : "";
+  return [
+    ...(threadWatchRowId ? [threadWatchRowId] : []),
+    ...keys,
+    ...(explicitId ? [`id:${explicitId}`] : []),
+  ];
 }
 
 function indexIdentity(identityToNodeId, record, nodeId) {
   identityKeysForRecord(record).forEach((key) => {
     if (!identityToNodeId.has(key)) identityToNodeId.set(key, nodeId);
-    else if (record?._unifiedRecordId && identityToNodeId.get(key) !== nodeId) {
+    else if (
+      (record?._unifiedRecordId || record?._threadWatchRowId)
+      && identityToNodeId.get(key) !== nodeId
+    ) {
       identityToNodeId.set(key, null);
     }
   });
@@ -248,6 +258,12 @@ export function createTopologyViewModel(
 }
 
 export function resolveTopologyNodeId(viewModel, record) {
+  const threadWatchRowId = typeof record?._threadWatchRowId === "string"
+    ? record._threadWatchRowId
+    : "";
+  if (threadWatchRowId) {
+    return viewModel.nodeMap.has(threadWatchRowId) ? threadWatchRowId : null;
+  }
   for (const key of identityKeysForRecord(record)) {
     const nodeId = viewModel.identityToNodeId.get(key);
     if (nodeId != null) return nodeId;

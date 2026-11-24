@@ -1,4 +1,4 @@
-import { trackedFetch } from "./tdash-activity.js";
+import { recordActivity, trackedFetch } from "./tdash-activity.js";
 
 const AVAILABLE_SOURCE_STATES = new Set(["available", "cached", "live"]);
 
@@ -18,6 +18,20 @@ export async function loadSourceCapabilities() {
     || !payload.files || typeof payload.files !== "object") {
     throw new Error("Capability response is invalid");
   }
+  Object.entries(payload.files).forEach(([filename, details]) => {
+    if (!details?.cacheError) return;
+    recordActivity({
+      category: "cache",
+      phase: "warning",
+      message: "Cached snapshot failed verification",
+      route: `/api/data/${filename}`,
+      metadata: {
+        filename,
+        source: details.source ?? "",
+        reason: details.cacheError,
+      },
+    });
+  });
   return payload;
 }
 
